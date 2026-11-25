@@ -2476,7 +2476,7 @@ test('holding the shortcut keeps the pointed context local and sends only the re
   expect(calls[1].gesture).toBe('pinned');
 });
 
-test('connects a ChatGPT topic to an independent saved passage and keeps the evidence folded', async ({
+test('checks a train against an earlier ferry email and reveals the exact source', async ({
   page,
 }, info) => {
   test.setTimeout(180000);
@@ -2486,22 +2486,22 @@ test('connects a ChatGPT topic to an independent saved passage and keeps the evi
     else await rpc('model', {runtime: 'Ollama', name: 'llama3.2:3b'});
     await rpc('activityConfigure', {scope: 'displays'});
     await rpc('activityConfigure', {enabled: true});
-    const note =
-      'The loading dock closes at 4 pm. Bring the indigo panels through the west entrance before then.';
+    const email =
+      'Friday’s last ferry leaves Bayport Pier at 7:15 PM; trains arriving after that miss the crossing.';
     for (const [title, body] of [
-      ['Notes · Open studio install', note],
+      ['Mail · Friday crossing', email],
       [
-        'Screen 1 · Mail active',
-        'The ceramics pickup moved to Wednesday. Bring the crates.',
+        'Notes · Books',
+        'Bring a paperback for the train ride home.',
       ],
       [
-        'Screen 1 · ChatGPT active',
-        'How should I plan delivery of the indigo panels to the loading dock?',
+        'Friday train options',
+        'Later train to the island ferry: arrives at Bayport Pier at 7:40 PM on Friday.',
       ],
     ])
       await rpc('fixtureActivity', {source: 'display', title, body});
     const journal = await rpc('activityJournal');
-    const anchor = journal.events.find((e: Row) => e.title.includes('ChatGPT'));
+    const anchor = journal.events.find((e: Row) => e.title === 'Friday train options');
     expect(anchor).toBeTruthy();
     const asks: Row[] = [];
     await page.exposeFunction(
@@ -2541,24 +2541,25 @@ test('connects a ChatGPT topic to an independent saved passage and keeps the evi
     await page.goto('/#activity');
     await expect(page.getByLabel(/Remove context/)).toBeVisible();
     const question = page.getByRole('textbox', {name: 'Your question'});
-    await question.fill('Yo, is this relevant to that?');
+    await question.fill('Does this train connect with the last ferry?');
     await question.press('Enter');
     const answer = page.locator('.activity-turn .reply');
-    await expect(answer).toContainText(/4\s*(pm|p\.m)|west entrance/i, {
+    await expect(answer).toContainText(/7:15/, {
       timeout: 120000,
     });
+    await expect(answer).toContainText(/miss|too late|after|earlier|already left|before.*arriv/i);
     expect(asks[0].sources.map((s: Row) => s.title)).toEqual([
-      'Notes · Open studio install',
+      'Mail · Friday crossing',
     ]);
     expect(asks[0].supportingLine.length).toBeGreaterThan(4);
-    expect(note).toContain(asks[0].supportingLine);
+    expect(email).toContain(asks[0].supportingLine);
     await expect(
       page.getByText(asks[0].supportingLine, {exact: true}),
     ).toBeHidden();
     await page.setViewportSize({width: 460, height: 365});
-    await page.screenshot({path: info.outputPath('contextual-answer.png')});
+    await page.screenshot({path: info.outputPath('ferry-answer.png')});
     console.log('Grounded connection:', asks[0].answer);
-    await page.getByRole('button', {name: /Open studio install/}).click();
+    await page.getByRole('button', {name: /Friday crossing/}).click();
     await expect(
       page.getByText(asks[0].supportingLine, {exact: true}),
     ).toBeVisible();
