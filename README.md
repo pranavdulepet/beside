@@ -8,8 +8,8 @@ Beside is a floating assistant for your Mac. Point at a line in another app and 
 
 1. **Check your Mac.** Open the Apple menu → **About This Mac**. You’ll need an Apple M-series chip and macOS 14 or later. The built-in model downloads need at least 16 GB of memory.
 2. **Open Beside.** Double-click the downloaded ZIP, drag **Beside** to **Applications**, then open it. The download is ad-hoc signed. If macOS asks you to review the app, see [Apple’s guide to opening downloaded apps](https://support.apple.com/en-us/102445).
-3. **Choose “Use a model on this Mac.”** Beside finds an installed model or offers a download that fits. Let the download finish, select **Continue**, then draw your mark or choose **Skip for now**. Local answers work without a subscription.
-4. **Give it a page to read.** Choose **Ask about this Mac** in the menu bar. Click the Beside mark → **Sources**, choose the app you want it to see, and select **Start**. Allow Screen Recording in macOS if prompted.
+3. **Set up local answers.** In the floating sheet, click **Notebook**, then **Use a model on this Mac**. Beside finds an installed model or offers a download that fits. Let the download finish, select **Continue**, then draw your mark or choose **Skip for now**. Local answers work without a subscription.
+4. **Give it a page to read.** Open TextEdit. Choose **Ask about this Mac** from Beside’s menu bar icon. Click the Beside mark → **Sources** → **Selected apps & sites**. Choose **+ Add open app**, pick **TextEdit**, and select **Start**. Allow Screen Recording in macOS if prompted.
 5. **Ask your first question.** In TextEdit, type “Bring the prints through the west door before four.” With that line visible, tap **⌥⇧Space** (Option–Shift–Space), type **Which entrance should I use?**, and press Return. Read the answer, then press **Esc** to return to TextEdit. You can also hold the shortcut to speak.
 
 <img src="docs/media/related-note.png" width="460" alt="Beside connects a delivery question to a saved studio note. The source is one click below the answer.">
