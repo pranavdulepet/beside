@@ -1,5 +1,7 @@
 # Using Beside on your Mac
 
+Once screen memory is on, Beside can use a passage you saw earlier even after you close its window. Choose **All displays** to cover visible work across apps. An import is useful for older material you haven’t opened while Beside was observing.
+
 The floating sheet is for a question that comes up in another app. Use Chats to reopen a floating conversation, or open the notebook for longer writing and saved preferences. [Install Beside and try the shortcut](../README.md#try-beside)
 
 ## Ask from another app
@@ -36,8 +38,23 @@ New notebooks use `~/Beside`. Upgrades keep using the existing notebook folder a
 | --- | --- |
 | Floating conversations | Saved in the encrypted database. |
 | Workspace conversations, dated memories and skills | Readable Markdown copies in the notebook. Anyone with access to those files can read them. |
-| Saved screen passages and optional previews | Stored in the encrypted database. **Keep daily Markdown files** also writes readable copies in the notebook’s hidden activity-journal folder. Turning this off removes the managed daily files. They are excluded from notebook exports and the agent interface. |
+| Saved screen passages and optional previews | Stored in the encrypted database. **Keep daily Markdown copies** also writes readable copies in the notebook’s hidden activity-journal folder. Turning this off removes the managed daily files. They are excluded from notebook exports and the agent interface. |
 | Meeting recordings | Standard MP4 files in the notebook’s hidden meetings folder, outside the encrypted database. Use **Show recording in Finder** to manage them. |
+
+### Look inside your notebook
+
+In notebook Settings, choose **Open notebook folder**. In Finder, `desk/conversations/` holds workspace chats, `desk/core.md` lists core memories and `desk/pages/` groups dated memories by subject. The `scroll/` folder holds notebook entries. Saved methods live under `scroll/skills/`.
+
+You can open the Markdown in a text editor. If you prefer a shell, run these from the notebook folder once you have saved a conversation or memory.
+
+```sh
+ls desk
+cat desk/core.md
+find scroll -name '*.md'
+grep -rin 'ferry' desk scroll
+```
+
+These commands search the readable files. Beside also searches its encrypted screen history and imported passages, which a Markdown search cannot see. Use Memory to correct or retire a dated fact. Beside regenerates its Markdown summary from those records.
 
 ## Models, web search and sharing
 
@@ -73,6 +90,6 @@ Use **Correct this reply** to teach Beside a preference. A red memory mark opens
 
 ### Use Notes and Mail in proactive suggestions
 
-In **What Beside knows → Sources**, choose **Import Apple Notes**. macOS may ask for Automation access to Notes. Beside copies unlocked note titles and text into the encrypted notebook. It can then find a passage under a matching heading while Notes is closed. Choose **Refresh Apple Notes** after editing or locking notes to replace the snapshot. **Remove imported notes** clears the index. A passage you already accepted can also appear in your saved conversation. Inkling explains these suggestions locally.
+Under **What Beside knows → Sources → Earlier notes and mail**, choose **Import Apple Notes**. macOS may ask for Automation access to Notes. Beside copies unlocked note titles and text into the encrypted notebook. It can then find a passage under a matching heading while Notes is closed. Choose **Refresh Apple Notes** after editing or locking notes to replace the snapshot. **Remove imported notes** clears the index. A passage you already accepted can also appear in your saved conversation. Inkling explains these suggestions locally.
 
-In Apple Mail choose **Mailbox → Export Mailbox**, then choose **Import Mail export** in Beside and select the export folder. Beside streams the mbox files locally and replaces its previous Mail snapshot. It keeps up to 12,000 characters of message text, preferring plain text and extracting readable text from HTML locally. It skips attachments and raw messages over 24 MiB. The import reports how many messages it kept and skipped. Apple Notes and Mail each have a removal control.
+In Apple Mail choose **Mailbox → Export Mailbox**, then open **Earlier notes and mail**, choose **Import Mail export** in Beside and select the export folder. Beside streams the mbox files locally and replaces its previous Mail snapshot. It keeps up to 12,000 characters of message text, preferring plain text and extracting readable text from HTML locally. It skips attachments and raw messages over 24 MiB. The import reports how many messages it kept and skipped. Apple Notes and Mail each have a removal control.

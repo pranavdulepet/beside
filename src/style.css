@@ -1541,6 +1541,13 @@ p[role='alert'] {
   padding-top: 2px;
 }
 
+/* Keep the source with the answer. Reveal its editing tools on approach. */
+@media (hover: hover) and (pointer: fine) {
+  .floating-sheet .activity-turn:not(:hover):not(:focus-within) .turn-actions:not(:has(.reply-correction)) {
+    opacity: 0;
+  }
+}
+
 .turn-action-btn {
   min-height: 22px;
   height: 22px;

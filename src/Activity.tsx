@@ -555,21 +555,6 @@ export function ActivityControls({
         </button>
       </div>
 
-      {[
-        {label: 'Apple Notes', count: config.importedAppleNotes, unit: 'notes', hint: 'Import unlocked notes into your encrypted notebook.', refresh: 'refreshAppleNotes', remove: 'removeAppleNotes'},
-        {label: 'Mail export', count: config.importedMail, unit: 'messages', hint: 'In Mail, choose Mailbox → Export Mailbox, then choose the export folder here.', refresh: 'importMailExport', remove: 'removeMailInbox'},
-      ].map(library => (
-        <section key={library.refresh} className="drawer-section">
-          <h3>{library.label}</h3>
-          <small>{library.count ? `${library.count} ${library.unit} in your local notebook.` : library.hint}</small>
-          <div className="action-row">
-            <button className="btn-sm" disabled={pending} onClick={() => void run(library.refresh, {}, library.refresh, `${library.label} refreshed.`)}>
-              {pendingKey === library.refresh ? 'Importing…' : `${library.count ? 'Refresh' : 'Import'} ${library.label}`}
-            </button>
-            {!!library.count && <button className="btn-sm" disabled={pending} onClick={() => void run(library.remove, {}, library.remove, `Imported ${library.unit} removed.`)}>Remove imported {library.unit}</button>}
-          </div>
-        </section>
-      ))}
       {displays && (
         <label className="check">
           <input type="checkbox" checked={config.openWindows === true} disabled={pending}
@@ -712,6 +697,28 @@ export function ActivityControls({
           </form>
         </fieldset>
       )}
+
+      <details>
+        <summary>Earlier notes and mail</summary>
+        <div className="details-body">
+          <small>Include older notes and messages you haven’t opened with Beside.</small>
+          {[
+            {label: 'Apple Notes', count: config.importedAppleNotes, unit: 'notes', hint: 'Import unlocked notes into your encrypted notebook.', refresh: 'refreshAppleNotes', remove: 'removeAppleNotes'},
+            {label: 'Mail export', count: config.importedMail, unit: 'messages', hint: 'In Mail, choose Mailbox → Export Mailbox, then choose the export folder here.', refresh: 'importMailExport', remove: 'removeMailInbox'},
+          ].map(library => (
+            <section key={library.refresh} className="drawer-section">
+              <h3>{library.label}</h3>
+              <small>{library.count ? `${library.count} ${library.unit} in your local notebook.` : library.hint}</small>
+              <div className="action-row">
+                <button className="btn-sm" disabled={pending} onClick={() => void run(library.refresh, {}, library.refresh, `${library.label} refreshed.`)}>
+                  {pendingKey === library.refresh ? 'Importing…' : `${library.count ? 'Refresh' : 'Import'} ${library.label}`}
+                </button>
+                {!!library.count && <button className="btn-sm" disabled={pending} onClick={() => void run(library.remove, {}, library.remove, `Imported ${library.unit} removed.`)}>Remove imported {library.unit}</button>}
+              </div>
+            </section>
+          ))}
+        </div>
+      </details>
 
       <details>
         <summary>Visual screenshots & vision</summary>
@@ -2473,6 +2480,29 @@ export function ActivitySheet({
                         ))}
                       </div>
                     )}
+                    {t.quote && (
+                      <figure className="recall-citation">
+                        <figcaption>{t.quoteTitle || 'Exact line'}</figcaption>
+                        <blockquote className="recall-line">
+                          {t.quote}
+                        </blockquote>
+                      </figure>
+                    )}
+                    {close
+                      ? answerEvidence(t, true)
+                      : t.supportingLine && (
+                          <details className="margin-footnote">
+                            <summary role="button">
+                              {t.sources?.[0]?.title?.replace(/^Screen \d+ · (.+) active$/, '$1') ||
+                                t.files?.[0]?.name || 'Supporting passage'}
+                            </summary>
+                            <blockquote>{t.supportingLine}</blockquote>
+                            <button type="button" className="bar-link" onClick={() => {
+                              inspect(i);
+                              select('journal');
+                            }}>Open in Memory</button>
+                          </details>
+                        )}
                     {!t.proposedQuery && t.answer && !t.savedMemories?.length && (
                       <div className="turn-actions">
                         {!close && !busy && (correcting === i ? (
@@ -2506,29 +2536,6 @@ export function ActivitySheet({
                         </button>
                       </div>
                     )}
-                    {t.quote && (
-                      <figure className="recall-citation">
-                        <figcaption>{t.quoteTitle || 'Exact line'}</figcaption>
-                        <blockquote className="recall-line">
-                          {t.quote}
-                        </blockquote>
-                      </figure>
-                    )}
-                    {close
-                      ? answerEvidence(t, true)
-                      : t.supportingLine && (
-                          <details className="margin-footnote">
-                            <summary role="button">
-                              {t.sources?.[0]?.title?.replace(/^Screen \d+ · (.+) active$/, '$1') ||
-                                t.files?.[0]?.name || 'Supporting passage'}
-                            </summary>
-                            <blockquote>{t.supportingLine}</blockquote>
-                            <button type="button" className="bar-link" onClick={() => {
-                              inspect(i);
-                              select('journal');
-                            }}>Open in Memory</button>
-                          </details>
-                        )}
                   </article>
               ))}
               {close && turns.length > 0 && !busy && (

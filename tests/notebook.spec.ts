@@ -2015,20 +2015,23 @@ test('floating assistant reads an unopened local document and manages daily scre
     });
     await page.goto('/#activity');
     await page.getByRole('button', {name: 'What Beside knows'}).click();
-    await page.getByText('Options', {exact: true}).click();
-    await page.getByRole('button', {name: 'Tuck into a floating tab'}).click();
-    await page.getByRole('button', {name: 'Expand Beside'}).click();
     await page.getByRole('button', {name: 'Sources', exact: true}).click();
-    await page.getByRole('radio', {name: /Your screens/}).check();
-    await page.getByRole('button', {name: 'Start observation'}).click();
+    await page.getByRole('button', {name: 'All displays'}).click();
+    await page.getByRole('button', {name: 'Start', exact: true}).click();
     await rpc('fixtureActivity', {
       source: 'display',
       title: 'Screen 1 · Notes active',
       body: 'Window Help\nFile Edit View\nWindow Help\nWren press invitation\nThe Wren press opens Saturday at seven.\nWren press opening hours',
     });
-    await page.getByText('Folders and local files', {exact: true}).click();
-    await page.getByRole('button', {name: 'Choose a folder…'}).click();
-    await page.getByLabel('Keep daily Markdown files').check();
+    await page.getByText('Folders & local files', {exact: true}).click();
+    await page.getByRole('button', {name: '+ Choose a folder…'}).click();
+    const earlier = page.getByText('Earlier notes and mail', {exact: true});
+    const importNotes = page.getByRole('button', {name: 'Import Apple Notes'});
+    await expect(importNotes).toBeHidden();
+    await earlier.click();
+    await expect(importNotes).toBeVisible();
+    await earlier.click();
+    await page.getByLabel('Keep daily Markdown copies').check();
     const daily = join(
       folder,
       '.sumi',
@@ -2059,10 +2062,10 @@ test('floating assistant reads an unopened local document and manages daily scre
       'seven on Saturday',
     );
     await page.screenshot({path: info.outputPath('floating-file-answer.png')});
-    await page.getByText('Options', {exact: true}).click();
-    await page.getByRole('button', {name: 'Clear conversation'}).click();
-    await page.getByRole('button', {name: 'What Beside knows'}).click();
-    const recall = page.getByRole('button', {name: /Recall my last screen/});
+    await page.getByRole('button', {name: 'Ask Beside', exact: true}).click();
+    await page.getByRole('button', {name: 'New', exact: true}).click();
+    await page.getByLabel('Your question', {exact: true}).fill('What was I just looking at?');
+    const recall = page.getByRole('button', {name: 'Ask on this Mac'});
     await recall.evaluate(button =>
       button.addEventListener('click', () => performance.mark('recall-click'), {
         once: true,
@@ -2148,12 +2151,13 @@ test('floating assistant reads an unopened local document and manages daily scre
     console.log('Return to painted menu and exact quote (ms)', menuMs);
     expect(menuMs).toBeLessThan(1000);
     await page.getByRole('button', {name: 'What Beside knows'}).click();
-    await page.getByRole('button', {name: 'Pause screen memory'}).click();
+    await page.getByRole('button', {name: 'Sources', exact: true}).click();
+    await page.getByRole('button', {name: 'Pause', exact: true}).click();
     expect((await rpc('activitySettings')).enabled).toBe(false);
     await rpc('activityForget', {scope: 'all'});
     await expect(stat(daily)).rejects.toThrow();
     await page.getByRole('button', {name: 'Sources', exact: true}).click();
-    await page.getByText('Folders and local files', {exact: true}).click();
+    await page.getByText('Folders & local files', {exact: true}).click();
     await page
       .getByRole('button', {name: /Remove .*example-documents/})
       .click();
@@ -2648,7 +2652,14 @@ test('floating reply correction stays with its chat and survives reopening the n
     await expect(page.locator('.activity-turn')).toContainText(
       '8 frames and 6 clips',
     );
-    await page.getByRole('button', {name: 'Correct this reply'}).click();
+    const actions = page.locator('.activity-turn').last().locator('.turn-actions');
+    await page.getByRole('textbox', {name: 'Follow up'}).focus();
+    await page.mouse.move(1, 1);
+    await expect(actions).toHaveCSS('opacity', '0');
+    const correct = actions.getByRole('button', {name: 'Correct this reply'});
+    await correct.focus();
+    await expect(actions).toHaveCSS('opacity', '1');
+    await page.keyboard.press('Enter');
     const rule = 'For frame purchases, I always choose walnut over oak.';
     await page.getByLabel('What should I remember for next time?').fill(rule);
     await page.getByRole('button', {name: 'Save correction'}).click();
