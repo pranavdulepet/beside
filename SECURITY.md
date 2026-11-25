@@ -10,7 +10,7 @@ A user or process with access to your unlocked account can read the notebook’s
 
 ## Release review
 
-The November 25, 2026 maintainer review covered the locked npm and Cargo dependencies, public source tree, notebook and export permissions, model downloads, local agent endpoint, webview policy and Mac packaging. The updated lockfiles returned zero known vulnerabilities from npm audit and RustSec. RustSec flagged the maintenance status of Chrono, which ships on Mac. Five further informational warnings concern packages outside the Apple Silicon dependency tree.
+The November 25, 2026 maintainer review covered the locked npm and Cargo dependencies, public source tree, notebook and export permissions, model downloads, local agent endpoint, webview policy and Mac packaging. The updated lockfiles returned zero known vulnerabilities from npm audit and RustSec. RustSec flagged the maintenance status of Chrono, which ships on Mac. Five further RustSec warnings concern packages outside the Apple Silicon dependency tree. One also appears in GitHub’s advisory database as a moderate GLib finding. Tauri uses that GTK dependency on Linux and BSD. Both the resolved Mac dependency tree and the linked libraries of the distributed app and runtime exclude it. Reassess the finding before adding another platform. [GLib advisory](https://github.com/advisories/GHSA-wrw7-89jp-8q8g)
 
 To repeat the dependency checks, run `npm audit` and `cargo audit --file src-tauri/Cargo.lock` with a current advisory database. Run `gitleaks dir . --redact` on a clean source checkout to scan for recognizable credentials. The [development guide](docs/development.md) covers the app tests and package verification.
 
