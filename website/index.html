@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Beside — a floating assistant for your Mac</title>
+    <style>
+      @font-face {
+        font-family: Geist;
+        src: url('Geist.ttf') format('truetype');
+        font-weight: 100 900;
+        font-display: swap;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        color-scheme: light dark;
+      }
+      body {
+        margin: 0;
+        background: light-dark(#f2f1ec, #241f24);
+        color: light-dark(#29242a, #f8f2e9);
+        font:
+          17px Geist, sans-serif;
+      }
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: url('paper.png') repeat;
+        opacity: 0.18;
+        pointer-events: none;
+      }
+      canvas {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        cursor: crosshair;
+      }
+      main {
+        position: relative;
+        min-height: 100svh;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        pointer-events: none;
+        padding: 30px;
+        text-align: center;
+      }
+      @media (prefers-color-scheme: dark) { main img { filter: brightness(2.6); } }
+      h1 {
+        font:
+          490 clamp(65px, 11vw, 125px)/1 Geist, sans-serif;
+        letter-spacing: -0.065em;
+        margin: 0;
+      }
+      p {
+        margin: 28px 0 34px;
+      }
+      a {
+        pointer-events: auto;
+        display: block;
+        color: inherit;
+        text-decoration: none;
+        border-bottom: 1px solid;
+        padding: 5px;
+        font-size: 15px;
+      }
+      small a {
+        display: inline;
+        padding: 0;
+        font: inherit;
+      }
+      small {
+        position: absolute;
+        bottom: 25px;
+        font-size: 12px;
+        letter-spacing: 0.09em;
+        opacity: 0.7;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas aria-label="Draw with ink on the paper"></canvas>
+    <main>
+      <img src="beside.png" width="68" height="68" alt="">
+      <h1>Beside</h1>
+      <p>Point at something on your Mac and ask. Beside can bring back the note you need while you work.</p>
+      <a href="https://github.com/pranavdulepet/beside/releases/latest/download/Beside-macOS.zip" download>Download for Mac ↓</a>
+      <small>Apple Silicon · macOS 14 or later · <a href="https://github.com/pranavdulepet/beside#try-beside">Setup and demos</a></small>
+    </main>
+    <script>
+      if (location.protocol === 'file:' || ['localhost', '127.0.0.1'].includes(location.hostname)) {
+        document.querySelector('a[download]').href = 'Beside-macOS.zip';
+      }
+      const canvas = document.querySelector('canvas');
+      const ink = canvas.getContext('2d');
+      const dark = matchMedia('(prefers-color-scheme: dark)');
+      const still = matchMedia('(prefers-reduced-motion: reduce)');
+      const strokes = [];
+      let active, pointer, frame;
+
+      function paint(from, to, spread) {
+        ink.beginPath();
+        ink.moveTo(from.x, from.y);
+        ink.lineTo(to.x + 0.01, to.y + 0.01);
+        ink.lineCap = 'round';
+        ink.strokeStyle = dark.matches ? '#efaaca' : '#6d284b';
+        ink.lineWidth = (from.w + to.w) / 2 + spread;
+        ink.globalAlpha = spread ? 0.09 : 0.85;
+        ink.stroke();
+      }
+      function render(time) {
+        ink.clearRect(0, 0, innerWidth, innerHeight);
+        let wet = false;
+        for (const stroke of strokes) {
+          const age = still.matches ? 1 : Math.min(1, (time - stroke.at) / 650);
+          const bleed = 0.2 + 2.2 * Math.max(0, age);
+          wet ||= age < 1;
+          stroke.points.forEach((point, i) => {
+            const previous = stroke.points[Math.max(0, i - 1)];
+            paint(previous, point, bleed);
+            paint(previous, point, 0);
+          });
+        }
+        frame = wet ? requestAnimationFrame(render) : null;
+      }
+      function schedule() {
+        if (!frame) frame = requestAnimationFrame(render);
+      }
+      function resize() {
+        const scale = Math.min(devicePixelRatio, 3);
+        canvas.width = Math.round(innerWidth * scale);
+        canvas.height = Math.round(innerHeight * scale);
+        ink.setTransform(scale, 0, 0, scale, 0, 0);
+        schedule();
+      }
+      function point(e) {
+        return {x: e.clientX, y: e.clientY, w: 0.8 + 5 * (e.pressure || 0.45)};
+      }
+      canvas.onpointerdown = e => {
+        if (!e.isPrimary || e.button !== 0) return;
+        pointer = e.pointerId;
+        canvas.setPointerCapture(pointer);
+        active = {at: performance.now(), points: [point(e)]};
+        strokes.push(active);
+        schedule();
+      };
+      canvas.onpointermove = e => {
+        if (!active || e.pointerId !== pointer) return;
+        active.points.push(point(e));
+        active.at = performance.now();
+        schedule();
+      };
+      canvas.onlostpointercapture = () => { active = null; };
+      dark.addEventListener('change', schedule);
+      still.addEventListener('change', schedule);
+      addEventListener('resize', resize);
+      resize();
+    </script>
+  </body>
+</html>

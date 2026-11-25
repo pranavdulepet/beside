@@ -1,0 +1,568 @@
+#import <AppKit/AppKit.h>
+#import <ApplicationServices/ApplicationServices.h>
+#import <QuartzCore/QuartzCore.h>
+#import <ScreenCaptureKit/ScreenCaptureKit.h>
+#import <Vision/Vision.h>
+
+static id ax_attr(AXUIElementRef el, CFStringRef key) {
+    CFTypeRef val = NULL;
+    if (AXUIElementCopyAttributeValue(el, key, &val) != kAXErrorSuccess) return nil;
+    return CFBridgingRelease(val);
+}
+
+static CGRect ax_bounds(AXUIElementRef el) {
+    CGPoint p;
+    CGSize s;
+    id pos = ax_attr(el, kAXPositionAttribute);
+    id size = ax_attr(el, kAXSizeAttribute);
+    if (!pos || !size) return CGRectZero;
+    if (CFGetTypeID((__bridge CFTypeRef)pos) != AXValueGetTypeID() ||
+        CFGetTypeID((__bridge CFTypeRef)size) != AXValueGetTypeID()) return CGRectZero;
+    if (!AXValueGetValue((__bridge AXValueRef)pos, kAXValueCGPointType, &p) ||
+        !AXValueGetValue((__bridge AXValueRef)size, kAXValueCGSizeType, &s)) return CGRectZero;
+    return (CGRect){p, s};
+}
+
+static NSString *ax_clean(id v) {
+    return [v isKindOfClass:NSString.class]
+        ? [v stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
+        : @"";
+}
+
+static BOOL interactive_role(NSString *role) {
+    static NSSet *roles;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        roles = [NSSet setWithArray:@[
+            @"AXButton", @"AXMenuButton", @"AXPopUpButton", @"AXCheckBox",
+            @"AXRadioButton", @"AXTab", @"AXLink", @"AXTextField",
+            @"AXSearchField", @"AXMenuItem", @"AXSlider", @"AXDisclosureTriangle",
+            @"AXMenuBarItem", @"AXToolbarButton", @"AXSegmentedControl",
+            @"AXCell", @"AXRow"
+        ]];
+    });
+    return [roles containsObject:role];
+}
+
+static NSString *short_role(NSString *role) {
+    if ([role hasPrefix:@"AX"]) return [[role substringFromIndex:2] lowercaseString];
+    return role.lowercaseString ?: @"control";
+}
+
+static NSString *region_for_rect(CGRect r, CGRect windowFrame) {
+    if (windowFrame.size.width <= 1 || windowFrame.size.height <= 1) return @"window";
+    CGFloat rx = (CGRectGetMidX(r) - windowFrame.origin.x) / windowFrame.size.width;
+    CGFloat ry = (CGRectGetMidY(r) - windowFrame.origin.y) / windowFrame.size.height;
+    if (ry < 0.11) {
+        if (rx < 0.25) return @"top-left bar";
+        if (rx > 0.75) return @"top-right bar";
+        return @"top bar";
+    }
+    if (ry > 0.89) {
+        if (rx < 0.25) return @"bottom-left";
+        if (rx > 0.75) return @"bottom-right";
+        return @"bottom bar";
+    }
+    if (rx < 0.24) return @"left sidebar";
+    if (rx > 0.78) return @"right sidebar";
+    return @"main area";
+}
+
+static BOOL skip_bundle(NSString *bundle) {
+    if (!bundle.length) return YES;
+    NSString *selfBundle = NSBundle.mainBundle.bundleIdentifier ?: @"";
+    if ([bundle isEqualToString:selfBundle]) return YES;
+    static NSSet *excluded;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        excluded = [NSSet setWithArray:@[
+            @"com.apple.dock",
+            @"com.apple.controlcenter",
+            @"com.apple.notificationcenterui",
+            @"com.apple.WindowManager",
+            @"com.apple.SystemUIServer",
+            @"com.apple.Spotlight",
+            @"com.apple.Passwords",
+            @"com.apple.keychainaccess",
+            @"com.apple.SecurityAgent",
+            @"com.apple.loginwindow",
+            @"com.1password.1password",
+            @"com.agilebits.onepassword7",
+            @"com.bitwarden.desktop"
+        ]];
+    });
+    return [excluded containsObject:bundle];
+}
+
+static void collect_elements(
+    AXUIElementRef node,
+    CGRect windowFrame,
+    int depth,
+    int *budget,
+    NSMutableArray *out
+) {
+    if (!node || depth > 14 || --(*budget) < 0 || out.count >= 30) return;
+    NSString *role = ax_clean(ax_attr(node, kAXRoleAttribute));
+    if (interactive_role(role)) {
+        CGRect r = ax_bounds(node);
+        if (r.size.width >= 10 && r.size.height >= 10 &&
+            r.size.width <= windowFrame.size.width &&
+            r.size.height <= windowFrame.size.height &&
+            CGRectIntersectsRect(r, windowFrame)) {
+            NSString *label = ax_clean(ax_attr(node, kAXTitleAttribute));
+            if (!label.length) label = ax_clean(ax_attr(node, kAXDescriptionAttribute));
+            if (!label.length) label = ax_clean(ax_attr(node, kAXHelpAttribute));
+            if (!label.length && ![role containsString:@"TextField"]) {
+                label = ax_clean(ax_attr(node, kAXValueAttribute));
+            }
+            if (label.length >= 2 && label.length <= 72) {
+                NSString *eid = [NSString stringWithFormat:@"E%lu", (unsigned long)(out.count + 1)];
+                [out addObject:@{
+                    @"id": eid,
+                    @"role": short_role(role),
+                    @"label": label,
+                    @"region": region_for_rect(r, windowFrame),
+                    @"x": @(round(r.origin.x)),
+                    @"y": @(round(r.origin.y)),
+                    @"w": @(round(r.size.width)),
+                    @"h": @(round(r.size.height))
+                }];
+            }
+        }
+    }
+    NSArray *children = ax_attr(node, kAXChildrenAttribute);
+    if (![children isKindOfClass:NSArray.class]) return;
+    for (id child in children) {
+        if (*budget <= 0 || out.count >= 30) break;
+        collect_elements((__bridge AXUIElementRef)child, windowFrame, depth + 1, budget, out);
+    }
+}
+
+static BOOL already_captured(NSArray *elements, NSString *label, CGRect rect) {
+    NSString *needle = label.lowercaseString;
+    for (NSDictionary *el in elements) {
+        CGRect existing = CGRectMake(
+            [el[@"x"] doubleValue],
+            [el[@"y"] doubleValue],
+            [el[@"w"] doubleValue],
+            [el[@"h"] doubleValue]
+        );
+        NSString *lbl = [el[@"label"] lowercaseString];
+        if ([lbl isEqualToString:needle] && CGRectIntersectsRect(CGRectInset(existing, -14, -14), rect)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static NSString *strip_leading_glyph(NSString *raw) {
+    NSString *s = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    // Strip common leading bullet/icon OCR artifacts like "+ ", "• ", "· ", "& ", "o ", "0 ", "Q "
+    while (s.length > 2) {
+        unichar c = [s characterAtIndex:0];
+        BOOL iconPrefix =
+            c == '+' || c == '-' || c == '*' || c == '&' || c == '>' || c == '<' ||
+            c == '@' || c == 0x2022 || c == 0x00B7 || c == 0x00BF || c == 0x25CB ||
+            c == 0x25CF || c == 0x25A1 || c == 0xF8FF || c == 0x00A9 || c == 0x00AE;
+        BOOL singleGlyphWord =
+            s.length > 3 && [s characterAtIndex:1] == ' ' &&
+            (c == 'o' || c == 'O' || c == '0' || c == 'Q' || c == 'c' || c == 'C' || c == 'v');
+        if (iconPrefix || singleGlyphWord) {
+            NSString *rest = [[s substringFromIndex:1] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+            if (rest.length >= 2) { s = rest; continue; }
+        }
+        break;
+    }
+    // Capitalize single-word lowercase OCR artifacts like "automations" -> "Automations"
+    if (s.length >= 2 && [[NSCharacterSet lowercaseLetterCharacterSet] characterIsMember:[s characterAtIndex:0]]) {
+        s = [[[s substringToIndex:1] uppercaseString] stringByAppendingString:[s substringFromIndex:1]];
+    }
+    return s;
+}
+
+static void run_vision_ocr_on_cgimage(CGImageRef image, CGRect frame, NSMutableArray *elements) {
+    if (!image || elements.count >= 64) return;
+    VNRecognizeTextRequest *ocr = [VNRecognizeTextRequest new];
+    ocr.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+    ocr.usesLanguageCorrection = NO;
+    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:image options:@{}];
+    if ([handler performRequests:@[ocr] error:nil]) {
+        for (VNRecognizedTextObservation *obs in ocr.results) {
+            if (elements.count >= 64) break;
+            VNRecognizedText *cand = [obs topCandidates:1].firstObject;
+            if (!cand || cand.confidence < 0.45) continue;
+            NSString *label = strip_leading_glyph(cand.string);
+            if (label.length < 2 || label.length > 56) continue;
+            CGRect b = obs.boundingBox;
+            CGRect r = CGRectMake(
+                frame.origin.x + b.origin.x * frame.size.width,
+                frame.origin.y + (1.0 - CGRectGetMaxY(b)) * frame.size.height,
+                MAX(18.0, b.size.width * frame.size.width),
+                MAX(16.0, b.size.height * frame.size.height)
+            );
+            if (already_captured(elements, label, r)) continue;
+            NSString *eid = [NSString stringWithFormat:@"E%lu", (unsigned long)(elements.count + 1)];
+            [elements addObject:@{
+                @"id": eid,
+                @"role": @"ui",
+                @"label": label,
+                @"region": region_for_rect(r, frame),
+                @"x": @(round(r.origin.x)),
+                @"y": @(round(r.origin.y)),
+                @"w": @(round(r.size.width)),
+                @"h": @(round(r.size.height))
+            }];
+        }
+    }
+}
+
+char *sumi_ocr_elements_from_jpeg(const char *b64, double wx, double wy, double ww, double wh) {
+    @autoreleasepool {
+        if (!b64 || ww < 20 || wh < 20) return strdup("[]");
+        NSString *encoded = [NSString stringWithUTF8String:b64];
+        if (!encoded.length) return strdup("[]");
+        NSData *data = [[NSData alloc] initWithBase64EncodedString:encoded options:NSDataBase64DecodingIgnoreUnknownCharacters];
+        if (!data.length) return strdup("[]");
+        NSImage *img = [[NSImage alloc] initWithData:data];
+        CGImageRef cg = [img CGImageForProposedRect:NULL context:nil hints:nil];
+        if (!cg) return strdup("[]");
+        NSMutableArray *elements = [NSMutableArray array];
+        run_vision_ocr_on_cgimage(cg, CGRectMake(wx, wy, ww, wh), elements);
+        NSData *json = [NSJSONSerialization dataWithJSONObject:elements options:0 error:nil];
+        return json
+            ? strdup([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String)
+            : strdup("[]");
+    }
+}
+
+static void collect_vision_elements(
+    CGWindowID wid,
+    pid_t pid,
+    CGRect fallbackFrame,
+    NSMutableArray *elements
+) {
+    if (!wid || elements.count >= 64) return;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    [SCShareableContent getShareableContentExcludingDesktopWindows:YES
+                                               onScreenWindowsOnly:YES
+                                                 completionHandler:^(SCShareableContent *content, NSError *error) {
+        if (error) {
+            dispatch_semaphore_signal(done);
+            return;
+        }
+        SCWindow *target = nil;
+        for (SCWindow *w in content.windows) {
+            if (w.windowID == wid && w.owningApplication.processID == pid) {
+                target = w;
+                break;
+            }
+        }
+        if (!target) {
+            dispatch_semaphore_signal(done);
+            return;
+        }
+        CGRect frame = CGRectIsEmpty(target.frame) ? fallbackFrame : target.frame;
+        SCStreamConfiguration *cfg = [SCStreamConfiguration new];
+        cfg.ignoreShadowsSingleWindow = YES;
+        cfg.showsCursor = NO;
+        CGFloat scale = MIN(1.5, 1800.0 / MAX(1.0, MAX(frame.size.width, frame.size.height)));
+        cfg.width = MAX(1, (size_t)ceil(frame.size.width * scale));
+        cfg.height = MAX(1, (size_t)ceil(frame.size.height * scale));
+        SCContentFilter *filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:target];
+        [SCScreenshotManager captureImageWithFilter:filter
+                                      configuration:cfg
+                                  completionHandler:^(CGImageRef image, NSError *issue) {
+            if (image && !issue) {
+                run_vision_ocr_on_cgimage(image, frame, elements);
+            }
+            dispatch_semaphore_signal(done);
+        }];
+    }];
+    dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
+}
+
+static NSDictionary *pick_target_window(NSString *hint) {
+    pid_t selfPid = NSProcessInfo.processInfo.processIdentifier;
+    NSArray *windows = CFBridgingRelease(CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+        kCGNullWindowID
+    ));
+    NSString *lowerHint = hint.lowercaseString ?: @"";
+    NSDictionary *firstVisible = nil;
+    NSDictionary *hintMatch = nil;
+
+    for (NSDictionary *row in windows) {
+        if ([row[(__bridge NSString *)kCGWindowLayer] intValue] != 0) continue;
+        pid_t pid = [row[(__bridge NSString *)kCGWindowOwnerPID] intValue];
+        if (pid <= 0 || pid == selfPid) continue;
+        CGRect frame = CGRectZero;
+        if (!CGRectMakeWithDictionaryRepresentation(
+                (__bridge CFDictionaryRef)row[(__bridge NSString *)kCGWindowBounds], &frame)) continue;
+        if (frame.size.width < 180 || frame.size.height < 120) continue;
+        NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+        if (!app || skip_bundle(app.bundleIdentifier)) continue;
+        NSString *appName = app.localizedName ?: @"App";
+        NSDictionary *candidate = @{
+            @"wid": row[(__bridge NSString *)kCGWindowNumber],
+            @"pid": @(pid),
+            @"app": appName,
+            @"bundle": app.bundleIdentifier ?: @"",
+            @"frame": [NSValue valueWithRect:frame]
+        };
+        if (!firstVisible) firstVisible = candidate;
+        if (lowerHint.length >= 3) {
+            NSString *lowerApp = appName.lowercaseString;
+            if (lowerApp.length >= 3 && [lowerHint containsString:lowerApp]) {
+                hintMatch = candidate;
+                break;
+            }
+        }
+    }
+    return hintMatch ?: firstVisible;
+}
+
+extern BOOL sumi_overlay_allowed(const char *raw, NSString *bundle);
+
+char *sumi_capture_elements_for(const char *rawHint, const char *settings) {
+    @autoreleasepool {
+        NSString *hint = rawHint ? [NSString stringWithUTF8String:rawHint] : @"";
+        NSDictionary *target = pick_target_window(hint);
+        if (!target || !sumi_overlay_allowed(settings,target[@"bundle"])) return strdup("{\"elements\":[]}");
+
+        pid_t pid = [target[@"pid"] intValue];
+        CGWindowID wid = [target[@"wid"] unsignedIntValue];
+        CGRect frame = [target[@"frame"] rectValue];
+        NSString *appName = target[@"app"] ?: @"App";
+        NSString *bundle = target[@"bundle"] ?: @"";
+
+        NSMutableArray *elements = [NSMutableArray array];
+
+        // 1. Try Accessibility tree (enable AXManualAccessibility for Electron/Chromium apps).
+        if (AXIsProcessTrusted()) {
+            AXUIElementRef appRef = AXUIElementCreateApplication(pid);
+            if (appRef) {
+                AXUIElementSetMessagingTimeout(appRef, 0.25);
+                AXUIElementSetAttributeValue(appRef, CFSTR("AXManualAccessibility"), kCFBooleanTrue);
+                id win = ax_attr(appRef, kAXFocusedWindowAttribute);
+                if (!win) {
+                    NSArray *wins = ax_attr(appRef, kAXWindowsAttribute);
+                    if ([wins isKindOfClass:NSArray.class] && wins.count > 0) win = wins.firstObject;
+                }
+                if (win) {
+                    CGRect axFrame = ax_bounds((__bridge AXUIElementRef)win);
+                    if (!CGRectIsEmpty(axFrame)) frame = axFrame;
+                    int budget = 220;
+                    collect_elements((__bridge AXUIElementRef)win, frame, 0, &budget, elements);
+                }
+                CFRelease(appRef);
+            }
+        }
+
+        // 2. Augment with ScreenCaptureKit + Apple Vision OCR bounding boxes so Electron,
+        //    web apps, Figma, Antigravity, and Safari controls always have pixel-exact boxes.
+        collect_vision_elements(wid, pid, frame, elements);
+
+        NSMutableDictionary *result = [NSMutableDictionary dictionaryWithDictionary:@{
+            @"app": appName,
+            @"bundle": bundle,
+            @"elements": elements,
+            @"window": @{
+                @"x": @(round(frame.origin.x)),
+                @"y": @(round(frame.origin.y)),
+                @"w": @(round(frame.size.width)),
+                @"h": @(round(frame.size.height))
+            }
+        }];
+        if (!AXIsProcessTrusted()) result[@"needsAccessibility"] = @YES;
+
+        NSData *data = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        return data
+            ? strdup([[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding].UTF8String)
+            : strdup("{\"elements\":[]}");
+    }
+}
+
+
+
+// Click-through visual guidance overlay panel (Clicky-style screen pointing).
+static NSPanel *overlayPanel;
+static uint64_t overlayGeneration = 0;
+
+static void clear_overlay_main(void) {
+    overlayGeneration++;
+    if (overlayPanel) {
+        [overlayPanel orderOut:nil];
+        overlayPanel.contentView = [[NSView alloc] initWithFrame:NSZeroRect];
+    }
+}
+
+void sumi_overlay_clear(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        clear_overlay_main();
+    });
+}
+
+void sumi_overlay_highlight(
+    double qx,
+    double qy,
+    double qw,
+    double qh,
+    const char *rawLabel,
+    const char *rawNote,
+    int durationMs
+) {
+    NSString *label = rawLabel ? [NSString stringWithUTF8String:rawLabel] : @"";
+    NSString *note = rawNote ? [NSString stringWithUTF8String:rawNote] : @"";
+    int clampedMs = durationMs > 500 ? MIN(durationMs, 30000) : 10000;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        overlayGeneration++;
+        uint64_t gen = overlayGeneration;
+
+        NSScreen *primary = NSScreen.screens.firstObject ?: NSScreen.mainScreen;
+        if (!primary) return;
+        CGFloat primaryHeight = primary.frame.size.height;
+
+        // Convert Quartz top-left global coordinates to AppKit bottom-left coordinates.
+        CGFloat ax = qx;
+        CGFloat ay = primaryHeight - (qy + qh);
+        NSRect globalTarget = NSMakeRect(ax, ay, MAX(qw, 20), MAX(qh, 18));
+        NSPoint center = NSMakePoint(NSMidX(globalTarget), NSMidY(globalTarget));
+
+        NSScreen *screen = primary;
+        for (NSScreen *s in NSScreen.screens) {
+            if (NSPointInRect(center, s.frame)) {
+                screen = s;
+                break;
+            }
+        }
+
+        if (!overlayPanel) {
+            overlayPanel = [[NSPanel alloc]
+                initWithContentRect:screen.frame
+                          styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                            backing:NSBackingStoreBuffered
+                              defer:NO];
+            overlayPanel.opaque = NO;
+            overlayPanel.backgroundColor = NSColor.clearColor;
+            overlayPanel.hasShadow = NO;
+            overlayPanel.ignoresMouseEvents = YES;
+            overlayPanel.level = NSStatusWindowLevel + 1;
+            overlayPanel.collectionBehavior =
+                NSWindowCollectionBehaviorCanJoinAllSpaces |
+                NSWindowCollectionBehaviorFullScreenAuxiliary |
+                NSWindowCollectionBehaviorTransient;
+        }
+
+        [overlayPanel setFrame:screen.frame display:NO];
+        NSView *canvas = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, screen.frame.size.width, screen.frame.size.height)];
+        canvas.wantsLayer = YES;
+        overlayPanel.contentView = canvas;
+
+        NSRect local = NSMakeRect(
+            globalTarget.origin.x - screen.frame.origin.x,
+            globalTarget.origin.y - screen.frame.origin.y,
+            globalTarget.size.width,
+            globalTarget.size.height
+        );
+        NSRect padded = NSInsetRect(local, -7, -6);
+        CGFloat radius = MIN(11, MIN(padded.size.width, padded.size.height) * 0.4);
+
+        // Outer soft luminous indigo halo
+        CAShapeLayer *halo = [CAShapeLayer layer];
+        NSRect haloRect = NSInsetRect(padded, -4, -4);
+        halo.path = CGPathCreateWithRoundedRect(haloRect, radius + 3, radius + 3, NULL);
+        halo.fillColor = NSColor.clearColor.CGColor;
+        halo.strokeColor = [NSColor colorWithRed:0.43 green:0.16 blue:0.29 alpha:0.35].CGColor;
+        halo.lineWidth = 4.0;
+        [canvas.layer addSublayer:halo];
+        CGPathRelease(halo.path);
+
+        // Crisp indigo-ai focus ring around the target UI element
+        CAShapeLayer *ring = [CAShapeLayer layer];
+        ring.path = CGPathCreateWithRoundedRect(padded, radius, radius, NULL);
+        ring.fillColor = [NSColor colorWithRed:0.43 green:0.16 blue:0.29 alpha:0.14].CGColor;
+        ring.strokeColor = [NSColor colorWithRed:0.90 green:0.91 blue:0.61 alpha:0.98].CGColor;
+        ring.lineWidth = 2.5;
+        ring.shadowColor = [NSColor colorWithRed:0.17 green:0.27 blue:0.44 alpha:0.65].CGColor;
+        ring.shadowRadius = 10;
+        ring.shadowOpacity = 0.85;
+        ring.shadowOffset = CGSizeZero;
+        [canvas.layer addSublayer:ring];
+        CGPathRelease(ring.path);
+
+        if (!NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
+            CABasicAnimation *pulse = [CABasicAnimation animationWithKeyPath:@"opacity"];
+            pulse.fromValue = @1.0;
+            pulse.toValue = @0.35;
+            pulse.duration = 0.85;
+            pulse.autoreverses = YES;
+            pulse.repeatCount = HUGE_VALF;
+            [halo addAnimation:pulse forKey:@"haloPulse"];
+        }
+
+        // Sleek callout pill with directional hint positioned neatly next to the target
+        NSString *caption = note.length
+            ? (label.length && ![note.lowercaseString containsString:label.lowercaseString]
+                ? [NSString stringWithFormat:@"%@ · %@", label, note]
+                : note)
+            : label;
+        if (caption.length) {
+            NSTextField *text = [NSTextField labelWithString:caption];
+            text.font = [NSFont fontWithName:@"Geist-Regular" size:12.5] ?: [NSFont systemFontOfSize:12.5 weight:NSFontWeightMedium];
+            text.textColor = [NSColor colorWithWhite:0.98 alpha:1.0];
+            text.lineBreakMode = NSLineBreakByTruncatingTail;
+            [text sizeToFit];
+
+            CGFloat pillW = MIN(320, text.frame.size.width + 32);
+            CGFloat pillH = 30;
+            CGFloat px, py;
+            // For left-sidebar elements, place pill cleanly to the right of the box!
+            if (NSMaxX(padded) + 12 + pillW < screen.frame.size.width - 16 && NSMinX(padded) < screen.frame.size.width * 0.35) {
+                px = NSMaxX(padded) + 12;
+                py = NSMidY(padded) - pillH / 2.0;
+            } else {
+                px = NSMinX(padded);
+                py = NSMaxY(padded) + 10;
+                if (py + pillH > screen.frame.size.height - 16) {
+                    py = MAX(16, NSMinY(padded) - pillH - 10);
+                }
+            }
+            px = MAX(14, MIN(px, screen.frame.size.width - pillW - 14));
+            py = MAX(14, MIN(py, screen.frame.size.height - pillH - 14));
+
+            NSView *pill = [[NSView alloc] initWithFrame:NSMakeRect(px, py, pillW, pillH)];
+            pill.wantsLayer = YES;
+            pill.layer.backgroundColor = [NSColor colorWithRed:0.16 green:0.14 blue:0.16 alpha:0.95].CGColor;
+            pill.layer.cornerRadius = 15;
+            pill.layer.borderWidth = 1;
+            pill.layer.borderColor = [NSColor colorWithRed:0.90 green:0.91 blue:0.61 alpha:0.45].CGColor;
+            pill.layer.shadowColor = NSColor.blackColor.CGColor;
+            pill.layer.shadowOpacity = 0.4;
+            pill.layer.shadowRadius = 12;
+            pill.layer.shadowOffset = CGSizeMake(0, -4);
+
+            NSView *dot = [[NSView alloc] initWithFrame:NSMakeRect(10, 11, 8, 8)];
+            dot.wantsLayer = YES;
+            dot.layer.cornerRadius = 4;
+            dot.layer.backgroundColor = [NSColor colorWithRed:0.90 green:0.91 blue:0.61 alpha:1.0].CGColor;
+            [pill addSubview:dot];
+
+            text.frame = NSMakeRect(24, 6, pillW - 34, 18);
+            [pill addSubview:text];
+            [canvas addSubview:pill];
+        }
+
+        [overlayPanel orderFrontRegardless];
+
+        dispatch_after(
+            dispatch_time(DISPATCH_TIME_NOW, (int64_t)clampedMs * NSEC_PER_MSEC),
+            dispatch_get_main_queue(),
+            ^{
+                if (overlayGeneration == gen) {
+                    clear_overlay_main();
+                }
+            }
+        );
+    });
+}

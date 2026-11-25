@@ -1,0 +1,1000 @@
+use crate::{sources, store::*};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
+const KINDS: [&str; 7] = [
+    "ChatGPT",
+    "OpenRouter",
+    "OpenAI",
+    "Anthropic",
+    "Gemini",
+    "Jev",
+    "Compatible",
+];
+pub(crate) fn http() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .redirects(0)
+        .timeout(Duration::from_secs(65))
+        .build()
+}
+fn account(s: &Store, k: &str) -> String {
+    format!("{}-{k}", &hash(&s.root.to_string_lossy())[..24])
+}
+fn vault(s: &Store, k: &str, v: &Value) -> Res<()> {
+    security_framework::passwords::set_generic_password(
+        "studio.sumi.providers",
+        &account(s, k),
+        v.to_string().as_bytes(),
+    )
+    .msg()
+}
+pub(crate) fn credential(s: &Store, k: &str) -> Res<Value> {
+    serde_json::from_slice(&keychain("studio.sumi.providers", &account(s, k))?).msg()
+}
+fn response(r: Result<ureq::Response, ureq::Error>) -> Res<Value> {
+    let res = r.map_err(|e| match e {
+        ureq::Error::Status(code, _) => format!("Provider returned HTTP {code}."),
+        _ => "Provider connection unavailable.".into(),
+    })?;
+    res.into_json().msg()
+}
+pub fn configure(s: &Store, a: &Value) -> Res<()> {
+    let k = a["provider"].as_str().unwrap_or("");
+    if !KINDS.contains(&k) {
+        return Err("Unknown provider.".into());
+    }
+    let model = a["model"].as_str().unwrap_or("").trim();
+    if k != "Jev" && (model.is_empty() || model.len() > 160) {
+        return Err("Enter a model ID available to your account.".into());
+    }
+    let cap = a["cap"].as_u64().unwrap_or(0).min(10000);
+    let endpoint = if k == "Compatible" {
+        let u = url::Url::parse(a["endpoint"].as_str().unwrap_or("")).msg()?;
+        if u.scheme() != "https"
+            || !u.username().is_empty()
+            || u.password().is_some()
+            || u.query().is_some()
+            || u.fragment().is_some()
+        {
+            return Err("Use an HTTPS base URL without credentials or query parameters.".into());
+        }
+        u.to_string()
+    } else {
+        String::new()
+    };
+    if let Some(key) = a["key"].as_str().filter(|v| !v.is_empty()) {
+        if k == "ChatGPT" {
+            return Err("Use Continue with ChatGPT.".into());
+        }
+        vault(s, k, &json!({"key":key}))?
+    } else {
+        credential(s, k).map_err(|_| "Connect an account or enter its API key first.")?;
+    }
+    s.put(
+        "provider",
+        &json!({"id":k,"model":model,"cap":cap,"endpoint":endpoint,"enabled":a["enabled"]==true,"imageModel":a["imageModel"].as_str().filter(|v|k=="OpenRouter" && v.len()<=160).unwrap_or(""),"typedQuestions":a["typedQuestions"]==true,"conversation":k=="OpenRouter" && a["conversation"]==true,"quiz":k=="Jev" && a["quiz"]==true,"backtest":k!="Jev" && a["backtest"]==true}),
+    )?;
+    Ok(())
+}
+pub fn disconnect(s: &Store, k: &str) -> Res<()> {
+    if !KINDS.contains(&k) {
+        return Err("Unknown provider.".into());
+    }
+    let _lock = if k == "ChatGPT" {
+        Some(plan_lock(s)?)
+    } else {
+        None
+    };
+    if k == "ChatGPT" && crate::plan::selected(&s.get("model")?) {
+        s.set("model", &s.get("previousLocalModel")?)?;
+    }
+    let revocation = if k == "ChatGPT" {
+        credential(s, k).ok().and_then(|c| {
+            let token = c["refresh_token"].as_str()?;
+            let client = c["client"].as_str()?;
+            Some(revoke_plan(token, client))
+        })
+    } else {
+        None
+    };
+    match security_framework::passwords::delete_generic_password(
+        "studio.sumi.providers",
+        &account(s, k),
+    ) {
+        Err(e) if e.code() != -25300 => return Err(e.to_string()),
+        _ => {}
+    }
+    s.del("provider", k)?;
+    if revocation.is_some_and(|r| r.is_err()) {
+        return Err(
+            "Disconnected on this Mac. Open ChatGPT Settings to confirm you removed Beside’s access."
+                .into(),
+        );
+    }
+    Ok(())
+}
+fn revoke_plan(token: &str, client: &str) -> Res<()> {
+    let h = http();
+    let meta = response(
+        h.get("https://auth.openai.com/.well-known/openid-configuration")
+            .call(),
+    )?;
+    let endpoint = meta["revocation_endpoint"]
+        .as_str()
+        .filter(|s| s.starts_with("https://auth.openai.com/"))
+        .ok_or("No revocation endpoint.")?;
+    for attempt in 0..2 {
+        match h.post(endpoint).send_form(&[
+            ("token", token),
+            ("client_id", client),
+            ("token_type_hint", "refresh_token"),
+        ]) {
+            Ok(_) => return Ok(()),
+            Err(ureq::Error::Status(c, _)) if c < 500 => break,
+            Err(_) if attempt == 0 => std::thread::sleep(Duration::from_millis(300)),
+            _ => break,
+        }
+    }
+    Err("Revocation could not be confirmed.".into())
+}
+pub(crate) fn reserve(s: &Store, p: &Value) -> Res<()> {
+    let month = chrono::Utc::now().format("%Y-%m").to_string();
+    let key = format!("budget/{month}/{}", p["id"].as_str().unwrap_or(""));
+    let mut c = s.db.lock().unwrap();
+    let tx = c
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .msg()?;
+    use rusqlite::OptionalExtension;
+    let spent = tx
+        .query_row("SELECT v FROM kv WHERE k=?", [&key], |r| {
+            r.get::<_, String>(0)
+        })
+        .optional()
+        .msg()?
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    if p["enabled"] != true || spent >= p["cap"].as_u64().unwrap_or(0) {
+        return Err("Monthly request cap reached or provider switched off.".into());
+    }
+    if crate::local::background() {
+        let daily = format!("idleBudget/{}", chrono::Local::now().date_naive());
+        let used=tx.execute("INSERT INTO kv(k,v) VALUES(?,'1') ON CONFLICT(k) DO UPDATE SET v=cast(cast(v as integer)+1 as text) WHERE cast(v as integer)<24",[daily]).msg()?;
+        if used == 0 {
+            return Err("Today’s 24 background provider requests have been used.".into());
+        }
+    }
+    tx.execute(
+        "INSERT OR REPLACE INTO kv VALUES(?,?)",
+        rusqlite::params![key, (spent + 1).to_string()],
+    )
+    .msg()?;
+    tx.commit().msg()
+}
+pub fn reflect(s: &Store, sys: &str, batch: &[Value]) -> Res<Option<String>> {
+    if !crate::local::idle() {
+        return Ok(None);
+    }
+    let Some(p) = s
+        .list("provider")?
+        .into_iter()
+        .find(|v| v["enabled"] == true && v["id"] != "Jev")
+    else {
+        return Ok(None);
+    };
+    // Only the narrow audited snippets reach this boundary. Messages and sensitive inferences are local.
+    let mut clean = vec![];
+    for v in batch {
+        if !crate::plan::cloud_usable(v) {
+            return Ok(None);
+        }
+        let mut item = json!({"id":v["id"],"date":v["date"]});
+        for k in ["situation", "reply"] {
+            let t = v[k].as_str().unwrap_or("");
+            if crate::local::sensitive(t) {
+                return Ok(None);
+            }
+            let Some(safe) = sources::audit(t) else {
+                return Ok(None);
+            };
+            item[k] = json!(safe)
+        }
+        clean.push(item)
+    }
+    send_text(
+        s,
+        &p,
+        sys,
+        &json!(clean).to_string(),
+        "reflection",
+        clean.len(),
+    )
+    .map(Some)
+}
+pub(crate) fn allows_question(p: &Value) -> bool {
+    match p["id"].as_str() {
+        Some("ChatGPT") => p["primary"] == true || p["standalone"] == true,
+        Some("OpenAI" | "Anthropic" | "OpenRouter" | "Gemini" | "Compatible") => {
+            p["cap"].as_u64().unwrap_or(0) > 0 && p["typedQuestions"] == true
+        }
+        _ => false,
+    }
+}
+pub fn typed_question(s: &Store, a: &Value) -> Res<Value> {
+    let name = a["provider"].as_str().ok_or("Choose a provider.")?;
+    let input = a["text"]
+        .as_str()
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && t.chars().count() <= 3000)
+        .ok_or("Enter a question under 3,000 characters.")?;
+    let mut p = s.doc("provider", name)?;
+    if a["approved"] != true || !allows_question(&p) {
+        return Err("Enable typed questions for this provider first.".into());
+    }
+    let answer = if name == "ChatGPT" {
+        crate::plan::standalone(s, input)?
+    } else {
+        p["enabled"] = json!(true);
+        send_text(
+            s,
+            &p,
+            "Answer the user's question directly.",
+            input,
+            "typed question",
+            1,
+        )?
+    };
+    Ok(
+        json!({"answer":answer,"sources":[],"notes":[],"epoch":s.get("activityEpoch")?,"provider":name}),
+    )
+}
+fn send_text(s: &Store, p: &Value, sys: &str, input: &str, job: &str, items: usize) -> Res<String> {
+    let k = p["id"].as_str().unwrap();
+    let model = p["model"].as_str().unwrap();
+    let h = http();
+    let cred = credential(s, k)?;
+    let key = cred["key"].as_str().unwrap_or("");
+    reserve(s, p)?;
+    let limit = match job {
+        "typed question" => 650,
+        "reflection" => 600,
+        "grading" => 160,
+        _ => 96,
+    };
+    let answer = if k == "ChatGPT" {
+        crate::plan::complete(
+            crate::plan::API,
+            &access_token(s)?,
+            model,
+            sys,
+            input,
+            limit,
+            None,
+        )?
+    } else {
+        let messages = json!([{"role":"system","content":sys},{"role":"user","content":input}]);
+        let (request, body) = match k {
+            "Anthropic" => (
+                h.post("https://api.anthropic.com/v1/messages")
+                    .set("x-api-key", key)
+                    .set("anthropic-version", "2023-06-01"),
+                json!({"model":model,"max_tokens":limit,"system":sys,"messages":[{"role":"user","content":input}]}),
+            ),
+            "Gemini" => {
+                if !model
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c))
+                {
+                    return Err("Invalid Gemini model identifier.".into());
+                }
+                (h.post(&format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"))
+                    .set("x-goog-api-key",key),
+                    json!({"systemInstruction":{"parts":[{"text":sys}]},"contents":[{"parts":[{"text":input}]}],"generationConfig":{"maxOutputTokens":limit}}))
+            }
+            "OpenRouter" | "Compatible" => {
+                let base = if k == "OpenRouter" {
+                    "https://openrouter.ai/api/v1"
+                } else {
+                    p["endpoint"].as_str().ok_or("Missing endpoint")?
+                };
+                (
+                    h.post(&format!("{}/chat/completions", base.trim_end_matches('/')))
+                        .set("Authorization", &format!("Bearer {key}")),
+                    json!({"model":model,"messages":messages,"max_tokens":limit}),
+                )
+            }
+            "OpenAI" => (
+                h.post("https://api.openai.com/v1/responses")
+                    .set("Authorization", &format!("Bearer {key}")),
+                json!({"model":model,"instructions":sys,"input":input,"store":false,"max_output_tokens":limit}),
+            ),
+            _ => return Err("Unknown text provider.".into()),
+        };
+        let v = response(request.send_json(body))?;
+        match k {
+            "Anthropic" => v.pointer("/content/0/text"),
+            "Gemini" => v.pointer("/candidates/0/content/parts/0/text"),
+            "OpenAI" => v["output"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|x| x["type"] == "message")
+                .and_then(|m| m.pointer("/content/0/text")),
+            _ => v.pointer("/choices/0/message/content"),
+        }
+        .and_then(Value::as_str)
+        .ok_or("Provider returned no usable text.")?
+        .to_owned()
+    };
+    s.put(
+        "route",
+        &json!({"id":id(),"date":now(),"job":job,"provider":k,"model":model,"items":items}),
+    )?;
+    Ok(answer)
+}
+#[cfg(test)]
+thread_local! {static ROUTER_FIXTURE:std::cell::RefCell<Option<String>>=const{std::cell::RefCell::new(None)};}
+fn router_session(s: &Store) -> Res<(String, String)> {
+    #[cfg(test)]
+    if let Some(base) = ROUTER_FIXTURE.with(|v| v.borrow().clone()) {
+        return Ok((base, "synthetic-key".into()));
+    }
+    let cred = credential(s, "OpenRouter")?;
+    Ok((
+        "https://openrouter.ai/api/v1".into(),
+        cred["key"]
+            .as_str()
+            .ok_or("Reconnect OpenRouter.")?
+            .to_owned(),
+    ))
+}
+pub fn conversation(
+    s: &Store,
+    p: &Value,
+    system: &str,
+    input: &Value,
+    sink: &mut dyn FnMut(&str),
+) -> Res<String> {
+    let current = s.doc("provider", "OpenRouter")?;
+    if current != *p || p["conversation"] != true {
+        return Err("OpenRouter conversation access changed.".into());
+    }
+    let input = crate::plan::clean(input)?;
+    let (base, key) = router_session(s)?;
+    let mut budget = p.clone();
+    budget["enabled"] = json!(true);
+    reserve(s, &budget)?;
+    let response=http().post(&format!("{base}/chat/completions"))
+        .set("Authorization",&format!("Bearer {key}"))
+        .send_json(json!({"model":p["model"],"stream":true,"max_tokens":650,"messages":[{"role":"system","content":system},{"role":"user","content":input.to_string()}]}))
+        .map_err(|_|"OpenRouter could not complete this request. Check the connection in Settings.")?;
+    let answer = crate::models::consume_chat(response.into_reader(), false, 650, sink)?;
+    s.put("route",&json!({"id":id(),"date":now(),"job":"conversation","provider":"OpenRouter","model":p["model"],"items":1}))?;
+    Ok(answer)
+}
+pub fn backtest_provider(s: &Store) -> Res<Option<Value>> {
+    Ok(s.list("provider")?.into_iter().find(|p| {
+        p["enabled"] == true
+            && p["backtest"] == true
+            && p["cap"].as_u64().unwrap_or(0) > 0
+            && p["id"] != "Jev"
+    }))
+}
+pub fn blind_job(
+    s: &Store,
+    p: &Value,
+    job: &str,
+    prompt: &str,
+    fields: &[(&str, &str)],
+    rules: &[Value],
+) -> Res<Option<String>> {
+    if !crate::local::idle() {
+        return Ok(None);
+    }
+    let mut input = json!({});
+    let clean = |t: &str| -> Option<String> {
+        if crate::local::sensitive(t) {
+            None
+        } else {
+            sources::audit(t).map(|v| v.chars().take(750).collect())
+        }
+    };
+    for (name, value) in fields {
+        let Some(t) = clean(value) else {
+            return Ok(None);
+        };
+        input[*name] = json!(t);
+    }
+    let mut snippets = vec![];
+    for rule in rules.iter().take(8) {
+        if !crate::plan::cloud_usable(rule) {
+            return Ok(None);
+        }
+        let Some(t) = rule["text"].as_str().and_then(clean) else {
+            return Ok(None);
+        };
+        snippets.push(t);
+    }
+    input["rules"] = json!(snippets);
+    send_text(
+        s,
+        p,
+        prompt,
+        &input.to_string(),
+        job,
+        fields.len() + snippets.len(),
+    )
+    .map(Some)
+}
+fn plan_lock(s: &Store) -> Res<std::fs::File> {
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(s.root.join(".sumi/plan.lock"))
+        .msg()?;
+    f.lock().msg()?;
+    Ok(f)
+}
+pub(crate) fn access_token(s: &Store) -> Res<String> {
+    let _lock = plan_lock(s)?;
+    plan_token(s, credential(s, "ChatGPT")?)
+}
+fn plan_token(s: &Store, mut c: Value) -> Res<String> {
+    if c["expires"].as_i64().unwrap_or(0) <= chrono::Utc::now().timestamp() + 60 {
+        let t = response(
+            http()
+                .post("https://auth.openai.com/api/accounts/oauth/token")
+                .send_form(&[
+                    ("grant_type", "refresh_token"),
+                    ("client_id", c["client"].as_str().unwrap_or("")),
+                    ("refresh_token", c["refresh_token"].as_str().unwrap_or("")),
+                    ("resource", "https://api.openai.com/v1"),
+                ]),
+        )?;
+        if !t["access_token"].is_string() {
+            return Err("Sign in to ChatGPT again.".into());
+        }
+        if let Some(scopes) = t["scope"].as_str() {
+            c["scope"] = json!(scopes);
+        }
+        c["access_token"] = t["access_token"].clone();
+        if t["refresh_token"].is_string() {
+            c["refresh_token"] = t["refresh_token"].clone()
+        }
+        c["expires"] =
+            json!(chrono::Utc::now().timestamp() + t["expires_in"].as_i64().unwrap_or(0));
+        vault(s, "ChatGPT", &c)?;
+    }
+    if !c["scope"]
+        .as_str()
+        .unwrap_or("")
+        .split_whitespace()
+        .any(|sc| sc == "chatgpt.tokens.use.direct")
+    {
+        return Err("Sign in to allow ChatGPT plan use for Beside.".into());
+    }
+    c["access_token"]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or("Sign in with ChatGPT again.".into())
+}
+fn verify(jwt: &str, client: &str, nonce: &str) -> Res<Value> {
+    let parts: Vec<_> = jwt.split('.').collect();
+    if parts.len() != 3 {
+        return Err("Invalid identity token.".into());
+    }
+    let head: Value = serde_json::from_slice(&B64.decode(parts[0]).msg()?).msg()?;
+    if head["alg"] != "RS256" {
+        return Err("Unrecognized signing algorithm.".into());
+    }
+    let h = http();
+    let meta = response(
+        h.get("https://auth.openai.com/.well-known/openid-configuration")
+            .call(),
+    )?;
+    let uri = meta["jwks_uri"]
+        .as_str()
+        .ok_or("Missing identity key endpoint.")?;
+    if !uri.starts_with("https://auth.openai.com/") {
+        return Err("Unexpected identity key endpoint.".into());
+    }
+    let keys = response(h.get(uri).call())?;
+    let key = keys["keys"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|k| k["kid"] == head["kid"] && k["kty"] == "RSA")
+        .ok_or("Signing key unavailable.")?;
+    let n = B64.decode(key["n"].as_str().unwrap_or("")).msg()?;
+    let e = B64.decode(key["e"].as_str().unwrap_or("")).msg()?;
+    ring::signature::RsaPublicKeyComponents { n: &n, e: &e }
+        .verify(
+            &ring::signature::RSA_PKCS1_2048_8192_SHA256,
+            format!("{}.{}", parts[0], parts[1]).as_bytes(),
+            &B64.decode(parts[2]).msg()?,
+        )
+        .map_err(|_| "Identity signature did not verify.")?;
+    let claims: Value = serde_json::from_slice(&B64.decode(parts[1]).msg()?).msg()?;
+    verify_claims(&claims, client, nonce, chrono::Utc::now().timestamp())?;
+    Ok(claims)
+}
+
+fn verify_claims(claims: &Value, client: &str, nonce: &str, now: i64) -> Res<()> {
+    if claims["iss"] != "https://auth.openai.com" {
+        return Err("The sign-in reply came from an unexpected issuer.".into());
+    }
+    // OpenAI can encode the issued app ID as a string or a one-element OIDC
+    // audience list. Beside trusts only its own client registration.
+    let audience = &claims["aud"];
+    let for_this_app = audience.as_str() == Some(client)
+        || audience
+            .as_array()
+            .is_some_and(|ids| matches!(ids.as_slice(), [id] if id.as_str() == Some(client)));
+    if !for_this_app
+        || claims
+            .get("azp")
+            .is_some_and(|party| party.as_str() != Some(client))
+    {
+        return Err(
+            "OpenAI’s reply was issued to a different app registration. Sign in again.".into(),
+        );
+    }
+    if claims["nonce"].as_str() != Some(nonce) {
+        return Err(
+            "OpenAI’s reply did not match this sign-in attempt. Start again in Beside.".into(),
+        );
+    }
+    if claims["exp"].as_i64().is_none_or(|expires| expires <= now) {
+        return Err(
+            "The OpenAI sign-in reply expired. Check your Mac’s clock and try again.".into(),
+        );
+    }
+    if claims["sub"].as_str().is_none_or(str::is_empty) {
+        return Err("OpenAI’s reply did not identify an account.".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    #[test]
+    fn oidc_checks_the_registration_in_both_supported_audience_forms() {
+        let client = "oaiapp_example";
+        let nonce = "single-attempt";
+        let now = 100;
+        let claims = json!({"iss":"https://auth.openai.com", "aud":[client], "sub":"account", "exp":101, "nonce":nonce});
+        assert!(verify_claims(&claims, client, nonce, now).is_ok());
+        let mut scalar = claims.clone();
+        scalar["aud"] = json!(client);
+        scalar["azp"] = json!(client);
+        assert!(verify_claims(&scalar, client, nonce, now).is_ok());
+        for (field, invalid) in [
+            ("aud", json!("another")),
+            ("aud", json!(["another"])),
+            ("aud", json!([])),
+            ("aud", json!([client, "untrusted"])),
+            ("aud", Value::Null),
+            ("azp", json!("another")),
+            ("nonce", json!("earlier")),
+            ("iss", json!("https://example.org")),
+            ("sub", json!("")),
+            ("exp", json!(now)),
+            ("exp", Value::Null),
+        ] {
+            let mut changed = claims.clone();
+            changed[field] = invalid;
+            assert!(
+                verify_claims(&changed, client, nonce, now).is_err(),
+                "accepted invalid {field}"
+            );
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum PlanAccess {
+    Credential,
+    Notebook,
+    Standalone,
+}
+pub fn oauth(s: &Store, kind: &str, access: PlanAccess) -> Res<Value> {
+    if access == PlanAccess::Standalone && crate::plan::selected(&s.get("model")?) {
+        return Err("This notebook already has a connected ChatGPT plan.".into());
+    }
+    let plan = kind == "ChatGPT";
+    if !plan && kind != "OpenRouter" {
+        return Err("Unsupported sign-in.".into());
+    }
+    let server = tiny_http::Server::http("127.0.0.1:0").map_err(|e| e.to_string())?;
+    let addr = server.server_addr().to_ip().unwrap();
+    let redirect = format!("http://{addr}/auth/callback");
+    let state = id();
+    let nonce = id();
+    let verifier = B64.encode(rand::random::<[u8; 40]>());
+    let challenge = B64.encode(Sha256::digest(verifier.as_bytes()));
+    let mut host = s.get("hostId")?;
+    if host.is_null() {
+        host = json!(format!("urn:uuid:{}", uuid::Uuid::new_v4()));
+        s.set("hostId", &host)?;
+    }
+    let previous = credential(s, kind).ok();
+    let original_model = s.get("model")?;
+    let registered = previous.as_ref().and_then(|p| p["client"].as_str());
+    let mut url = url::Url::parse(if plan {
+        "https://auth.openai.com/api/accounts/authorize"
+    } else {
+        "https://openrouter.ai/auth"
+    })
+    .msg()?;
+    {
+        let mut qp = url.query_pairs_mut();
+        qp.append_pair("state", &state)
+            .append_pair("code_challenge_method", "S256")
+            .append_pair("code_challenge", &challenge);
+        if plan {
+            qp.append_pair("client_id", registered.unwrap_or("dynamic_agent_client"))
+                .append_pair("response_type", "code")
+                .append_pair("redirect_uri", &redirect)
+                .append_pair("ext_agent_host_id", host.as_str().unwrap())
+                .append_pair(
+                    "scope",
+                    "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct",
+                )
+                .append_pair("resource", "https://api.openai.com/v1")
+                .append_pair("nonce", &nonce);
+            if registered.is_none() {
+                qp.append_pair("agent_name_hint", "Beside");
+            }
+        } else {
+            qp.append_pair("callback_url", &redirect)
+                .append_pair("key_label", "Beside");
+        }
+    }
+    std::process::Command::new("/usr/bin/open")
+        .arg(url.as_str())
+        .spawn()
+        .msg()?;
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(180) {
+        let Some(req) = server.recv_timeout(Duration::from_secs(1)).msg()? else {
+            continue;
+        };
+        let parsed = url::Url::parse(&format!("http://{addr}{}", req.url())).msg()?;
+        let fields: HashMap<_, _> = parsed.query_pairs().into_owned().collect();
+        if parsed.path() != "/auth/callback" || fields.get("state") != Some(&state) {
+            let _ = req.respond(tiny_http::Response::empty(400));
+            continue;
+        }
+        let _ = req.respond(tiny_http::Response::from_string(
+            "Return to Beside to finish connecting.",
+        ));
+        if fields.contains_key("error") {
+            return Err("Sign-in was cancelled or plan access was declined.".into());
+        }
+        let code = fields.get("code").ok_or("Sign-in was cancelled.")?;
+        let h = http();
+        if plan {
+            let client = fields
+                .get("client_id")
+                .map(String::as_str)
+                .or(registered)
+                .ok_or("Missing client registration.")?;
+            if client == "dynamic_agent_client" || registered.is_some_and(|v| v != client) {
+                return Err("Client registration mismatch.".into());
+            }
+            let mut t = response(
+                h.post("https://auth.openai.com/api/accounts/oauth/token")
+                    .send_form(&[
+                        ("grant_type", "authorization_code"),
+                        ("client_id", client),
+                        ("code", code),
+                        ("code_verifier", &verifier),
+                        ("redirect_uri", &redirect),
+                        ("resource", "https://api.openai.com/v1"),
+                    ]),
+            )?;
+            let claims = verify(t["id_token"].as_str().unwrap_or(""), client, &nonce)?;
+            if registered.is_some()
+                && previous
+                    .as_ref()
+                    .is_some_and(|p| p["subject"] != claims["sub"])
+            {
+                return Err("The account does not match this registration.".into());
+            }
+            if !t["scope"]
+                .as_str()
+                .unwrap_or("")
+                .split_whitespace()
+                .any(|s| s == "chatgpt.tokens.use.direct")
+            {
+                return Err("Plan usage was not enabled for Beside.".into());
+            }
+            t["subject"] = claims["sub"].clone();
+            t["client"] = json!(client);
+            t["expires"] =
+                json!(chrono::Utc::now().timestamp() + t["expires_in"].as_i64().unwrap_or(0));
+            let _lock = plan_lock(s)?;
+            let model = if access != PlanAccess::Credential {
+                Some(crate::plan::verify_connection(
+                    s,
+                    t["access_token"]
+                        .as_str()
+                        .ok_or("ChatGPT did not return a plan token.")?,
+                )?)
+            } else {
+                None
+            };
+            if access != PlanAccess::Credential && s.get("model")? != original_model {
+                return Err(
+                    "Your thinking setting changed during sign-in. Try again to use ChatGPT."
+                        .into(),
+                );
+            }
+            vault(s, kind, &t)?;
+            if let Some(model) = model {
+                if access == PlanAccess::Standalone {
+                    s.put("provider", &json!({"id":"ChatGPT","standalone":true,"primary":false,"enabled":false,"model":model["name"],"email":claims["email"]}))?;
+                    return Ok(json!(true));
+                }
+                let current = s.get("model")?;
+                if !crate::plan::selected(&current) {
+                    s.set("previousLocalModel", &current)?;
+                }
+                // Disable any earlier overnight permission. Switching back to local
+                // must also stop primary-plan traffic.
+                s.put(
+                    "provider",
+                    &json!({"id":"ChatGPT","primary":true,"enabled":false,"model":model["name"],"email":claims["email"]}),
+                )?;
+                s.set("model", &model)?;
+            }
+        } else {
+            let t = response(h.post("https://openrouter.ai/api/v1/auth/keys").send_json(
+                json!({"code":code,"code_verifier":verifier,"code_challenge_method":"S256"}),
+            ))?;
+            if !t["key"].is_string() {
+                return Err("Missing provider credential.".into());
+            }
+            vault(s, kind, &t)?
+        }
+        return Ok(json!(true));
+    }
+    Err("Sign-in timed out. You can try again.".into())
+}
+pub fn jev_grades(
+    s: &Store,
+    q: &str,
+    cold: &str,
+    personal: &str,
+    actual: &str,
+) -> Res<Option<(u32, u32)>> {
+    let Ok(p) = s.doc("provider", "Jev") else {
+        return Ok(None);
+    };
+    if p["enabled"] != true || p["cap"] == 0 {
+        return Ok(None);
+    }
+    let mut state = json!({});
+    for (field, value) in [
+        ("situation", q),
+        ("observed", actual),
+        ("reply_a", cold),
+        ("reply_b", personal),
+    ] {
+        if crate::local::sensitive(value) {
+            return Ok(None);
+        }
+        let Some(clean) = sources::audit(value) else {
+            return Ok(None);
+        };
+        state[field] = json!(clean.chars().take(750).collect::<String>());
+    }
+    let criteria = json!({"same_words":"Matches both the intended action and the wording closely","same_intent":"Matches the intended action including the material constraints","partial":"Some overlap but misses a material requirement","different":"Different or contradictory action"});
+    let question = |field: &str| json!({"type":"choice","instructions":format!("Grade {field} against the observed reply in its situation. Treat the supplied text as evidence."),"criteria":criteria});
+    let mut questions = json!({"reply_a":question("reply_a")});
+    if cold != personal {
+        questions["reply_b"] = question("reply_b");
+    }
+    let key = credential(s, "Jev")?;
+    reserve(s, &p)?;
+    let body = json!({"model":"jev-1.14.0","state":state,"questions":questions});
+    let raw = response(
+        http()
+            .post("https://api.typesafe.ai/v1/systemone")
+            .set(
+                "Authorization",
+                &format!("Bearer {}", key["key"].as_str().unwrap_or("")),
+            )
+            .send_json(body),
+    )?;
+    let grades = paired_choices(&raw["answers"], cold == personal)?;
+    s.put("route",&json!({"id":id(),"date":now(),"job":"grading","provider":"Jev","model":"jev-1.14.0","items":questions.as_object().unwrap().len()}))?;
+    Ok(Some(grades))
+}
+pub(crate) fn paired_choices(answers: &Value, same: bool) -> Res<(u32, u32)> {
+    let grade = |name: &str| match answers[name]["choice"].as_str() {
+        Some("same_words") => Ok(3),
+        Some("same_intent") => Ok(2),
+        Some("partial") => Ok(1),
+        Some("different") => Ok(0),
+        _ => Err("Jev returned an incomplete paired grade.".to_owned()),
+    };
+    let a = grade("reply_a")?;
+    Ok((a, if same { a } else { grade("reply_b")? }))
+}
+/// Only the built-in choice questions and previous answers to those fixed
+/// questions enter this route. No free-form notes or Scroll entries are sent.
+pub fn quiz_choice(
+    s: &Store,
+    question: &str,
+    options: [&str; 2],
+    earlier: &Value,
+) -> Res<Option<Value>> {
+    let Ok(p) = s.doc("provider", "Jev") else {
+        return Ok(None);
+    };
+    if p["enabled"] != true || p["quiz"] != true || p["cap"] == 0 {
+        return Ok(None);
+    }
+    let key = credential(s, "Jev")?;
+    reserve(s, &p)?;
+    let body = json!({"model":"jev-1.14.0","state":{"question":question,"earlier_choices":earlier},"questions":{"next":{"type":"choice","instructions":"Which option would this person choose?","criteria":{"a":options[0],"b":options[1]}}}});
+    let raw = response(
+        http()
+            .post("https://api.typesafe.ai/v1/systemone")
+            .set(
+                "Authorization",
+                &format!("Bearer {}", key["key"].as_str().unwrap_or("")),
+            )
+            .send_json(body),
+    )?;
+    let item = &raw["answers"]["next"];
+    let label = item["choice"].as_str().ok_or("Jev returned no choice.")?;
+    let guess = match label {
+        "a" => options[0],
+        "b" => options[1],
+        _ => return Err("Jev returned an unknown option.".into()),
+    };
+    let probability = item["probabilities"][label]
+        .as_f64()
+        .filter(|n| (0.0..=1.0).contains(n))
+        .ok_or("Jev returned no choice probability.")?;
+    s.put("route",&json!({"id":id(),"date":now(),"job":"choice prediction","provider":"Jev","model":raw["model"],"items":1}))?;
+    Ok(Some(
+        json!({"guess":guess,"probability":probability,"model":raw["model"]}),
+    ))
+}
+
+pub fn render_image(s: &Store, a: &Value) -> Res<Value> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use std::io::Read;
+    let _guard = s.edit.lock().unwrap();
+    let sheet = ident(a["sheet"].as_str().unwrap_or(""))?;
+    let key = ident(a["turn"].as_str().unwrap_or(""))?;
+    let mut chat = s.doc("chat", sheet)?;
+    if chat["networkClosed"] == true || s.doc("sheet", sheet)?["private"] == true {
+        return Err("This sheet is offline.".into());
+    }
+    let turn = chat["turns"]
+        .as_array_mut()
+        .and_then(|v| v.iter_mut().find(|t| t["id"] == key))
+        .ok_or("Missing image request.")?;
+    if turn["image"].is_string() {
+        return Ok(Value::Null);
+    }
+    let prompt = turn["imagePrompt"]
+        .as_str()
+        .filter(|v| a["prompt"] == *v)
+        .ok_or("Review the image prompt first.")?;
+    if crate::local::sensitive(prompt) || crate::sources::audit(prompt).as_deref() != Some(prompt) {
+        return Err("This prompt needs to stay on your Mac.".into());
+    }
+    let mut provider = s.doc("provider", "OpenRouter")?;
+    let model = provider["imageModel"]
+        .as_str()
+        .filter(|v| !v.is_empty())
+        .ok_or("Connect an image model in Settings.")?
+        .to_string();
+    let (base, secret) = router_session(s)?;
+    provider["enabled"] = json!(true);
+    reserve(s, &provider)?;
+    let response=http().post(&format!("{base}/images")).set("Authorization",&format!("Bearer {secret}"))
+        .send_json(json!({"model":model,"prompt":prompt,"n":1,"output_format":"png","response_format":"b64_json"})).map_err(|_|"OpenRouter could not return an image. Check your provider activity before trying again.")?;
+    let body: Value = serde_json::from_reader(response.into_reader().take(12_000_000))
+        .map_err(|_| "The image response exceeded the notebook limit or could not be read.")?;
+    let encoded = body
+        .pointer("/data/0/b64_json")
+        .and_then(Value::as_str)
+        .ok_or("OpenRouter returned no image.")?;
+    let bytes = STANDARD.decode(encoded).msg()?;
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err("The provider returned an unsupported image format.".into());
+    }
+    let dir = s.root.join("desk/images");
+    std::fs::create_dir_all(&dir).msg()?;
+    atomic(&dir.join(format!("{key}.png")), &bytes)?;
+    turn["image"] = json!(key);
+    turn["runtime"] = json!("OpenRouter");
+    turn["model"] = json!(model);
+    turn["reply"] = json!("");
+    turn["imagePrompt"] = Value::Null;
+    chat["pendingFile"] = json!(true);
+    s.put("chat", &chat)?;
+    crate::conversation::publish(s, &mut chat)?;
+    Ok(Value::Null)
+}
+pub fn image_data(s: &Store, a: &Value) -> Res<Value> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let key = ident(a["id"].as_str().unwrap_or(""))?;
+    let bytes = std::fs::read(s.root.join("desk/images").join(format!("{key}.png"))).msg()?;
+    Ok(json!(format!(
+        "data:image/png;base64,{}",
+        STANDARD.encode(bytes)
+    )))
+}
+
+#[cfg(test)]
+mod router_contract {
+    use super::*;
+    #[test]
+    #[ignore = "Uses a local OpenRouter protocol fixture, no provider charges"]
+    fn model_and_picture_require_separate_consent_and_share_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::with_key(dir.path().into(), &[8; 32]).unwrap();
+        crate::app::setup(&s).unwrap();
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        ROUTER_FIXTURE.with(|r| *r.borrow_mut() = Some(format!("http://{}", server.server_addr())));
+        let image="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tZioAAAAASUVORK5CYII=";
+        let worker = std::thread::spawn(move || {
+            for path in ["/chat/completions", "/images"] {
+                let mut req = server
+                    .recv_timeout(Duration::from_secs(8))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(req.url(), path);
+                let body: Value = serde_json::from_reader(req.as_reader()).unwrap();
+                assert!(!body.to_string().contains("unshared"));
+                let response = if path == "/images" {
+                    assert_eq!(body["prompt"], "Draw a pear");
+                    json!({"data":[{"b64_json":image}]}).to_string()
+                } else {
+                    format!(
+                        "data: {}\n\ndata: [DONE]\n\n",
+                        json!({"choices":[{"delta":{"content":"A pear."}}]})
+                    )
+                };
+                req.respond(tiny_http::Response::from_string(response))
+                    .unwrap();
+            }
+        });
+        let mut p = json!({"id":"OpenRouter","model":"fixture","imageModel":"fixture-image","cap":2,"enabled":false});
+        s.put("provider", &p).unwrap();
+        assert!(conversation(&s, &p, "Answer", &json!("pear"), &mut |_| {}).is_err());
+        p["conversation"] = json!(true);
+        s.put("provider", &p).unwrap();
+        assert_eq!(
+            conversation(&s, &p, "Answer", &json!("pear"), &mut |_| {}).unwrap(),
+            "A pear."
+        );
+        let sheet = s.get("current").unwrap();
+        let turn = id();
+        s.put("chat",&json!({"id":sheet,"networkClosed":false,"turns":[{"id":turn,"question":"Draw a pear","imagePrompt":"Draw a pear"},{"id":id(),"question":"unshared"}]})).unwrap();
+        assert!(render_image(&s, &json!({"sheet":sheet,"turn":turn,"prompt":"changed"})).is_err());
+        let args = json!({"sheet":sheet,"turn":turn,"prompt":"Draw a pear"});
+        render_image(&s, &args).unwrap();
+        render_image(&s, &args).unwrap();
+        assert!(image_data(&s, &json!({"id":turn}))
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .ends_with(image));
+        assert!(conversation(&s, &p, "Answer", &json!("third request"), &mut |_| {}).is_err());
+        worker.join().unwrap();
+        ROUTER_FIXTURE.with(|r| *r.borrow_mut() = None);
+    }
+}

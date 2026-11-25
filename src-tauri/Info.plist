@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>ATSApplicationFontsPath</key><string>fonts/</string>
+<key>NSServices</key><array><dict><key>NSMenuItem</key><dict><key>default</key><string>Ask Beside about selection</string></dict><key>NSMessage</key><string>askSumi</string><key>NSPortName</key><string>Beside</string><key>NSSendTypes</key><array><string>public.utf8-plain-text</string><string>NSStringPboardType</string></array></dict></array>
+<key>NSAppleEventsUsageDescription</key><string>Read the unlocked Apple Notes you choose to import into your encrypted notebook.</string>
+<key>NSMicrophoneUsageDescription</key><string>Hear your question while you hold the shortcut, or include your voice in a meeting you choose to record.</string>
+<key>NSSpeechRecognitionUsageDescription</key><string>Transcribe your held-shortcut questions and meeting notes on this Mac.</string>
+<key>NSAudioCaptureUsageDescription</key><string>Record audio from the meeting app you select in the sharing picker.</string>
+</dict></plist>

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Beside",
+  "version": "1.4.2",
+  "identifier": "studio.sumi.notebook",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Beside",
+        "visible": false,
+        "width": 980,
+        "height": 730,
+        "minWidth": 520,
+        "minHeight": 480,
+        "titleBarStyle": "Overlay",
+        "dragDropEnabled": false,
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost; font-src 'self';"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.icns"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "14.0"
+    },
+    "resources": {
+      "runtime/LICENSE": "runtime/LICENSE",
+      "runtime/llama-server": "runtime/llama-server",
+      "runtime/libggml.1.dylib": "runtime/libggml.1.dylib",
+      "runtime/libggml-base.1.dylib": "runtime/libggml-base.1.dylib",
+      "runtime/libggml-blas.1.dylib": "runtime/libggml-blas.1.dylib",
+      "runtime/libggml-cpu.1.dylib": "runtime/libggml-cpu.1.dylib",
+      "runtime/libggml-metal.1.dylib": "runtime/libggml-metal.1.dylib",
+      "runtime/libggml-rpc.1.dylib": "runtime/libggml-rpc.1.dylib",
+      "runtime/libllama.1.dylib": "runtime/libllama.1.dylib",
+      "runtime/libllama-common.1.dylib": "runtime/libllama-common.1.dylib",
+      "runtime/libllama-server-impl.dylib": "runtime/libllama-server-impl.dylib",
+      "runtime/libmtmd.1.dylib": "runtime/libmtmd.1.dylib",
+      "../public/fonts/Geist.ttf": "fonts/Geist.ttf",
+      "../licenses/Geist.txt": "licenses/Geist.txt"
+    }
+  }
+}
