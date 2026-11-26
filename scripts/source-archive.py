@@ -13,7 +13,7 @@ files = [
 ]
 folders = [
     "website/media", ".github/workflows", "catalog", "src", "public", "scripts", "tests", "prompts", "licenses", "docs",
-    "src-tauri/src", "src-tauri/data", "src-tauri/capabilities", "src-tauri/icons",
+    "src-tauri/src", "src-tauri/data", "src-tauri/capabilities", "src-tauri/icons", "examples/writing",
 ]
 # Only ship reviewed files. A source distribution carries the same inventory so
 # it can be repackaged without Git metadata.

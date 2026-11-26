@@ -37,12 +37,15 @@ pub(crate) fn city(text: &str) -> Option<&str> {
     (!city.is_empty()
         && city.len() <= 55
         && city.split_whitespace().count() <= 5
+        && !city.split_whitespace().any(|part| matches!(
+            part.to_ascii_lowercase().as_str(), "my" | "our" | "his" | "her" | "their" | "this" | "that"
+        ))
         && city
             .chars()
             .all(|c| c.is_alphabetic() || " ,’-'-".contains(c)))
     .then_some(city)
 }
-fn weekend(day: NaiveDate) -> (NaiveDate, NaiveDate) {
+pub(crate) fn weekend(day: NaiveDate) -> (NaiveDate, NaiveDate) {
     let dow = day.weekday().num_days_from_monday();
     let sat = if dow == 6 {
         day.pred_opt().unwrap()
@@ -62,6 +65,7 @@ pub fn prepare(
     let lower = q.to_lowercase();
     if current_screen_question(q) { return None; }
     let is_outing = outing(q, last);
+    let standalone = standalone_query(q);
     let general = routing["web"].as_str().unwrap_or("").trim();
     let explicit = [
         "search the web",
@@ -75,7 +79,7 @@ pub fn prepare(
     ]
     .iter()
     .any(|s| lower.contains(s));
-    if !is_outing
+    if standalone.is_none() && !is_outing
         && !explicit
         && (general.len() < 4
             || general.eq_ignore_ascii_case("none")
@@ -84,7 +88,7 @@ pub fn prepare(
     {
         return None;
     }
-    if !is_outing
+    if standalone.is_none() && !is_outing
         && !explicit
         && (lower.contains("tomorrow")
             || lower.starts_with("what did i")
@@ -162,10 +166,8 @@ pub fn prepare(
             end.format("%B %-d, %Y")
         )
     } else {
-        let query = if let Some(terms) = dictated_query(q) {
+        let query = if let Some(terms) = standalone {
             terms
-        } else if floating_lookup(q) && public_typed_lookup(q) {
-            q
         } else if general.len() >= 4 && !general.eq_ignore_ascii_case("none") {
             general
         } else {
@@ -489,49 +491,59 @@ fn scheduled_activity(activity: &str, title: &str, dates: &[NaiveDate]) -> Optio
     None
 }
 
+pub(crate) struct WeekendPick {
+    pub index: usize,
+    pub answer: String,
+    pub quote: String,
+    pub preference: Option<Value>,
+}
+
+pub(crate) const UNCONFIRMED_DATES: &str =
+    "I found local listings, but couldn’t confirm an activity on the requested dates. You can check the listings below.";
+
+pub(crate) fn weekend_pick(pages: &[Value], dates: &[NaiveDate], notes: &[Value]) -> Option<WeekendPick> {
+    let prefs: Vec<_> = notes.iter().filter(|n| n["topic"] != "home" && n["restricted"] != true).collect();
+    let (index, activity, heading, memory) = dated_choice(pages, dates, &prefs)?;
+    let day = dates.iter().find(|date| mentions_day(&heading, **date))?;
+    let title = pages[index]["title"].as_str()?;
+    let answer = scheduled_activity(&activity, title, dates).unwrap_or_else(|| format!(
+        "{} · {}\n\n“{}”", day.format("%A, %B %-d"), title, short_quote(&activity)
+    ));
+    let quote = if heading == activity { activity } else { format!("{heading}\n…\n{activity}") };
+    Some(WeekendPick {index, answer, quote, preference: memory.map(|i| prefs[i].clone())})
+}
+
 pub fn complete(s: &Store, turn: &mut Value, model: &Value, notes: &[Value]) -> Res<()> {
     let query = turn["web"]["query"]
         .as_str()
         .ok_or("Missing search query.")?
         .to_owned();
-    let mut pages = search(&query, turn["web"]["outing"] == true)?;
-    if turn["web"]["outing"] == true && !pages.is_empty() {
-        let urls = pages.iter().map(|p| &p["url"]).collect::<Vec<_>>();
-        let fetched = request("web_fetch_exa", json!({"urls":urls,"maxCharacters":9000}))?;
-        let mut candidates = available_pages(&fetched, &pages, chrono::Local::now().date_naive())?;
-        if let Some(city) = turn["web"]["city"].as_str() {
-            let city = city.split(',').next().unwrap_or(city).trim().to_lowercase();
-            let compact = city.replace(' ', "");
-            candidates.retain(|p| {
-                let page = format!(
-                    "{} {}",
-                    p["title"].as_str().unwrap_or(""),
-                    p["excerpt"].as_str().unwrap_or("")
-                )
-                .to_lowercase();
-                let host = url::Url::parse(p["url"].as_str().unwrap_or(""))
-                    .ok()
-                    .and_then(|u| u.host_str().map(str::to_owned))
-                    .unwrap_or_default();
-                page.contains(&city) || host.contains(&compact)
-            });
-        }
-        if candidates.is_empty() {
-            turn["reply"]=json!("I found listings, but couldn’t verify a weekend option in town with current venue details. I’d broaden the activity or try a nearby town.");
-            turn["web"]["status"] = json!("empty");
-            turn["web"]["checkedAt"] = json!(now());
-            return Ok(());
-        }
-        pages = candidates;
-    }
+    let outing = turn["web"]["outing"] == true;
+    let pages = research(&query, outing, turn["web"]["city"].as_str())?;
     if pages.is_empty() {
-        turn["reply"] =
-            json!("I couldn’t find a source for that search. Try a broader topic or another town.");
+        turn["reply"] = json!(if outing {
+            "I couldn’t verify a weekend option in town with current venue details. I’d broaden the activity or try a nearby town."
+        } else {
+            "I couldn’t find a source for that search. Try a broader topic."
+        });
         turn["web"]["status"] = json!("empty");
+        turn["web"]["checkedAt"] = json!(now());
         return Ok(());
     }
-    let dates: Vec<NaiveDate> =
-        serde_json::from_value(turn["web"]["dates"].clone()).unwrap_or_default();
+    if outing {
+        let dates: Vec<NaiveDate> = serde_json::from_value(turn["web"]["dates"].clone()).unwrap_or_default();
+        let pick = weekend_pick(&pages, &dates, notes);
+        turn["reply"] = json!(pick.as_ref().map_or(UNCONFIRMED_DATES, |p| p.answer.as_str()));
+        turn["web"]["pick"] = json!(pick.as_ref().map(|p| p.index));
+        if let Some(pick) = pick {
+            turn["web"]["quote"] = json!(pick.quote);
+            if let Some(note) = pick.preference { turn["usedMemory"] = note; }
+        }
+        turn["web"]["sources"] = json!(pages);
+        turn["web"]["checkedAt"] = json!(now());
+        turn["web"]["status"] = json!("done");
+        return Ok(());
+    }
     let indexed: Vec<_> = pages.iter().enumerate().map(|(i,p)| {
         let lines=display_lines(p);
         json!({"number":i+1,"title":p["title"],"lines":lines.iter().enumerate().map(|(j,l)|json!([j+1,l])).collect::<Vec<_>>()})
@@ -548,63 +560,16 @@ pub fn complete(s: &Store, turn: &mut Value, model: &Value, notes: &[Value]) -> 
         let i = value.as_u64()?.checked_sub(1)? as usize;
         (i < count).then_some(i)
     }
-    let dated = if turn["web"]["outing"] == true {
-        dated_choice(&pages, &dates, &prefs)
-    } else {
-        None
-    };
-    let pick = dated
-        .as_ref()
-        .map(|d| d.0)
-        .or_else(|| index(&answer["source"], pages.len()));
+    let pick = index(&answer["source"], pages.len());
     turn["reply"] = json!("Here are the pages I found. Open a source to check the details.");
-    if let Some(i) = pick {
-        let title = pages[i]["title"].as_str().unwrap_or("the venue’s listing");
-        let lines = display_lines(&pages[i]);
-        let line = index(&answer["line"], lines.len()).and_then(|n| lines.get(n));
-        if turn["web"]["outing"] == true {
-            let mut reply = format!("My pick is {title}.");
-            if let Some((_, activity, heading, _)) = &dated {
-                reply.push_str(&format!("\n\n“{}”", short_quote(activity)));
-                if heading != activity {
-                    reply.push_str(&format!(
-                        "\n\nListed under {}.",
-                        short_quote(heading).trim_end_matches('.')
-                    ));
-                }
-            } else {
-                if let Some(detail) = line.filter(|l| !title.contains(l.as_str())) {
-                    reply.push_str(&format!("\n\n“{}”", short_quote(detail)));
-                }
-                reply.push_str("\n\nCheck the venue for this weekend’s availability.");
-            }
-            if let Some(clear) = dated
-                .as_ref()
-                .and_then(|(_, activity, _, _)| scheduled_activity(activity, title, &dates))
-            {
-                reply = clear;
-            }
-            turn["reply"] = json!(reply);
-        } else if let Some(a) = answer["answer"]
-            .as_str()
-            .map(str::trim)
-            .filter(|a| !a.is_empty() && !a.contains("://"))
+    if pick.is_some() {
+        if let Some(text) = answer["answer"].as_str().map(str::trim)
+            .filter(|text| !text.is_empty() && !text.contains("://"))
         {
-            turn["reply"] = json!(a);
+            turn["reply"] = json!(text);
         }
-        let memory = if let Some((i, _, _, n)) = &dated {
-            n.or_else(|| {
-                if index(&answer["source"], pages.len()) == Some(*i) {
-                    index(&answer["memory"], prefs.len())
-                } else {
-                    None
-                }
-            })
-        } else {
-            index(&answer["memory"], prefs.len())
-        };
-        if let Some(n) = memory {
-            turn["usedMemory"] = json!(prefs[n]);
+        if let Some(i) = index(&answer["memory"], prefs.len()) {
+            turn["usedMemory"] = json!(prefs[i]);
         }
     }
     turn["web"]["sources"] = json!(pages);
@@ -690,6 +655,19 @@ mod listing_tests {
         let picked = dated_choice(&pages, &["2026-11-21".parse().unwrap()], &[&n]).unwrap();
         assert!(picked.1.contains("Block Printing"));
         assert!(picked.2.contains("November 21"));
+    }
+
+    #[test]
+    fn a_weekend_pick_needs_a_dated_activity_even_when_the_interest_matches_exactly() {
+        let day = "2026-11-28".parse().unwrap();
+        let preference = json!({"text":"I enjoy printmaking workshops"});
+        let undated = json!({"title":"Open studio","excerpt":"A printmaking workshop for beginners.\nSaturday, December 5, 2026\nWoodblock printing workshop"});
+        assert!(weekend_pick(&[undated], &[day], std::slice::from_ref(&preference)).is_none());
+        let dated = json!({"title":"Open studio","excerpt":"November 28, 2026\nWoodblock printing workshop at noon"});
+        let pick = weekend_pick(&[dated], &[day], std::slice::from_ref(&preference)).unwrap();
+        assert!(pick.answer.contains("November 28"));
+        assert!(pick.quote.contains("Woodblock printing workshop at noon"));
+        assert_eq!(pick.preference, Some(preference));
     }
 }
 
@@ -830,7 +808,7 @@ pub fn floating_lookup(question: &str) -> bool {
 }
 
 /// Read the underlying pages while retaining search snippets if a publisher is unavailable.
-pub(crate) fn research(query: &str, outing: bool) -> Res<Vec<Value>> {
+pub(crate) fn research(query: &str, outing: bool, city: Option<&str>) -> Res<Vec<Value>> {
     let mut pages = search(query, outing)?;
     let has_snippets = pages
         .iter()
@@ -843,7 +821,7 @@ pub(crate) fn research(query: &str, outing: bool) -> Res<Vec<Value>> {
     let urls: Vec<_> = pages
         .iter()
         .filter_map(|p| p["url"].as_str())
-        .take(4)
+        .take(if outing { 8 } else { 4 })
         .collect();
     if urls.is_empty() {
         return Ok(pages);
@@ -858,7 +836,17 @@ pub(crate) fn research(query: &str, outing: bool) -> Res<Vec<Value>> {
             Err(_) => return Ok(pages),
         };
     if outing {
-        let verified = available_pages(&raw, &pages, chrono::Local::now().date_naive())?;
+        let mut verified = available_pages(&raw, &pages, chrono::Local::now().date_naive())?;
+        if let Some(city) = city {
+            let city = city.split(',').next().unwrap_or(city).trim().to_lowercase();
+            let compact = city.replace(' ', "");
+            verified.retain(|p| {
+                let page = format!("{} {}", p["title"].as_str().unwrap_or(""), p["excerpt"].as_str().unwrap_or(""));
+                let host = url::Url::parse(p["url"].as_str().unwrap_or("")).ok()
+                    .and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_default();
+                page.to_lowercase().contains(&city) || host.contains(&compact)
+            });
+        }
         return Ok(verified);
     }
     for block in blocks(&raw)? {
@@ -959,8 +947,7 @@ pub(crate) fn evidence(pages: &[Value], query: &str) -> Vec<Value> {
         .collect()
 }
 
-/// A direct "search the web for X" supplies its own outbound terms. References
-/// to the screen, to other people or to private context still use the query editor.
+/// A direct "search the web for X" supplies its own outbound terms.
 pub(crate) fn dictated_query(q: &str) -> Option<&str> {
     let raw = q.trim().trim_end_matches(['.', '?', '!']);
     let lower = raw.to_ascii_lowercase();
@@ -1057,8 +1044,8 @@ mod floating_tests {
     }
 }
 
-// Automatic search can use the user's own public question. Terms derived from
-// a window, saved memory, or private reference stay in the review flow.
+// Automatic search can use the user's own public question. A private reference
+// needs a narrower query before dispatch.
 pub fn public_typed_lookup(q: &str) -> bool {
     let lower = q.to_lowercase();
     let words = lower.replace("this weekend", "weekend").replace("is it raining", "rain").replace("what time is it", "time");
@@ -1068,8 +1055,12 @@ pub fn public_typed_lookup(q: &str) -> bool {
             "i" | "me"
                 | "my"
                 | "mine"
-                | "we"
+                | "his"
+                | "her"
+                | "their"
                 | "our"
+                | "ours"
+                | "we"
                 | "this"
                 | "that"
                 | "these"
@@ -1086,8 +1077,37 @@ pub fn public_typed_lookup(q: &str) -> bool {
         && crate::sources::audit(&lower).as_deref() == Some(lower.as_str())
 }
 
+/// A public question that can be answered from the user's own terms alone.
+/// Outings and references to the user's work keep their contextual routes.
+pub(crate) fn standalone_query(question: &str) -> Option<&str> {
+    let q = question.trim();
+    if current_screen_question(q) || outing(q, &Value::Null) {
+        return None;
+    }
+    dictated_query(q).or_else(|| (floating_lookup(q) && public_typed_lookup(q)).then_some(q))
+}
+
 #[cfg(test)]
 mod floating_policy_tests {
+    use super::*;
+
+    #[test]
+    fn both_views_can_look_up_a_public_question_without_a_planner_or_private_context() {
+        let day = "2026-11-26".parse().unwrap();
+        let q = "What do the official docs say about keyboard shortcuts in Apple Notes?";
+        assert_eq!(standalone_query(q), Some(q));
+        let plan = prepare(q, &Value::Null, &json!({"web":"unrelated terms"}), &[], day, false).unwrap();
+        assert_eq!(plan["query"], q);
+        assert_eq!(prepare(q, &Value::Null, &Value::Null, &[], day, true).unwrap()["status"], "private");
+        assert_eq!(standalone_query("Look up Apple Notes shortcuts."), Some("Apple Notes shortcuts"));
+        assert_eq!(prepare("What should I do this weekend in my area?", &Value::Null, &Value::Null, &[], day, false).unwrap()["status"], "place");
+        assert_eq!(prepare("What should I do this weekend in New York?", &Value::Null, &Value::Null, &[], day, false).unwrap()["city"], "New York");
+        for dependent in ["Look up her current price", "What am I looking at right now?",
+            "What should I do this weekend?", "Check the latest on this document"] {
+            assert_eq!(standalone_query(dependent), None, "{dependent}");
+        }
+    }
+
     #[test]
     fn screen_identity_precedes_freshness_and_web_planning() {
         for question in ["What am I looking at right now", "What's on my screen?", "What are we looking at now?"] {

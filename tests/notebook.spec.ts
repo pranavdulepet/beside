@@ -1832,6 +1832,74 @@ test('a dinner question chooses its own tools and remembers a change of mind', a
   }
 });
 
+test('a public question in the floating sheet shows the exact web source in place', async ({page}) => {
+  test.skip(process.env.BESIDE_LIVE_SEARCH !== '1', 'Uses live public search and an installed model.');
+  const {core, rpc, folder} = await fixtureNotebook();
+  try {
+    if (process.env.BESIDE_TEST_INKLING === '1') await rpc('fixtureInkling');
+    else await rpc('model', {runtime: 'Ollama', name: 'llama3.2:3b'});
+    await rpc('activityConfigure', {scope: 'displays'});
+    await rpc('activityConfigure', {enabled: true});
+    await rpc('fixtureActivity', {
+      title: 'Notes · Staff meeting', source: 'display',
+      body: 'The private rehearsal has moved to the north courtyard.',
+    });
+    let outbound = '';
+    let result: Row = {};
+    await page.exposeFunction('publicNotebook', async (op: string, args: Row) => {
+      if (op === 'activitySize') return null;
+      if (op === 'visitPublicSource') { outbound = args.url; return null; }
+      const value = await rpc(op, args);
+      if (op === 'activityAsk') result = value;
+      return value;
+    });
+    await page.addInitScript(() => {
+      (window as any).__TAURI_EVENT_PLUGIN_INTERNALS__ = {unregisterListener() {}};
+      (window as any).__TAURI_INTERNALS__ = {
+        transformCallback: () => 1,
+        invoke: (cmd: string, p: Row) => cmd === 'notebook'
+          ? (window as any).publicNotebook(p.operation, p.args) : Promise.resolve(1),
+      };
+    });
+    await page.goto('/#activity');
+    const question = 'What do the official docs say is the shortcut for applying checklist format in Apple Notes on Mac?';
+    const field = page.getByRole('textbox', {name: 'Your question'});
+    await field.fill(question);
+    await field.press('Enter');
+    await expect(page.locator('.activity-turn .reply')).toContainText(/Shift.{0,12}(Command|Cmd).{0,8}L|⇧\s*⌘\s*L/i, {timeout: 90000});
+    const apple = result.webSources.find((p: Row) => new URL(p.url).hostname === 'support.apple.com' && /checklist.{0,20}shift/i.test(p.quote));
+    expect(apple).toBeTruthy();
+    expect(result.publicQuery).toBe(question);
+    expect(result.sources).toEqual([]);
+    expect(result.notes).toEqual([]);
+    expect(result.pointLine).toBe('');
+    expect(result.usedVisual).toBeFalsy();
+    const sources = page.getByRole('group', {name: 'Sources used'});
+    await sources.getByRole('button', {name: apple.title, exact: true}).click();
+    const passage = page.getByRole('region', {name: apple.title});
+    await expect(passage).toContainText(apple.quote);
+    expect(outbound).toBe('');
+    await passage.getByRole('button', {name: 'Open source'}).click();
+    await expect.poll(() => outbound).toBe(apple.url);
+
+    const followup = page.getByRole('textbox', {name: /^(Your question|Follow up)$/});
+    await followup.fill('What should I do this weekend in my area?');
+    await followup.press('Enter');
+    await expect(page.locator('.activity-turn .reply').last()).toContainText('Which city');
+    expect(result.publicQuery).toBeUndefined();
+    await followup.fill('Boston');
+    await followup.press('Enter');
+    await expect.poll(() => result.publicQuery, {timeout: 90000}).toContain('Boston');
+    expect(result.publicQuery).not.toMatch(/rehearsal|courtyard|my area/i);
+    await expect(page.locator('.activity-turn .reply').last()).toContainText(/Saturday|Sunday|couldn’t confirm|couldn’t verify/);
+  } finally {
+    const closed = once(core, 'close');
+    core.stdin.end();
+    await closed;
+    await rm(folder, {recursive: true, force: true});
+  }
+});
+
 test('a weekend plan uses live sources and the current preference from another sheet', async ({
   page,
 }, info) => {
@@ -1848,7 +1916,8 @@ test('a weekend plan uses live sources and the current preference from another s
         [0.85, 0.52],
       ],
     });
-    await rpc('model', {name: 'llama3.2:3b', runtime: 'Ollama'});
+    if (process.env.BESIDE_TEST_INKLING === '1') await rpc('fixtureInkling');
+    else await rpc('model', {name: 'llama3.2:3b', runtime: 'Ollama'});
     await rpc('finish');
     await page.exposeFunction('sumiTestIPC', rpc);
     await page.addInitScript(() => {
@@ -1882,6 +1951,11 @@ test('a weekend plan uses live sources and the current preference from another s
     expect(result.web.query).toContain('art workshops');
     expect(result.web.status).toBe('done');
     expect(result.web.sources[result.web.pick].url).toMatch(/^https?:\/\//);
+    expect(result.web.quote).toBeTruthy();
+    expect(result.web.dates.some((iso: string) => {
+      const date = new Date(iso + 'T12:00:00');
+      return result.reply.includes(date.toLocaleDateString('en-US', {month: 'long', day: 'numeric'}));
+    })).toBe(true);
     expect(result.reply.length).toBeGreaterThan(30);
     await page.getByLabel('Show remembered preference').hover();
     await expect(page.getByLabel('Remembered words')).toContainText(
@@ -1908,6 +1982,12 @@ test('a weekend plan uses live sources and the current preference from another s
     expect(automatic.web.status).toBe('done');
     expect(automatic.web.query).not.toMatch(/printmaking|art workshops/i);
     expect(automatic.usedMemory).toBeUndefined();
+    await fresh();
+    await say('What do the official docs say is the shortcut for applying checklist format in Apple Notes on Mac?');
+    const lookup = (await rpc('state')).chat.turns[0];
+    expect(lookup.web.sources.some((source: Row) => new URL(source.url).hostname === 'support.apple.com')).toBe(true);
+    expect(lookup.selector).toBeNull();
+    expect(lookup.notes).toEqual([]);
     await fresh();
     await page.getByLabel('Keep this sheet offline').check();
     await say('What should I do this weekend?');

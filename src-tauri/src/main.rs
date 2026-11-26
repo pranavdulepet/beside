@@ -558,7 +558,7 @@ fn run() -> Res<()> {
                     if quitting() {
                         break;
                     }
-                    let next_nudge = proactive::latest();
+                    let next_nudge = proactive::latest(&capture_db);
                     if next_nudge["id"] != published["id"] || next_nudge["eventId"] != published["eventId"] {
                         published = next_nudge.clone();
                         let _ = capture_app.emit("proactive-nudge", &next_nudge);
@@ -638,7 +638,7 @@ fn run() -> Res<()> {
                     while std::time::Instant::now() < deadline && !quitting() {
                         std::thread::sleep(std::time::Duration::from_millis(150));
                         // Publish an available suggestion promptly, independently of capture.
-                        let current = proactive::latest();
+                        let current = proactive::latest(&capture_db);
                         if current["id"] != published["id"] || current["eventId"] != published["eventId"] {
                             break;
                         }

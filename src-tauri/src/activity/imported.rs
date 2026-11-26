@@ -70,7 +70,7 @@ pub(super) fn replace(s: &Store, kind: &str, notes: &[[String; 3]], epoch: &Valu
     )
     .msg()?;
     tx.commit().msg()?;
-    crate::proactive::clear_active();
+    crate::proactive::clear_active(s);
     Ok(Value::Null)
 }
 

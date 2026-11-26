@@ -73,6 +73,7 @@ pub struct Store {
     pub db: Mutex<Connection>,
     pub edit: Mutex<()>,
     pub activity_edit: Mutex<()>,
+    pub(crate) proactive: Mutex<crate::proactive::Watcher>,
     pub lifecycle: std::sync::RwLock<()>,
     pub reading: std::sync::atomic::AtomicBool,
 }
@@ -135,6 +136,7 @@ impl Store {
             db: Mutex::new(conn),
             edit: Mutex::new(()),
             activity_edit: Mutex::new(()),
+            proactive: Mutex::default(),
             lifecycle: std::sync::RwLock::new(()),
             reading: false.into(),
         })

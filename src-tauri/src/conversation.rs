@@ -967,14 +967,14 @@ pub fn ask_with(s: &Store, a: &Value, sink: &mut dyn FnMut(&str)) -> Res<Value> 
         )
     });
     menu.truncate(24);
-    let routing = desk_tools::select(
-        s,
-        selector,
-        q,
-        turns.last().unwrap_or(&Value::Null),
-        &menu,
-        at,
-    )?;
+    let public_query = web_search::standalone_query(q).filter(|_| {
+        !has_files && !requests_picture(&q.to_lowercase()) && forced.or(matched).is_none()
+    });
+    let routing = if let Some(query) = public_query {
+        json!({"quick":true,"selector":"built-in","web":query})
+    } else {
+        desk_tools::select(s, selector, q, last, &menu, at)?
+    };
     let named = routing["skill"]
         .as_u64()
         .and_then(|v| v.checked_sub(1))
@@ -1019,8 +1019,10 @@ pub fn ask_with(s: &Store, a: &Value, sink: &mut dyn FnMut(&str)) -> Res<Value> 
     let outing = web_search::outing(q, last);
     // Quick local replies can become history on a later hosted turn on the same sheet.
     let shareable_sheet = plan::selected(&primary) && !private;
-    let mut notes = memory::relevant(s, q, outing, shareable_sheet)?;
-    if !outing {
+    let mut notes = if public_query.is_some() { Vec::new() } else {
+        memory::relevant(s, q, outing, shareable_sheet)?
+    };
+    if !outing && public_query.is_none() {
         for n in memory::core_notes(s, shareable_sheet)? {
             if !notes.iter().any(|v| v["id"] == n["id"]) {
                 notes.push(n);
@@ -1195,7 +1197,8 @@ pub fn ask_with(s: &Store, a: &Value, sink: &mut dyn FnMut(&str)) -> Res<Value> 
             s.get("autoListings")? != false
         } else {
             let query = turn["web"]["query"].as_str().unwrap_or("");
-            (query == q && web_search::public_typed_lookup(q)) || web_search::dictated_query(q) == Some(query)
+            web_search::standalone_query(q) == Some(query)
+                || (query == q && web_search::public_typed_lookup(q))
         })
         && !restricted
     {
@@ -1262,12 +1265,12 @@ pub fn confirm_search(s: &Store, a: &Value) -> Res<Value> {
     }
     let primary = s.get("model")?;
     let model = choose_model(&primary, local_only, false, || local_model(s))?;
-    let notes = memory::relevant(
-        s,
-        turn["question"].as_str().unwrap_or(""),
-        turn["web"]["outing"] == true,
-        plan::selected(&model),
-    )?;
+    let question = turn["question"].as_str().unwrap_or("");
+    let notes = if web_search::standalone_query(question).is_some() && turn["methodId"].is_null() {
+        Vec::new()
+    } else {
+        memory::relevant(s, question, turn["web"]["outing"] == true, plan::selected(&model))?
+    };
     if turn["web"]["outing"] == true {
         let updated = web_search::prepare(
             turn["question"].as_str().unwrap_or(""),

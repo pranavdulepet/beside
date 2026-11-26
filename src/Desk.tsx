@@ -364,7 +364,7 @@ export function Desk({
               }}
               text={
                 t.usedMemory
-                  ? t.reply.replace(/^(.*?)([.!?])(?=\s|$)/, '$1$2 [[m1]]')
+                  ? t.reply.replace(/^.+?(?:[.!?](?=\s|$)|$)/m, '$& [[m1]]')
                   : t.reply
               }
               mark={index => {

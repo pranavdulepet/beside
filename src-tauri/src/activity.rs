@@ -164,7 +164,7 @@ pub fn settings(s: &Store) -> Res<Value> {
     v["proactive"] = crate::proactive::settings(s)?;
     v["importedAppleNotes"] = json!(imported::count(s, "note")?);
     v["importedMail"] = json!(imported::count(s, "mail")?);
-    v["nudge"] = crate::proactive::latest();
+    v["nudge"] = crate::proactive::latest(s);
     Ok(v)
 }
 pub fn apps() -> Res<Value> {
@@ -239,7 +239,7 @@ pub fn configure(s: &Store, a: &Value) -> Res<Value> {
     c["generation"] = json!(id());
     s.set("activitySettings", &c)?;
     crate::point::expire(true);
-    crate::proactive::clear_active();
+    crate::proactive::clear_active(s);
     workspace::clear();
     if a["journalFiles"].is_boolean() {
         crate::activity_files::sync_locked(s)?;
@@ -309,12 +309,12 @@ pub fn observe_foreground(s: &Store) {
         let changed = front != schedule.identity;
         if changed {
             if let Some(row) = &front {
-                crate::proactive::follow_front(row["source"].as_str().unwrap_or(""), row["title"].as_str().unwrap_or(""));
+                crate::proactive::follow_front(s, row["source"].as_str().unwrap_or(""), row["title"].as_str().unwrap_or(""));
             }
         }
         if schedule.due(front, Instant::now()) {
             if let Err(err) = sample(s) { let _ = s.set("activityStatus", &json!(err)); }
-            if changed && crate::proactive::latest().is_null() { let _ = revisit_front(s); }
+            if changed && crate::proactive::latest(s).is_null() { let _ = revisit_front(s); }
         }
         std::thread::sleep(Duration::from_millis(250));
     }
@@ -329,7 +329,7 @@ pub fn anchor(s: &Store) -> Res<Value> {
     // Capture the active window right before the floating companion takes focus
     // so asking "what is this?" always has fresh on-screen context.
     let front_row = front_identity(&c);
-    let suggestion = crate::proactive::latest();
+    let suggestion = crate::proactive::latest(s);
     if let Some(row) = &front_row {
         if suggestion["eventId"].is_string() && row["source"] == suggestion["source"]
             && row["title"] == suggestion["originTitle"] {
@@ -393,10 +393,10 @@ pub fn revisit_front(s: &Store) -> Res<()> {
         return Ok(());
     }
     crate::proactive::follow_front(
-        row["source"].as_str().unwrap_or(""),
+        s, row["source"].as_str().unwrap_or(""),
         row["title"].as_str().unwrap_or(""),
     );
-    if !crate::proactive::latest().is_null() {
+    if !crate::proactive::latest(s).is_null() {
         return Ok(());
     }
     use rusqlite::OptionalExtension;
@@ -688,7 +688,7 @@ pub fn forget(s: &Store, a: &Value) -> Res<Value> {
     c["generation"] = json!(id());
     s.set("activitySettings", &c)?;
     crate::point::expire(true);
-    crate::proactive::clear_active();
+    crate::proactive::clear_active(s);
     workspace::clear();
     let db = s.db.lock().unwrap();
     match a["scope"].as_str() {
@@ -2775,19 +2775,24 @@ fn guide_answer(
     phase: &mut dyn FnMut(&str),
 ) -> Res<Value> {
     use crate::web_search;
-    let point = match a["gesture"].as_str() {
+    let standalone = web_search::standalone_query(q);
+    let public_only = standalone.is_some_and(|terms| {
+        a["publicQuery"].as_str().is_none_or(|approved| approved.trim() == terms)
+    });
+    let point = match a["gesture"].as_str().filter(|_| !public_only) {
         Some(id) => crate::point::target(s, id)?,
         None => Value::Null,
     };
     let active_brain = crate::brain::status(s)?;
-    if active_brain["mode"] != "cloud" && private_model(s).is_none() {
+    let outing = web_search::outing(q, &Value::Null);
+    if !outing && active_brain["mode"] != "cloud" && private_model(s).is_none() {
         return Err("Set up a local model (like Inkling 2 Mini) or connect a cloud account in Settings.".into());
     }
     let line = point["line"].as_str().unwrap_or("");
     let mut approved: Option<String> = a["publicQuery"]
         .as_str()
         .map(str::trim)
-        .or_else(|| web_search::dictated_query(q))
+        .or(standalone)
         .or_else(|| (a["forceWeb"] == true).then_some(q))
         .map(str::to_owned);
     let lookup = web_search::floating_lookup(q) || a["forceWeb"] == true;
@@ -2861,13 +2866,20 @@ fn guide_answer(
     } else {
         None
     };
+    let mut search_city = None;
+    let outing_preferences = if outing { crate::memory::relevant(s, q, true, true)? } else { Vec::new() };
     if (lookup || planned.is_some()) && approved.is_none() {
         let today = Local::now().date_naive();
-        let prefs = crate::memory::relevant(s, q, true, true)?;
-        let outing = web_search::outing(q, &Value::Null);
         let proposal = if outing {
-            web_search::prepare(q, &Value::Null, &Value::Null, &prefs, today, false)
-                .and_then(|w| w["query"].as_str().map(str::to_owned))
+            let plan = web_search::prepare(q, &Value::Null, &Value::Null, &outing_preferences, today, false)
+                .unwrap_or(Value::Null);
+            if plan["status"] == "place" {
+                output["awaitingSearchCity"] = json!(true);
+                output["answer"] = json!("Which city should I look around?");
+                return Ok(output);
+            }
+            search_city = plan["city"].as_str().map(str::to_owned);
+            Some(plan["query"].as_str().ok_or("Choose a public city for the search.")?.to_owned())
         } else {
             None
         };
@@ -2887,11 +2899,6 @@ fn guide_answer(
             q.to_string()
         };
         checked()?;
-        if outing && proposal_missing_city(&json!(&query), q) {
-            output["awaitingSearchCity"] = json!(true);
-            output["answer"] = json!("Which city should I look around?");
-            return Ok(output);
-        }
         // Never let a planner silently turn a passage, title or selection into outbound text.
         // Listings contain only the city and predefined public categories. Other automatic
         // searches can use the user's own public terms and the app's public name.
@@ -2925,17 +2932,38 @@ fn guide_answer(
             return Err("Use a public topic or place for the web query.".into());
         }
         checked()?;
-        pages = web_search::research(query, web_search::outing(q, &Value::Null))?;
+        pages = web_search::research(query, outing, search_city.as_deref())?;
         pages.retain(|p| p["excerpt"].as_str().is_some_and(|s| !s.trim().is_empty()));
+        if outing {
+            checked()?;
+            let (sat, sun) = web_search::weekend(Local::now().date_naive());
+            let pick = web_search::weekend_pick(&pages, &[sat, sun], &outing_preferences);
+            let mut links: Vec<Value> = pages.iter()
+                .map(|p| json!({"title":p["title"],"url":p["url"]})).collect();
+            let answer = match pick {
+                Some(chosen) => {
+                    links[chosen.index]["quote"] = json!(chosen.quote);
+                    links.swap(0, chosen.index);
+                    if let Some(note) = chosen.preference { output["notes"] = json!([note]); }
+                    chosen.answer
+                }
+                None if links.is_empty() => "I couldn’t verify a weekend activity in that area. Try a broader interest or a nearby town.".to_owned(),
+                None => web_search::UNCONFIRMED_DATES.to_owned(),
+            };
+            output["webSources"] = json!(links.into_iter().take(3).collect::<Vec<_>>());
+            output["publicQuery"] = json!(query);
+            output["answer"] = json!(answer);
+            sink(&answer);
+            return Ok(output);
+        }
         if pages.is_empty() {
             return Err(
                 "Web search returned no readable sources. Try rephrasing your question.".into(),
             );
         }
     }
-    // A self-contained public lookup needs its sources, not an image of the
-    // entire desktop. Keep the prompt within the local model's context window.
-    if !pages.is_empty() && web_search::dictated_query(q).is_some() {
+    // The public-only inference input contains just the question and source passages.
+    if !pages.is_empty() && public_only {
         let evidence = web_search::evidence(&pages[..pages.len().min(3)], approved.as_deref().unwrap_or(q));
         let input = json!({"question":q,"sources":evidence});
         let opts = crate::brain::BrainOpts {
@@ -3295,7 +3323,4 @@ fn guide_answer(
     output["files"] = json!(files.iter().take(2).collect::<Vec<_>>());
     output["notes"] = json!(learned);
     Ok(output)
-}
-fn proposal_missing_city(query: &Value, q: &str) -> bool {
-    query.as_str() == Some(q) && !q.to_lowercase().contains(" in ")
 }

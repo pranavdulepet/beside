@@ -1214,7 +1214,7 @@ function ReplySources({turn, fail}: {turn: Row; fail: (message: string) => void}
     .filter((p: Row) => typeof p.url === 'string' && p.url)
     .slice(0, 3);
   const note = notes.find((s) => s.id === selected);
-  const forecast = notes.length ? pages.find((p) => p.url === selected && p.quote) : undefined;
+  const source = pages.find((p) => p.url === selected && p.quote);
   const visit = (url: string) =>
     void call('visitPublicSource', {url}).catch((e) => fail(String(e)));
   const toggle = (id: string) => pick((current) => (current === id ? '' : id));
@@ -1242,7 +1242,7 @@ function ReplySources({turn, fail}: {turn: Row; fail: (message: string) => void}
           </button>
         ))}
         {pages.map((p, i) => {
-          const inPlace = notes.length > 0 && !!p.quote;
+          const inPlace = !!p.quote;
           return (
             <button
               key={p.url || i}
@@ -1262,17 +1262,17 @@ function ReplySources({turn, fail}: {turn: Row; fail: (message: string) => void}
         id={panel}
         ref={reading}
         className="source-reading"
-        hidden={!note && !forecast}
+        hidden={!note && !source}
         tabIndex={note ? 0 : undefined}
-        aria-label={note ? cleanTitle(note.title, note.label) : forecast?.title}
+        aria-label={note ? cleanTitle(note.title, note.label) : source?.title}
       >
         {note && <Evidence key={note.id} id={note.id} />}
-        {forecast && (
+        {source && (
           <>
-            <p>{forecast.quote}</p>
-            {forecast.basis && <p className="source-basis">{forecast.basis}</p>}
-            <button type="button" className="bar-link" onClick={() => visit(forecast.url)}>
-              Open forecast ↗
+            <p className="source-original">{source.quote}</p>
+            {source.basis && <p className="source-basis">{source.basis}</p>}
+            <button type="button" className="bar-link" onClick={() => visit(source.url)}>
+              {notes.length ? 'Open forecast' : 'Open source'} ↗
             </button>
           </>
         )}

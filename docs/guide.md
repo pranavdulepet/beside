@@ -20,7 +20,7 @@ Hold **Option–Shift–Space** with your pointer on the relevant line. Speak wh
 
 Choose **Notebook** to open the full app. Choose **Open companion** in the notebook to return to the floating sheet. Click the Beside mark to open **What Beside knows**. Inspect **Last question** for the pointer context and passages used. A source beneath a connected answer opens the supporting line. Choose **Use this passage** on an earlier observation to ask about it again. You can refer to an item by its contents, such as “the printer’s instructions.”
 
-When suggestions are enabled and observation is running, Beside can match a visible passage to a saved note. A dot in the menu bar and **View suggestion** let you inspect the match. Choose **Show connection** to ask about the screen that produced it, or dismiss it. Manage suggestions in notebook Settings. Beside can surface a matching line from Mail as well as Notes. Opening the suggestion keeps the screen and the source line paired.
+When observation and suggestions are on, a dot in the menu bar can point to a useful line in Notes or Mail. Choose **View suggestion**, then **Show connection** to see the line and ask Inkling how it relates. If the conversation changes subject, Beside checks the match again when it next reads the screen. You can dismiss a suggestion or mute an app in notebook Settings.
 
 Web lookup is available automatically. A standalone public question about current information can go straight to search. Screen-identification questions use local evidence. If Beside needs a public topic or location, it asks for that detail.
 
@@ -92,7 +92,7 @@ The floating assistant defaults to a local model. If you explicitly enable cloud
 
 In the notebook, an eligible ChatGPT plan or an API provider is optional. A cloud notebook model can receive conversation passages needed for the answer. Private sheets stay local, and attached excerpts have their own sharing control. In the floating sheet, choosing a provider for one typed question sends that text and returns the next question to local thinking. Anthropic uses an API key. Provider usage follows the account you connect.
 
-Ask a current public question and Beside looks it up automatically. Questions about what you’re looking at use local screen memory. Exa receives public search terms. When a lookup needs a location or a private reference cannot be resolved to public terms, Beside asks for the missing detail. The selected model reads the results for a floating answer. In notebook settings you can also manage search approval for weekend listings. In Settings, you can also review which notebook entries a connected agent can read and revoke its access.
+Ask a current public question and Beside looks it up automatically. Exa receives the public search terms. Click a source beneath a floating answer to read the passage Beside used, then choose **Open source** to visit the page. A question about what’s on your screen uses local context. When a lookup needs a city or a clearer public topic, Beside asks. Notebook Settings also lets you manage weekend listing searches and access for connected agents.
 
 ## Floating conversations and corrections
 

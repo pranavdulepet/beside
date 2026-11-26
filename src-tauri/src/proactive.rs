@@ -3,19 +3,28 @@ use chrono::Utc;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
-    sync::{LazyLock, Mutex},
+    collections::{HashSet, VecDeque},
+    sync::LazyLock,
 };
 
 #[derive(Default)]
-struct Watcher {
+pub(crate) struct Watcher {
+    revision: u64,
     last_nudge_at: i64,
     last_digest: String,
     active: Option<Value>,
-    dismissed: HashSet<String>,
+    dismissed: VecDeque<String>,
 }
 
-static WATCHER: LazyLock<Mutex<Watcher>> = LazyLock::new(|| Mutex::new(Watcher::default()));
+impl Watcher {
+    fn observe(&mut self, source: &str, title: &str) -> u64 {
+        self.revision = self.revision.wrapping_add(1);
+        if self.active.as_ref().is_some_and(|v| v["source"] != source || v["originTitle"] != title) {
+            self.active = None;
+        }
+        self.revision
+    }
+}
 
 static ERROR_LINE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:error\[E\d+\]|error:|exception:|typeerror:|referenceerror:|syntaxerror:|panic(?:ked)? at\b|command not found\b|permission denied\b|exit code [1-9]\b|failed to compile\b|404 not found\b|500 internal server error\b|fatal:)")
@@ -39,9 +48,6 @@ pub fn configure(s: &Store, a: &Value) -> Res<Value> {
     let mut cfg = settings(s)?;
     if let Some(enabled) = a["enabled"].as_bool() {
         cfg["enabled"] = json!(enabled);
-        if !enabled {
-            clear_active();
-        }
     }
     if let Some(cd) = a["cooldownSeconds"].as_i64() {
         cfg["cooldownSeconds"] = json!(cd.clamp(15, 1800));
@@ -53,7 +59,6 @@ pub fn configure(s: &Store, a: &Value) -> Res<Value> {
         if !muted.iter().any(|v| v == app) {
             muted.push(json!(app));
         }
-        clear_active();
     }
     if let Some(app) = a["unmuteApp"].as_str() {
         if let Some(muted) = cfg["mutedApps"].as_array_mut() {
@@ -61,32 +66,31 @@ pub fn configure(s: &Store, a: &Value) -> Res<Value> {
         }
     }
     s.set("proactiveSettings", &cfg)?;
+    if cfg["enabled"] == false || a["muteApp"].is_string() {
+        clear_active(s);
+    }
     Ok(cfg)
 }
 
-pub fn clear_active() {
-    if let Ok(mut w) = WATCHER.lock() {
+pub fn clear_active(s: &Store) {
+    if let Ok(mut w) = s.proactive.lock() {
+        w.revision = w.revision.wrapping_add(1);
         w.active = None;
     }
 }
 
-pub fn follow_front(source: &str, title: &str) {
-    if let Ok(mut w) = WATCHER.lock() {
-        if w.active
-            .as_ref()
-            .is_some_and(|v| v["source"] != source || v["originTitle"] != title)
-        {
-            w.active = None;
-        }
+pub fn follow_front(s: &Store, source: &str, title: &str) {
+    if let Ok(mut w) = s.proactive.lock() {
+        w.observe(source, title);
     }
 }
 
-pub fn dismiss(nudge_id: &str) {
-    if let Ok(mut w) = WATCHER.lock() {
-        if !nudge_id.is_empty() {
-            w.dismissed.insert(nudge_id.to_owned());
+pub fn dismiss(s: &Store, nudge_id: &str) {
+    if let Ok(mut w) = s.proactive.lock() {
+        if !nudge_id.is_empty() && !w.dismissed.iter().any(|id| id == nudge_id) {
+            w.dismissed.push_back(nudge_id.to_owned());
             if w.dismissed.len() > 100 {
-                w.dismissed.clear();
+                w.dismissed.pop_front();
             }
         }
         if w.active.as_ref().is_some_and(|v| v["id"] == nudge_id) {
@@ -95,9 +99,9 @@ pub fn dismiss(nudge_id: &str) {
     }
 }
 
-pub fn latest() -> Value {
+pub fn latest(s: &Store) -> Value {
     let now_ts = Utc::now().timestamp();
-    let Ok(mut w) = WATCHER.lock() else {
+    let Ok(mut w) = s.proactive.lock() else {
         return Value::Null;
     };
     if let Some(nudge) = w.active.as_ref() {
@@ -221,7 +225,7 @@ fn profile_records(s: &Store) -> Vec<(&'static str, Value)> {
 }
 
 pub fn read_profile(s: &Store, request: &Value) -> Res<Value> {
-    let nudge = latest();
+    let nudge = latest(s);
     let expired = "That memory has changed or this suggestion has expired.";
     if nudge["profileId"].as_str().is_none() || nudge["id"] != request["id"]
         || nudge["eventId"] != request["eventId"] || nudge["epoch"] != s.get("activityEpoch")?
@@ -424,7 +428,7 @@ pub fn evaluate(
     body: &str,
     force: bool,
 ) -> Option<Value> {
-    follow_front(source, title);
+    let revision = s.proactive.lock().ok()?.observe(source, title);
     let cfg = settings(s).ok()?;
     if !crate::activity::allowed(&crate::activity::config(s).ok()?, source) || cfg["enabled"] != true {
         return None;
@@ -438,33 +442,48 @@ pub fn evaluate(
     }
     let now_ts = Utc::now().timestamp();
     let cooldown = cfg["cooldownSeconds"].as_i64().unwrap_or(90);
-    let digest = hash(&format!("{source}\n{title}\n{}", body.chars().take(400).collect::<String>()));
+    let digest = hash(&format!("{source}\n{title}\n{body}"));
 
     {
-        let w = WATCHER.lock().ok()?;
+        let w = s.proactive.lock().ok()?;
         if !force {
-            if w.last_digest == digest {
+            if w.last_digest == digest && w.active.as_ref().is_none_or(|n| n["eventId"] == event_id) {
                 return None;
             }
-            if now_ts - w.last_nudge_at < cooldown {
+            if w.active.is_none() && now_ts - w.last_nudge_at < cooldown {
                 return None;
             }
         }
     }
 
-    let mut candidate = find_memory_nudge(s, event_id, source, title, body, now_ts)
+    let candidate = find_memory_nudge(s, event_id, source, title, body, now_ts)
         .or_else(|| find_error_nudge(source, title, body, now_ts))
-        .or_else(|| find_reply_nudge(source, title, body, now_ts))?;
+        .or_else(|| find_reply_nudge(source, title, body, now_ts));
 
-    candidate["epoch"] = s.get("activityEpoch").ok()?;
-    candidate["eventId"] = json!(event_id);
-    candidate["originTitle"] = json!(title);
-    let key = candidate["id"].as_str().unwrap_or("").to_owned();
-    let mut w = WATCHER.lock().ok()?;
-    if !force && w.dismissed.contains(&key) {
+    let epoch = s.get("activityEpoch").ok()?;
+    let mut w = s.proactive.lock().ok()?;
+    if w.revision != revision {
         return None;
     }
-    w.last_nudge_at = now_ts;
+    // A conversation can change subjects without changing its window title.
+    // The cooldown limits new interruptions. Evidence for an existing dot
+    // still has to match the newly captured passage.
+    let previous = w.active.take();
+    let mut candidate = candidate?;
+    candidate["epoch"] = epoch;
+    candidate["eventId"] = json!(event_id);
+    candidate["originTitle"] = json!(title);
+    let key = candidate["id"].as_str()?;
+    if !force && w.dismissed.iter().any(|id| id == key) {
+        return None;
+    }
+    if let Some(same) = previous.filter(|n| !force && n["id"] == key) {
+        candidate["createdAt"] = same["createdAt"].clone();
+        if now_ts - candidate["createdAt"].as_i64()? > 240 { return None; }
+    } else {
+        if !force && now_ts - w.last_nudge_at < cooldown { return None; }
+        w.last_nudge_at = now_ts;
+    }
     w.last_digest = digest;
     w.active = Some(candidate.clone());
     Some(candidate)
@@ -512,6 +531,42 @@ pub fn scan_latest(s: &Store) -> Res<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_active_connection_follows_the_passage_even_during_cooldown() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::with_key(dir.path().join("book"), &[7; 32]).unwrap();
+        crate::activity::init(&s).unwrap();
+        crate::activity::configure(&s, &json!({"scope":"displays"})).unwrap();
+        let cfg = crate::activity::configure(&s, &json!({"enabled":true})).unwrap();
+        let quote = "Take the projector through the north entrance for the courtyard film screening before 5 pm.";
+        s.db.lock().unwrap().execute("INSERT INTO imported_passages VALUES (?,?,?,?)",
+            ["apple-note:rooftop", "Rooftop screening", quote, "note"]).unwrap();
+        let title = "Screen 1 · ChatGPT active";
+        let save = |body: &str| {
+            crate::activity::ingest(&s, &cfg, &json!({"source":"display","title":title,"body":body}),
+                Utc::now().timestamp()).unwrap();
+            latest(&s)
+        };
+        // Browser chrome and an unchanged prefix must not mask a new topic further down.
+        let prefix = "Navigation ".repeat(42);
+        let topic = format!("{prefix}Plan the courtyard film screening and position the projector.");
+        let first = save(&topic);
+        assert_eq!(first["detail"], quote);
+        let related = save(&format!("{topic} The audience will arrive at dusk."));
+        assert_eq!(related["id"], first["id"]);
+        assert_ne!(related["eventId"], first["eventId"]);
+        assert_eq!(related["createdAt"], first["createdAt"]);
+        assert!(save(&format!("{topic}\n{quote}")).is_null());
+        assert!(save(&format!("{prefix}Use rye flour for a long sourdough fermentation.")).is_null());
+        assert!(save(&topic).is_null()); // A new interruption still has to wait.
+
+        let other = Store::with_key(dir.path().join("other"), &[8; 32]).unwrap();
+        evaluate(&s, "return", "display", title, &topic, true).unwrap();
+        assert!(latest(&other).is_null());
+        dismiss(&other, first["id"].as_str().unwrap());
+        assert_eq!(latest(&s)["id"], first["id"]);
+    }
 
     #[test]
     fn imported_headings_ground_short_names_and_do_not_leak_between_sections() {
@@ -615,7 +670,7 @@ mod tests {
         .expect("should detect compiler error");
         assert_eq!(err["kind"], "help");
 
-        dismiss(err["id"].as_str().unwrap());
-        assert!(latest().is_null());
+        dismiss(&s, err["id"].as_str().unwrap());
+        assert!(latest(&s).is_null());
     }
 }
