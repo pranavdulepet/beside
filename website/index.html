@@ -25,8 +25,8 @@
       }
       body {
         margin: 0;
-        background: light-dark(#faf7ed, #202127);
-        color: light-dark(#292824, #f4f0e5);
+        background: light-dark(#faf8f1, #1c2929);
+        color: light-dark(#334443, #faf8f1);
         font:
           17px "Söhne", Geist, sans-serif;
       }
@@ -53,23 +53,23 @@
         place-content: center;
         justify-items: center;
         pointer-events: none;
-        padding: 30px;
+        padding: 28px 16px;
         text-align: center;
       }
       .signature {
-        width: 68px;
-        height: 68px;
-        background: light-dark(#48538f, #b9c1fa);
+        width: 46px;
+        height: 38px;
+        background: light-dark(#34656d, #a2cccd);
         mask: url('beside.png') center / contain no-repeat;
       }
       h1 {
         font:
-          450 clamp(64px, 8vw, 104px)/1 Newsreader, Georgia, serif;
+          450 clamp(48px, 6vw, 72px)/1 Newsreader, Georgia, serif;
         letter-spacing: -0.045em;
         margin: 0;
       }
       p {
-        margin: 28px 0 34px;
+        margin: 12px 0 18px; max-width: 36rem; text-wrap: balance;
       }
       a {
         pointer-events: auto;
@@ -80,20 +80,27 @@
         padding: 5px;
         font-size: 15px;
       }
-      #demo { width: min(1080px, calc(100vw - 60px)); margin: 28px auto 0; }
-      video { width: 100%; height: auto; display: block; pointer-events: auto; border-radius: 12px; }
-      figcaption { margin: 10px 0; font-size: 14px; }
-      small a {
-        display: inline;
-        padding: 0;
-        font: inherit;
+      #demo { width: min(840px, calc(100vw - 32px)); margin: 26px 0 0; }
+      [role="tablist"] {
+        display: inline-flex; gap: 3px; margin-bottom: 12px;
+        pointer-events: auto;
       }
-      small {
-        margin: 16px 0 0;
-        font-size: 12px;
-        letter-spacing: 0.09em;
-        opacity: 0.7;
+      [role="tab"] {
+        font: inherit; font-size: 15px; font-weight: 500; color: inherit;
+        background: transparent; border: 0; border-radius: 7px;
+        padding: 8px 15px; min-height: 40px; cursor: pointer;
       }
+      [role="tab"]:hover { background: light-dark(#eeeae0, #293b3b); }
+      [role="tab"][aria-selected="true"] {
+        background: light-dark(#faeab1, #334443); color: light-dark(#334443, #faeab1);
+      }
+      :focus-visible { outline: 2px solid light-dark(#34656d, #a2cccd); outline-offset: 3px; }
+      figure { margin: 0; }
+      video { width: 100%; aspect-ratio: 2 / 1; object-fit: contain; display: block;
+        background: light-dark(#e9e8df, #263433); pointer-events: auto; border-radius: 10px; }
+      figcaption { margin: 11px auto 0; font-size: 14px; line-height: 1.5; text-wrap: balance; }
+      small { margin-top: 9px; font-size: 12px; }
+      small a { display: inline; padding: 0; font: inherit; }
     </style>
   </head>
   <body>
@@ -101,18 +108,68 @@
     <main>
       <span class="signature" aria-hidden="true"></span>
       <h1>Beside</h1>
-      <p>Point at something on your Mac and ask. Beside can bring back the note you need while you work.</p>
+      <p>A floating assistant for whatever’s open on your Mac.</p>
       <a href="https://github.com/pranavdulepet/beside/releases/latest/download/Beside-macOS.zip" download>Download for Mac ↓</a>
-      <figure id="demo">
-        <video controls playsinline preload="metadata" poster="media/baggage.png" aria-label="Do I need an extra bag? Beside on a Mac" src="media/baggage.mp4"></video>
-        <figcaption>Do I need an extra bag? A Morocco packing list, Air Arabia’s 7 kg cabin limit, and a decision before checkout.</figcaption>
-      </figure>
-      <small>Apple Silicon · macOS 14 or later · <a href="https://github.com/pranavdulepet/beside#try-beside">Setup</a> · <a href="https://github.com/pranavdulepet/beside/blob/main/docs/walkthroughs.md">Read the walkthrough</a></small>
+      <small>Apple silicon · macOS 14+ · <a href="https://github.com/pranavdulepet/beside#try-beside">Setup</a></small>
+      <section id="demo" aria-label="Beside on a Mac">
+        <div role="tablist" aria-label="Choose a walkthrough">
+          <button id="writing" role="tab" aria-controls="demo-panel" aria-selected="true">Writing</button>
+          <button id="groceries" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1">Groceries</button>
+          <button id="flight" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1">Flight</button>
+        </div>
+        <figure id="demo-panel" role="tabpanel" aria-labelledby="writing">
+          <video controls playsinline preload="metadata" poster="media/writing.png" src="media/writing.mp4" aria-describedby="caption" aria-label="Writing walkthrough">
+            <track kind="captions" srclang="en" label="English" src="media/writing.vtt" />
+          </video>
+          <figcaption id="caption">Check a detail about Chandragupta Maurya’s capital, then revise the essay in TextEdit.</figcaption>
+        </figure>
+      </section>
     </main>
     <script>
       if (location.protocol === 'file:' || ['localhost', '127.0.0.1'].includes(location.hostname)) {
         document.querySelector('a[download]').href = 'Beside-macOS.zip';
       }
+      const tabs = [...document.querySelectorAll('[role="tab"]')];
+      const panel = document.querySelector('#demo-panel');
+      const video = panel.querySelector('video');
+      const caption = panel.querySelector('figcaption');
+      const demos = {
+        writing: ['writing', caption.textContent],
+        groceries: ['groceries', 'Turn a week of meals into a Trader Joe’s shopping list and paste it into Apple Notes.'],
+        flight: ['baggage', 'Compare an Athens packing list with the second-bag fee at United checkout.'],
+      };
+      function selectDemo(id, updateAddress) {
+        const tab = tabs.find(item => item.id === id) || tabs[0];
+        if (tab.getAttribute('aria-selected') === 'true') return;
+        for (const item of tabs) {
+          item.setAttribute('aria-selected', String(item === tab));
+          item.tabIndex = item === tab ? 0 : -1;
+        }
+        const [file, line] = demos[tab.id];
+        video.pause();
+        video.poster = 'media/' + file + '.png';
+        video.src = 'media/' + file + '.mp4';
+        video.setAttribute('aria-label', tab.textContent + ' walkthrough');
+        video.querySelector('track').src = 'media/' + file + '.vtt';
+        video.load();
+        panel.setAttribute('aria-labelledby', tab.id);
+        caption.textContent = line;
+        if (updateAddress) history.replaceState(null, '', '#' + tab.id);
+      }
+      for (const [i, tab] of tabs.entries()) {
+        tab.onclick = () => selectDemo(tab.id, true);
+        tab.onkeydown = event => {
+          const next = {ArrowLeft: (i + tabs.length - 1) % tabs.length, ArrowRight: (i + 1) % tabs.length,
+                        Home: 0, End: tabs.length - 1}[event.key];
+          if (next === undefined) return;
+          event.preventDefault();
+          tabs[next].focus();
+          selectDemo(tabs[next].id, true);
+        };
+      }
+      const readAddress = () => selectDemo(location.hash.slice(1), false);
+      addEventListener('hashchange', readAddress);
+      readAddress();
       const canvas = document.querySelector('canvas');
       const ink = canvas.getContext('2d');
       const dark = matchMedia('(prefers-color-scheme: dark)');
@@ -125,7 +182,7 @@
         ink.moveTo(from.x, from.y);
         ink.lineTo(to.x + 0.01, to.y + 0.01);
         ink.lineCap = 'round';
-        ink.strokeStyle = dark.matches ? '#b9c1fa' : '#48538f';
+        ink.strokeStyle = dark.matches ? '#a2cccd' : '#34656d';
         ink.lineWidth = (from.w + to.w) / 2 + spread;
         ink.globalAlpha = spread ? 0.09 : 0.85;
         ink.stroke();

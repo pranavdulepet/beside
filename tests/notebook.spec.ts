@@ -551,6 +551,17 @@ test('paper, brush and downloadable local Mac archive', async ({
 }, info) => {
   await page.goto('/website/index.html');
   await expect(page.getByRole('heading', {name: 'Beside'})).toBeVisible();
+  const player = page.locator('video');
+  const gallery = page.getByRole('tablist', {name: 'Choose a walkthrough'});
+  await expect(gallery.getByRole('tab', {selected: true})).toHaveText('Writing');
+  await gallery.getByRole('tab', {name: 'Groceries'}).click();
+  await expect(player).toHaveAttribute('src', 'media/groceries.mp4');
+  await page.keyboard.press('ArrowRight');
+  await expect(player).toHaveAttribute('src', 'media/baggage.mp4');
+  await page.reload();
+  await expect(gallery.getByRole('tab', {selected: true})).toHaveText('Flight');
+  await gallery.getByRole('tab', {name: 'Writing'}).click();
+  await expect(player).toHaveAttribute('src', 'media/writing.mp4');
   await page.mouse.move(80, 80);
   await page.mouse.down();
   await page.mouse.move(165, 105, {steps: 12});

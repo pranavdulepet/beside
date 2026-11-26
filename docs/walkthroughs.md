@@ -1,12 +1,15 @@
-# Do I need an extra bag?
+# Beside on a Mac
 
-[Watch the Mac walkthrough](https://pranavdulepet.github.io/beside/#demo)
+Choose **Writing**, **Groceries** or **Flight** above the [video player](https://pranavdulepet.github.io/beside/#demo). In each recording the same shortcut, **⌥⇧Space**, opens Beside over the app in use.
 
-1. Open **Morocco packing list**. It has a daypack, three T-shirts, trousers, four pairs each of socks and underwear, a scarf, a phone charger and travel-size toiletries.
-2. On Air Arabia’s **Fare Types** page, expand **International Flights from/to Morocco**. Each fare allows **7 kg** in the cabin bag and **3 kg** in a separate personal item. [Air Arabia fare table](https://www.airarabia.com/en/plan/reservation/fare-types)
-3. Point at the table, tap **⌥⇧Space** and ask **“Do I need an extra bag?”** Beside counts the listed items and the daypack, budgets about **5.5 kg**, and recommends **skipping the extra bag**. That leaves about **1.5 kg** before the cabin limit.
-4. Expand the source under the answer to check the airline’s wording. Press **Esc** to go back to the page.
+| Recording | Try it |
+| --- | --- |
+| [Writing](../website/media/writing.mp4) | With an essay open in TextEdit, ask what Pataliputra’s city wall was made of. Read the sourced answer and revise the opening sentence. |
+| [Groceries](../website/media/groceries.mp4) | In Apple Notes, open the week’s meal plan with the ingredients you already have. Ask for a Trader Joe’s shopping list. Choose **Copy**, open your shopping note and paste. |
+| [Flight](../website/media/baggage.mp4) | Leave an itemized packing list in your notebook. On United’s Newark–Athens checkout, expand **Calculate checked baggage charges** and ask **“Do I need a second bag?”** |
 
-For your own trip, keep one item per line and include quantities and the bag itself. A recorded scale reading takes priority. If the list has unfamiliar items or its estimate straddles the limit, Beside asks what the packed bag weighs.
+The United recording shows $90 for the first checked bag, $120 for the second, and a 23 kg limit per bag. Beside budgets about 14.5 kg for the list and suitcase and recommends one checked bag. The weight is an estimate. United collects the displayed fees when bags are checked.
+
+The wooden fortification in the essay is documented in the [Metropolitan Museum of Art’s Mauryan history](https://www.metmuseum.org/essays/mauryan-empire-ca-323-185-b-c).
 
 [First-time setup](../README.md#try-beside)
