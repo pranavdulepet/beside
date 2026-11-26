@@ -1,6 +1,7 @@
 pub mod imported;
 pub mod mail_archive;
 pub(crate) mod baggage;
+mod packing;
 mod connections;
 mod lists;
 mod shortfall;

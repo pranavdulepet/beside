@@ -42,8 +42,61 @@ fn one(body: &str, pattern: &Regex) -> Option<(i32, String)> {
     let first = hits.next()?;
     hits.all(|h| h.0 == first.0).then_some(first)
 }
+// Native OCR preserves cells on the same visual row. Accept a fare matrix
+// only if every headed column explicitly gives the same primary bag allowance.
+static CELL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+    r"(?i)^([0-9]{1,2}(?:\.[0-9])?)\s*kg(?:\s*\+\s*[0-9]{1,2}(?:\.[0-9])?\s*kg\s+personal item)?$"
+).unwrap()
+});
+
+fn matrix(body: &str) -> Option<(i32, String, &str)> {
+    let lines: Vec<_> = body.lines().collect();
+    let mut found = None;
+    for (i, line) in lines.iter().enumerate() {
+        let mut cells = line.split('\t').map(str::trim);
+        if !matches!(
+            cells.next()?.to_lowercase().as_str(),
+            "hand baggage" | "carry-on" | "cabin baggage" | "cabin bag"
+        ) {
+            continue;
+        }
+        let header = lines.get(i.checked_sub(1)?)?;
+        let columns = header.split('\t').count().checked_sub(1)?;
+        let cells: Vec<_> = cells.collect();
+        if columns == 0 || cells.len() != columns || found.is_some() {
+            return None;
+        }
+        let mut weights = cells
+            .iter()
+            .map(|c| CELL.captures(c).and_then(|v| grams(&v[1])));
+        let first = weights.next()??;
+        if !weights.all(|w| w == Some(first)) {
+            return None;
+        }
+        let section = lines[..i - 1]
+            .iter()
+            .rev()
+            .find(|s| !s.trim().is_empty())
+            .copied()
+            .unwrap_or("");
+        found = Some((first, cells[0].to_string(), section));
+    }
+    found
+}
+
 // Mixed fare classes, passengers or units need the user to open a single rule.
 fn allowance(body: &str) -> Option<(i32, String)> {
+    if body.lines().any(|l| {
+        l.split_once('\t').is_some_and(|(label, _)| {
+            matches!(
+                label.trim().to_lowercase().as_str(),
+                "hand baggage" | "cabin bag" | "cabin baggage" | "carry-on"
+            )
+        })
+    }) {
+        return matrix(body).map(|(g, line, _)| (g, line));
+    }
     for line in body.lines() {
         let text = line.to_lowercase();
         if ["carry-on", "carry on", "cabin bag"]
@@ -70,12 +123,21 @@ pub(super) fn booking(title: &str, body: &str) -> bool {
         "flight itinerary",
         "manage trip",
         "check-in",
+        "fare types",
+        "fare bundles",
+        "fare options",
     ]
     .iter()
     .any(|t| title.contains(t))
-        && ["carry-on", "carry on", "cabin bag", "baggage allowance"]
-            .iter()
-            .any(|t| body.contains(t))
+        && [
+            "carry-on",
+            "carry on",
+            "cabin bag",
+            "hand baggage",
+            "baggage allowance",
+        ]
+        .iter()
+        .any(|t| body.contains(t))
         && !["notes ·", "chatgpt", "claude", "beside ·"]
             .iter()
             .any(|t| title.contains(t))
@@ -92,7 +154,8 @@ pub(super) fn prepare(
     if !booking(title, body) {
         return Ok(());
     }
-    let context = format!(" {} ", words(&format!("{title} {body}")));
+    let booking_context = matrix(body).map(|(_, _, section)| section).unwrap_or(body);
+    let context = format!(" {} ", words(&format!("{title} {booking_context}")));
     let mut q=db.prepare("SELECT id,title,source FROM activity WHERE (title LIKE 'Notes · %' OR title LIKE '% · TextEdit active') AND (title LIKE '%packing list%' OR title LIKE '%packing checklist%') AND stamp>=?1 ORDER BY stamp DESC,rowid DESC LIMIT 120").msg()?;
     let mut rows = q.query([stamp - 30 * DAY]).msg()?;
     let mut found = std::collections::BTreeMap::new();
@@ -205,7 +268,10 @@ pub(crate) fn pin(s: &Store, point: &Value, generation: &Value) -> Res<Option<St
                 .trim()
                 .to_owned();
             !scope.is_empty()
-                && live.is_some_and(|b| format!(" {} ", words(b)).contains(&format!(" {scope} ")))
+                && live.is_some_and(|b| {
+                    format!(" {} ", words(matrix(b).map(|(_, _, s)| s).unwrap_or(b)))
+                        .contains(&format!(" {scope} "))
+                })
         });
         if live.is_none()
             || live.is_some_and(|v| {
@@ -297,20 +363,119 @@ pub(super) fn answer(s: &Store, a: &Value, q: &str, epoch: &Value) -> Res<Option
             note.as_ref()
                 .and_then(|(_, _, body, _)| one(body, &WEIGHED).map(|h| h.0))
         });
-    let answer=match weight {
-        Some(w) if w>limit=>format!("Your bag is {} kg over the {} kg carry-on limit. Remove at least {} kg to meet the weight limit.",kg(w-limit),kg(limit),kg(w-limit)),
-        Some(w)=>format!("At {} kg, your bag is within the {} kg carry-on limit. You don’t need extra baggage on weight grounds.",kg(w),kg(limit)),
-        None if note.is_some()=>format!("Your fare allows {} kg. I found your packing list, but couldn’t verify a packed weight. What does your packed carry-on weigh?",kg(limit)),
-        None=>format!("Your fare allows {} kg. What does your packed carry-on weigh?",kg(limit)),
+    let estimate = note.as_ref().and_then(|(id, title, body, _)| {
+        let document = id.starts_with("apple-note:") || title.starts_with("TextEdit · ");
+        let passage = title.starts_with("Notes · ") || title.starts_with("Visible text · ");
+        if document || passage {
+            super::packing::estimate(body).map(|bounds| (bounds, document))
+        } else {
+            None
+        }
+    });
+    let awaiting_weight =
+        weight.is_none() && !estimate.is_some_and(|((_, hi), _)| hi + 500 <= limit);
+    let answer = match (weight, estimate) {
+        (Some(w), _) if w>limit => format!("Pack lighter or use a checked bag. Your bag is {} kg over the {} kg carry-on limit. Remove at least {} kg to meet the weight limit.",kg(w-limit),kg(limit),kg(w-limit)),
+        (Some(w), _) => format!("Skip the extra bag on weight grounds. Your bag weighs {} kg and the cabin limit is {} kg.",kg(w),kg(limit)),
+        (_,Some(((low,high),complete))) => {
+            let upper = (high+499)/500*500;
+            let list = if complete {"your packing list"} else {"the visible items on your list"};
+            if high + 500 <= limit {
+                format!("Skip the extra bag. I’d budget about {} kg for {list}, including the bag itself. That leaves about {} kg under the {} kg cabin limit. Just check the bag fits the airline’s size limit.",kg(upper),kg(limit-upper),kg(limit))
+            } else if low > limit {
+                format!("Plan to check a bag or pack lighter. Even my low estimate of {} kg for {list} exceeds the {} kg cabin limit. Use any checked allowance already included before paying for more. What does your packed carry-on weigh?",kg(low/100*100),kg(limit))
+            } else {
+                format!("Hold off on buying extra baggage. I’d estimate {}–{} kg for {list}, including the bag. That’s close enough to the {} kg cabin limit that weighing it could change the decision. What does your packed carry-on weigh?",kg(low/500*500),kg(upper),kg(limit))
+            }
+        }
+        _ if note.is_some()=>format!("Your fare allows {} kg. I found your packing list, but couldn’t verify a packed weight. What does your packed carry-on weigh?",kg(limit)),
+        _=>format!("Your fare allows {} kg. What does your packed carry-on weigh?",kg(limit)),
     };
     Ok(Some(
-        json!({"answer":answer,"sources":sources,"supportingLine":line,"baggageAwaitingWeight":weight.is_none(),"epoch":epoch}),
+        json!({"answer":answer,"sources":sources,"supportingLine":line,"baggageAwaitingWeight":awaiting_weight,"epoch":epoch}),
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fare_table_keeps_the_personal_item_and_other_routes_separate() {
+        let table = "Flights to Egypt\nFlights to Morocco\nItem\tBasic\tPlus\nHand baggage\t7kg + 3kg personal item\t7kg + 3kg personal item\nChecked baggage\tChargeable\t20 kg";
+        assert_eq!(
+            matrix(table),
+            Some((7000, "7kg + 3kg personal item".into(), "Flights to Morocco"))
+        );
+        for bad in [
+            table.replacen("7kg", "9kg", 1),
+            table.replace("Basic\tPlus", "Basic\tPlus\tMax"),
+            table.replace("7kg + 3kg", "7 lb + 3kg"),
+        ] {
+            assert!(allowance(&bad).is_none());
+        }
+        assert_eq!(allowance("Other\tText\nCarry-on: 7 kg").unwrap().0, 7000);
+    }
+
+    #[test]
+    fn prepared_fare_reevaluates_a_changed_list_and_prefers_a_measurement() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::with_key(temp.path().join("book"), &[9; 32]).unwrap();
+        super::super::init(&store).unwrap();
+        let cfg = json!({"enabled":true,"scope":"displays","generation":"test"});
+        store.set("activitySettings", &cfg).unwrap();
+        let now = Utc::now().timestamp();
+        let record = |title: &str, body: &str| {
+            ingest(
+                &store,
+                &cfg,
+                &json!({"source":"display","title":title,"body":body}),
+                now,
+            )
+            .unwrap();
+        };
+        let table="Flights to Egypt\nFlights to Morocco\nItem\tBasic\tPlus\nHand baggage\t7kg + 3kg personal item\t7kg + 3kg personal item";
+        record(
+            "Visible text · Egypt packing list.txt · TextEdit active",
+            "Egypt packing list\nMy packed bag weighs 15 kg",
+        );
+        record("Fare Types", table);
+        let title = "Visible text · Morocco packing list.txt · TextEdit active";
+        record(title, "Morocco packing list\nDaypack\n3 T-shirts");
+        let point = json!({"source":"display","bookingTitle":"Fare Types","bookingBody":table,"app":"Browser"});
+        let key = pin(&store, &point, &cfg["generation"]).unwrap().unwrap();
+        let ask = || {
+            answer(
+                &store,
+                &json!({"anchor":key}),
+                "Do I need an extra bag?",
+                &store.get("activityEpoch").unwrap(),
+            )
+            .unwrap()
+            .unwrap()
+        };
+        let first = ask();
+        assert!(first["answer"]
+            .as_str()
+            .unwrap()
+            .starts_with("Skip the extra bag."));
+        assert_eq!(first["baggageAwaitingWeight"], false);
+        assert_eq!(first["sources"][1]["title"], title);
+        record(title, "Morocco packing list\nDaypack\n2 laptops");
+        assert!(ask()["answer"].as_str().unwrap().starts_with("Hold off"));
+        record(title, "Morocco packing list\nDaypack\n9 laptops");
+        assert!(ask()["answer"]
+            .as_str()
+            .unwrap()
+            .starts_with("Plan to check"));
+        record(title, "Morocco packing list\nDaypack\nCamera rig");
+        assert_eq!(ask()["baggageAwaitingWeight"], true);
+        record(
+            title,
+            "Morocco packing list\nDaypack\n9 laptops\nMy packed bag weighs 5 kg",
+        );
+        assert!(ask()["answer"].as_str().unwrap().contains("weighs 5 kg"));
+    }
 
     #[test]
     fn booking_prepares_only_the_matching_list_and_checks_changes() {

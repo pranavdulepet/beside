@@ -2,11 +2,11 @@
 
 [Watch the Mac walkthrough](https://pranavdulepet.github.io/beside/#demo)
 
-1. With screen memory on, open your trip’s packing list in Notes or a named TextEdit document. You can also use a list already imported from Apple Notes.
-2. Open the booking with its carry-on allowance visible. Beside can prepare a reference to a list named for the trip, such as **Japan packing list**, when the booking identifies the same trip.
-3. Point at the booking, tap **Option–Shift–Space**, and ask **“Do I need an extra bag?”** If your list has no verified packed weight, Beside asks for the scale reading. Reply with a weight such as **8.4 kg**. On a 7 kg fare, that is **1.4 kg over**.
-4. Expand the source beneath the answer to read the allowance. Press **Esc** to return to the booking.
+1. Open **Morocco packing list**. It has a daypack, three T-shirts, trousers, four pairs each of socks and underwear, a scarf, a phone charger and travel-size toiletries.
+2. On Air Arabia’s **Fare Types** page, expand **International Flights from/to Morocco**. Each fare allows **7 kg** in the cabin bag and **3 kg** in a separate personal item. [Air Arabia fare table](https://www.airarabia.com/en/plan/reservation/fare-types)
+3. Point at the table, tap **⌥⇧Space** and ask **“Do I need an extra bag?”** Beside counts the listed items and the daypack, budgets about **5.5 kg**, and recommends **skipping the extra bag**. That leaves about **1.5 kg** before the cabin limit.
+4. Expand the source under the answer to check the airline’s wording. Press **Esc** to go back to the page.
 
-The recording uses the installed Mac app, a fictional Japan reservation and a local text file. This check compares an explicit kilogram carry-on limit and measured weight. Buying baggage also depends on the ticket’s other allowances and options.
+For your own trip, keep one item per line and include quantities and the bag itself. A recorded scale reading takes priority. If the list has unfamiliar items or its estimate straddles the limit, Beside asks what the packed bag weighs.
 
 [First-time setup](../README.md#try-beside)

@@ -59,7 +59,7 @@ These commands search the readable files. Beside also searches its encrypted scr
 
 ### While booking a flight
 
-Beside prepares pointers to the observed booking and a packing list whose title matches the trip. These pointers live in the encrypted notebook. When you ask about an extra bag, Beside checks the original sources and compares kilograms locally. If the packed weight is missing, it asks you to weigh the bag. A changed fare can require a new allowance. The originals stay where you put them.
+Beside prepares pointers to the observed booking and a packing list whose title matches the trip. These pointers live in the encrypted notebook. When you ask about an extra bag, Beside checks the original sources and compares kilograms locally. A measured packed weight takes priority. For itemized lists, Beside counts familiar items and the container using local weight ranges. If the list leaves a material uncertainty or the range falls near the limit, it asks for the packed weight. A fare table must show the same cabin limit across its visible fare columns. A changed fare can require a new allowance. The originals stay where you put them.
 
 ## Models, web search and sharing
 

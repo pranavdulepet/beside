@@ -14,8 +14,8 @@ Beside is a floating assistant for your Mac. Point at the thing you’re working
 
 ### Do I need an extra bag?
 
-You're looking at a flight booking. Beside checks its carry-on limit against the packing list for that trip. When the ticket says **7 kg** and the list has no measured weight, it asks **“What does your packed carry-on weigh?”** Reply with the scale reading to check the difference.
+On Air Arabia’s Morocco fare page, tap **⌥⇧Space** and ask **“Do I need an extra bag?”** Beside finds the trip’s packing list and budgets **5.5 kg** for the daypack and its contents. The cabin allowance is **7 kg**. **Skip the extra bag.**
 
-[![Beside checks the carry-on allowance for a fictional Japan booking.](website/media/baggage.png)](https://pranavdulepet.github.io/beside/#demo)
+[![Beside compares a Morocco packing list with Air Arabia’s carry-on allowance.](website/media/baggage.png)](https://pranavdulepet.github.io/beside/#demo)
 
 [User guide and troubleshooting](docs/guide.md) · [Storage and sharing](docs/guide.md#where-your-data-lives) · [Security](SECURITY.md) · [Build from source](docs/development.md) · [Contribute](CONTRIBUTING.md) · [License](LICENSE) · [Third-party credits](licenses/)

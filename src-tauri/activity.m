@@ -206,6 +206,42 @@ static NSArray<NSString *> *notePassage(NSArray<VNRecognizedTextObservation *> *
     return body.count > 1 ? body : nil;
 }
 
+static BOOL fareWindow(NSString *title) {
+    return [title rangeOfString:@"booking|reservation|flight confirmation|flight itinerary|manage trip|check-in|fare types|fare bundles|fare options"
+                        options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location != NSNotFound;
+}
+
+// Vision returns observations in reading blocks. On a fare table, preserve
+// horizontal alignment so a checked-bag value cannot slide into the cabin row.
+static NSArray *fareRows(NSArray<VNRecognizedTextObservation *> *observations) {
+    NSArray *sorted = [observations sortedArrayUsingComparator:^NSComparisonResult(VNRecognizedTextObservation *a, VNRecognizedTextObservation *b) {
+        return [@(CGRectGetMidY(b.boundingBox)) compare:@(CGRectGetMidY(a.boundingBox))];
+    }];
+    NSMutableArray *groups = [NSMutableArray array];
+    for (VNRecognizedTextObservation *word in sorted) {
+        NSMutableArray *row = groups.lastObject;
+        VNRecognizedTextObservation *first = row.firstObject;
+        if (!first || fabs(CGRectGetMidY(first.boundingBox)-CGRectGetMidY(word.boundingBox)) >
+            0.5 * MIN(first.boundingBox.size.height,word.boundingBox.size.height)) {
+            row=[NSMutableArray array]; [groups addObject:row];
+        }
+        [row addObject:word];
+    }
+    NSMutableArray *lines=[NSMutableArray array];
+    for (NSMutableArray *row in groups) {
+        [row sortUsingComparator:^NSComparisonResult(VNRecognizedTextObservation *a,VNRecognizedTextObservation *b){
+            return [@(a.boundingBox.origin.x) compare:@(b.boundingBox.origin.x)];
+        }];
+        NSMutableArray *cells=[NSMutableArray array];
+        for (VNRecognizedTextObservation *cell in row) {
+            NSString *value=[cell topCandidates:1].firstObject.string;
+            if(value.length) [cells addObject:value];
+        }
+        [lines addObject:[cells componentsJoinedByString:@"\t"]];
+    }
+    return lines;
+}
+
 static NSDictionary *recognize(CGImageRef image, NSString *source, NSString *title,
                                BOOL keepPreview, BOOL note) {
     VNRecognizeTextRequest *ocr = [VNRecognizeTextRequest new];
@@ -219,6 +255,7 @@ static NSDictionary *recognize(CGImageRef image, NSString *source, NSString *tit
             if (s.length)
                 [lines addObject:s];
         }
+        if (fareWindow(title) && !note) lines = [fareRows(ocr.results) mutableCopy];
         if (note) {
             NSArray *passage = notePassage(ocr.results, title);
             if (!passage) return nil;
@@ -378,7 +415,14 @@ static char *sampleNote(NSRunningApplication *app, NSString *source, BOOL previe
     for (int attempt = 0; attempt < 3; attempt++) {
         if (attempt) [NSThread sleepForTimeInterval:0.4];
         if (!sameWindow()) return waiting();
-        NSDictionary *row = noteFrame(filter, config, source, window.title ?: @"", preview && previous != nil);
+        BOOL textFile = [app.bundleIdentifier isEqual:@"com.apple.TextEdit"];
+        NSString *heading = textFile ? window.title.stringByDeletingPathExtension : window.title;
+        NSDictionary *row = noteFrame(filter, config, source, heading ?: @"", preview && previous != nil);
+        if (row && textFile) {
+            NSMutableDictionary *passage=[row mutableCopy];
+            passage[@"title"]=[NSString stringWithFormat:@"Visible text · %@ · TextEdit active",window.title];
+            row=passage;
+        }
         if (!sameWindow()) return waiting();
         if (sameNoteRead(row, previous))
             return packed(row);
@@ -610,6 +654,32 @@ char *sumi_activity_front(const char *raw) {
         return packed(@{@"source": bundle, @"title": name});
     }
 }
+// A short packing list that fits on screen can be read without mixing in
+// words from other windows. Only mark it complete when the entire text is visible.
+static char *visiblePackingList(NSRunningApplication *app, NSString *source) {
+    if (!AXIsProcessTrusted() || !availableSession() || !screenAccess(NO)) return NULL;
+    pid_t pid=app.processIdentifier;
+    id owner=CFBridgingRelease(AXUIElementCreateApplication(pid));
+    AXUIElementRef ax=(__bridge AXUIElementRef)owner;
+    id window=attribute(ax,kAXFocusedWindowAttribute);
+    NSString *name=window ? clean(attribute((__bridge AXUIElementRef)window,kAXTitleAttribute)) : @"";
+    if ([name rangeOfString:@"packing (list|checklist)" options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location==NSNotFound) return NULL;
+    id field=attribute(ax,kAXFocusedUIElementAttribute);
+    if (!field) return NULL;
+    AXUIElementRef el=(__bridge AXUIElementRef)field;
+    if (![attribute(el,kAXRoleAttribute) isEqual:@"AXTextArea"] || ![window isEqual:attribute(el,kAXWindowAttribute)]) return NULL;
+    NSNumber *length=attribute(el,kAXNumberOfCharactersAttribute);
+    id visible=attribute(el,kAXVisibleCharacterRangeAttribute);
+    CFRange range={0,0};
+    if (!length || length.integerValue<1 || length.integerValue>5400 || !visible ||
+        CFGetTypeID((__bridge CFTypeRef)visible)!=AXValueGetTypeID() ||
+        !AXValueGetValue((__bridge AXValueRef)visible,kAXValueCFRangeType,&range) ||
+        range.location!=0 || range.length<length.integerValue) return NULL;
+    NSString *text=clean(attribute(el,kAXValueAttribute));
+    if (text.length!=length.integerValue || !stillFront(pid) || ![window isEqual:attribute(ax,kAXFocusedWindowAttribute)]) return NULL;
+    return packed(@{@"source":source,@"title":[NSString stringWithFormat:@"TextEdit · %@ · TextEdit active",name],@"body":text});
+}
+
 char *sumi_activity_sample(const char *raw) {
     @autoreleasepool {
         NSDictionary *settings =
@@ -623,6 +693,15 @@ char *sumi_activity_sample(const char *raw) {
         NSString *bundle = app.bundleIdentifier;
         pid_t pid = app.processIdentifier;
         BOOL displays = [settings[@"scope"] isEqual:@"displays"];
+        if ([bundle isEqual:@"com.apple.TextEdit"] && (displays || [allowed containsObject:bundle])) {
+            char *list=visiblePackingList(app, displays ? @"display" : bundle);
+            if (list) return list;
+            CGWindowID window=frontWindow(pid);
+            NSArray *windows=CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow,window));
+            NSString *name=clean(windows.firstObject[(__bridge NSString *)kCGWindowName]);
+            if ([name rangeOfString:@"packing (list|checklist)" options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location!=NSNotFound)
+                return sampleNote(app,displays ? @"display" : bundle,keepPreview);
+        }
         if ([bundle isEqual:@"com.apple.Notes"] && (displays || [allowed containsObject:bundle]))
             return sampleNote(app, displays ? @"display" : bundle, keepPreview);
         BOOL scopedMail = displays && [bundle isEqual:@"com.apple.mail"];
@@ -1115,8 +1194,7 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
                         @"windowFrame":@{@"x":@(round(frame.origin.x)), @"y":@(round(frame.origin.y)), @"w":@(round(frame.size.width)), @"h":@(round(frame.size.height))}
                     };
                     NSString *title=w.title ?: @"";
-                    if ([title rangeOfString:@"booking|reservation|flight confirmation|flight itinerary|manage trip|check-in"
-                                    options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location != NSNotFound) {
+                    if (fareWindow(title)) {
                         NSDictionary *page=recognize(image,source,title,NO,NO);
                         if (page[@"body"]) {
                             NSMutableDictionary *withPage=[result mutableCopy];
