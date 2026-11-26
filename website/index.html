@@ -98,7 +98,7 @@
       figure { margin: 0; }
       [hidden] { display: none !important; }
       .player { position: relative; }
-      video, .cover img, .direct-recording { display: block; width: 100%; aspect-ratio: 2 / 1; border-radius: 10px; }
+      video, .cover img, .direct-recording { display: block; width: 100%; height: auto; aspect-ratio: auto 2 / 1; object-fit: contain; border-radius: 10px; }
       video { background: #263433; }
       .cover img { height: auto; }
       .cover {
@@ -164,8 +164,8 @@
         </div>
         <figure id="demo-panel" role="tabpanel" aria-labelledby="writing">
           <div class="player">
-            <video controls playsinline muted preload="none" poster="media/writing.png?cut=5" aria-describedby="caption" aria-label="Writing walkthrough">
-              <track kind="captions" srclang="en" label="English" src="media/writing.vtt?cut=5" />
+            <video controls playsinline muted preload="none" poster="media/writing.png?take=6" aria-describedby="caption" aria-label="Writing walkthrough">
+              <track kind="captions" srclang="en" label="English" src="media/writing.vtt?take=6" />
             </video>
             <div class="film" hidden>
               <div class="film-screen">
@@ -186,13 +186,13 @@
             </div>
             <img class="direct-recording" alt="Writing walkthrough" hidden />
             <button type="button" class="cover" aria-label="Play Writing walkthrough" hidden>
-              <img src="media/writing.png?cut=5" width="1440" height="720" alt="" />
+              <img src="media/writing.png?take=6" width="1440" height="720" alt="" />
               <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 3.6a1 1 0 0 1 1.5-.86l14 8.4a1 1 0 0 1 0 1.72l-14 8.4A1 1 0 0 1 6 20.4z"/></svg>
             </button>
           </div>
-          <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="media/writing.gif?cut=5">Open the animation</a></p>
-          <figcaption id="caption">Trace a claim in a TextEdit essay to a reading note and name the witness.</figcaption>
-          <noscript><p><a href="media/writing.gif?cut=5">Watch Writing</a> <a href="media/groceries.gif?cut=5">Watch Groceries</a> <a href="media/baggage.gif?cut=5">Watch Flight</a></p></noscript>
+          <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="media/writing.gif?take=6">Open the animation</a></p>
+          <figcaption id="caption">Check what Pataliputra’s wall was made of and revise the opening sentence in TextEdit.</figcaption>
+          <noscript><p><a href="media/writing.gif?take=6">Watch Writing</a> <a href="media/groceries.gif?take=6">Watch Groceries</a> <a href="media/baggage.gif?take=6">Watch Flight</a></p></noscript>
         </figure>
       </section>
     </main>
@@ -209,8 +209,8 @@
       const caption = panel.querySelector('figcaption');
       const demos = {
         writing: ['writing', caption.textContent],
-        groceries: ['groceries', 'Turn a meal plan into a Trader Joe’s list, update it, and check off the tofu.'],
-        flight: ['baggage', 'Compare a packing list and a scale reading with United’s second-bag fee.'],
+        groceries: ['groceries', 'Turn three dinners into a Trader Joe’s list and paste it into Apple Notes.'],
+        flight: ['baggage', 'Use your packing list to decide whether to pay for a second bag on United.'],
       };
       const film = panel.querySelector('.film');
       const direct = panel.querySelector('.direct-recording');
@@ -218,7 +218,7 @@
       function preparePlayer(tab, file) {
         closePlayer?.();
         const base = 'media/' + file;
-        const media = extension => base + '.' + extension + '?cut=5';
+        const media = extension => base + '.' + extension + '?take=6';
         const animationUrl = media('gif');
         const label = tab.textContent + ' walkthrough';
         const controller = new AbortController();
@@ -254,7 +254,7 @@
           cover.setAttribute('aria-busy', 'true');
           try {
             const [module, response] = await Promise.all([
-              import('./film.js?cut=5'), fetch(animationUrl, {signal}),
+              import('./film.js?take=6'), fetch(animationUrl, {signal}),
             ]);
             if (!response.ok) throw new Error('Recording unavailable');
             const bytes = await response.arrayBuffer();

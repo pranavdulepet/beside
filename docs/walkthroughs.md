@@ -1,15 +1,15 @@
 # Using Beside
 
-Tap **⌥⇧Space** to type in the app you’re using, or hold it to speak. A follow-up stays with the same task.
+Tap **⌥⇧Space** in the app you’re using, ask a question and press Return. Press **Esc** to go back to your work. You can also hold the shortcut to speak.
 
-| Walkthrough | Try it |
+| Recording | What happens on screen |
 | --- | --- |
-| [Writing](../website/media/writing.mp4) | In TextEdit, select a claim and ask who reported it. Beside finds the saved reading note. Ask for the exact sentence, check the attribution, and return to your draft. |
-| [Groceries](../website/media/groceries.mp4) | Ask for a Trader Joe’s list from your meal plan. Say what you already have. Copy the revised quantities to Notes or Reminders and check off items as you shop. |
-| [Flight](../website/media/baggage.mp4) | On United’s baggage screen, ask whether you need a second bag. Give Beside your suitcase’s measured weight to see how much room you have on that fare. |
+| [Writing · 34 seconds](https://pranavdulepet.github.io/beside/#writing) | A writer selects the opening of a TextEdit essay about Chandragupta Maurya. They ask what Pataliputra’s wall was made of, read Beside’s answer and sources, and change the sentence in the same document. |
+| [Groceries · 31 seconds](https://pranavdulepet.github.io/beside/#groceries) | A cook has three dinners and a list of pantry staples in Apple Notes. They ask what to buy at Trader Joe’s, copy the seven-item answer and paste it into their shopping note. |
+| [Flight · 11 seconds](https://pranavdulepet.github.io/beside/#flight) | A traveler opens the baggage fees on United’s Newark–Athens itinerary and asks whether to add a second bag. Beside estimates 14.5 kg from the packing list against a 23 kg allowance and recommends skipping the $120 second bag. |
 
-These quick replays combine recorded Mac windows with the Beside interface running against an isolated local notebook. The grocery film shows an item being checked off in Apple Reminders on an iPhone simulator. Waiting and typing are shortened. [Watch the three replays](https://pranavdulepet.github.io/beside/#writing)
+Each video shows the work app and Beside in one continuous recording at its original pace, including typing and response time. The recorder places those two windows together in the frame. The rest of the desktop is outside the capture. Use the player’s full-screen control to enlarge it.
 
-The essay follows the museum’s attribution to Megasthenes. The United itinerary shown quotes $90 for the first checked bag, $120 for the second and a 23 kg limit. The 14.5 kg figure is a packing estimate. Entering 21.5 kg leaves 1.5 kg spare. [The Metropolitan Museum of Art](https://www.metmuseum.org/essays/mauryan-empire-ca-323-185-b-c)
+The baggage figure is an estimate from the items listed. The prices and allowance belong to the fare on screen. The workflow ends with the recommendation, before purchase.
 
-[First-time setup](../README.md#try-beside)
+[First-time setup](../README.md#try-beside) · [How Beside finds and uses evidence](architecture.md)

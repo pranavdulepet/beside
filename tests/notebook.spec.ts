@@ -575,6 +575,8 @@ test.describe('website walkthroughs', () => {
               new URL(v.currentSrc).pathname.endsWith('/' + slug + '.mp4') &&
               !v.paused &&
               !v.error &&
+              v.defaultPlaybackRate === 1 &&
+              v.playbackRate === 1 &&
               v.currentTime > 0.15 &&
               v.getVideoPlaybackQuality().totalVideoFrames > 1,
             file,

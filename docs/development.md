@@ -14,6 +14,8 @@ npm run desktop
 
 The desktop shell is Tauri. Vite serves the React interface during development. The native app provides screen access, storage and inference.
 
+Follow a shortcut, a background observation or a memory correction through the running app in the [architecture guide](architecture.md).
+
 ## Where to look
 
 | Area | Entry points |
