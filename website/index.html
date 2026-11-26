@@ -19,8 +19,8 @@
       }
       body {
         margin: 0;
-        background: light-dark(#f8f6f0, #20211f);
-        color: light-dark(#292824, #f2f0e9);
+        background: light-dark(#faf7ed, #202127);
+        color: light-dark(#292824, #f4f0e5);
         font:
           17px Geist, sans-serif;
       }
@@ -50,7 +50,12 @@
         padding: 30px;
         text-align: center;
       }
-      @media (prefers-color-scheme: dark) { main img { filter: brightness(2.6); } }
+      .signature {
+        width: 68px;
+        height: 68px;
+        background: light-dark(#48538f, #b9c1fa);
+        mask: url('beside.png') center / contain no-repeat;
+      }
       h1 {
         font:
           490 clamp(65px, 11vw, 125px)/1 Geist, sans-serif;
@@ -86,7 +91,7 @@
   <body>
     <canvas aria-label="Draw with ink on the paper"></canvas>
     <main>
-      <img src="beside.png" width="68" height="68" alt="">
+      <span class="signature" aria-hidden="true"></span>
       <h1>Beside</h1>
       <p>Point at something on your Mac and ask. Beside can bring back the note you need while you work.</p>
       <a href="https://github.com/pranavdulepet/beside/releases/latest/download/Beside-macOS.zip" download>Download for Mac ↓</a>
@@ -108,7 +113,7 @@
         ink.moveTo(from.x, from.y);
         ink.lineTo(to.x + 0.01, to.y + 0.01);
         ink.lineCap = 'round';
-        ink.strokeStyle = dark.matches ? '#dfa9ac' : '#803f52';
+        ink.strokeStyle = dark.matches ? '#b9c1fa' : '#48538f';
         ink.lineWidth = (from.w + to.w) / 2 + spread;
         ink.globalAlpha = spread ? 0.09 : 0.85;
         ink.stroke();
