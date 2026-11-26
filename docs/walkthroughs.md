@@ -1,17 +1,15 @@
-# Beside on a Mac
+# Using Beside
 
-Choose **Writing**, **Groceries** or **Flight** above the [player](https://pranavdulepet.github.io/beside/#demo). On a phone, tap Play, then drag the timeline or expand the recording. In each demo, **⌥⇧Space** opens Beside over the app in use.
+Tap **⌥⇧Space** to type in the app you’re using, or hold it to speak. A follow-up stays with the same task.
 
-| Recording | Try it |
+| Walkthrough | Try it |
 | --- | --- |
-| [Writing](../website/media/writing.mp4) | With an essay open in TextEdit, ask what Pataliputra’s city wall was made of. Read the sourced answer and revise the opening sentence. |
-| [Groceries](../website/media/groceries.mp4) | In Apple Notes, open the week’s meal plan with the ingredients you already have. Ask for a Trader Joe’s shopping list. Choose **Copy**, open your shopping note and paste. |
-| [Flight](../website/media/baggage.mp4) | Leave an itemized packing list in your notebook. On United’s Newark–Athens checkout, expand **Calculate checked baggage charges** and ask **“Do I need a second bag?”** |
+| [Writing](../website/media/writing.mp4) | In TextEdit, select a claim and ask who reported it. Beside finds the saved reading note. Ask for the exact sentence, check the attribution, and return to your draft. |
+| [Groceries](../website/media/groceries.mp4) | Ask for a Trader Joe’s list from your meal plan. Say what you already have. Copy the revised quantities to Notes or Reminders and check off items as you shop. |
+| [Flight](../website/media/baggage.mp4) | On United’s baggage screen, ask whether you need a second bag. Give Beside your suitcase’s measured weight to see how much room you have on that fare. |
 
-You can also open each full recording directly as an animation. [Writing](https://pranavdulepet.github.io/beside/media/writing.gif) · [Groceries](https://pranavdulepet.github.io/beside/media/groceries.gif) · [Flight](https://pranavdulepet.github.io/beside/media/baggage.gif)
+These quick replays combine recorded Mac windows with the Beside interface running against an isolated local notebook. The grocery film shows an item being checked off in Apple Reminders on an iPhone simulator. Waiting and typing are shortened. [Watch the three replays](https://pranavdulepet.github.io/beside/#writing)
 
-The United recording shows $90 for the first checked bag, $120 for the second, and a 23 kg limit per bag. Beside budgets about 14.5 kg for the list and suitcase and recommends one checked bag. The weight is an estimate. United collects the displayed fees when bags are checked.
-
-The wooden fortification in the essay is documented in the [Metropolitan Museum of Art’s Mauryan history](https://www.metmuseum.org/essays/mauryan-empire-ca-323-185-b-c).
+The essay follows the museum’s attribution to Megasthenes. The United itinerary shown quotes $90 for the first checked bag, $120 for the second and a 23 kg limit. The 14.5 kg figure is a packing estimate. Entering 21.5 kg leaves 1.5 kg spare. [The Metropolitan Museum of Art](https://www.metmuseum.org/essays/mauryan-empire-ca-323-185-b-c)
 
 [First-time setup](../README.md#try-beside)

@@ -11,10 +11,13 @@ async function readCaptions(url, signal) {
   if (!response.ok) throw new Error('Captions unavailable');
   const text = (await response.text()).replace(/\r/g, '');
   const seconds = stamp => stamp.trim().split(':').reduce((v, part) => v * 60 + Number(part), 0);
-  return text.trim().split(/\n\s*\n/).slice(1).map(block => {
-    const [timing, ...lines] = block.split('\n');
-    const [start, end] = timing.split(' --> ').map(seconds);
-    return {start, end, text: lines.join(' ')};
+  return text.trim().split(/\n\s*\n/).slice(1).flatMap(block => {
+    const lines = block.split('\n');
+    if (/^NOTE(?:\s|$)/.test(lines[0])) return [];
+    const timing = lines[0].includes('-->') ? 0 : 1;
+    const stamps = lines[timing]?.match(/^((?:\d{2,}:)?\d{2}:\d{2}\.\d{3})\s+-->\s+((?:\d{2,}:)?\d{2}:\d{2}\.\d{3})(?:\s|$)/);
+    if (!stamps) return [];
+    return [{start: seconds(stamps[1]), end: seconds(stamps[2]), text: lines.slice(timing + 1).join(' ')}];
   });
 }
 

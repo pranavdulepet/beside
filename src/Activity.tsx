@@ -1972,6 +1972,9 @@ export function ActivitySheet({
   );
   const activeBrain = capture?.brain;
   const isCloudBrain = activeBrain?.mode === 'cloud';
+  const canReplyToSelection =
+    /\b(messages|mail|gmail|outlook|slack)\b/i.test([gesture?.app, anchor?.title, anchor?.label].join(' ')) ||
+    /\b(can|could|will|would|did|do|are) you\b[^?]*\?/i.test(selection);
   const sheet = useRef<HTMLElement>(null);
   useEffect(() => {
     if (close) return;
@@ -2506,17 +2509,26 @@ export function ActivitySheet({
                     )}
                     {close
                       ? answerEvidence(t, true)
-                      : t.supportingLine && (
+                      : (t.supportingLine || !!t.sources?.length) && (
                           <details className="margin-footnote">
                             <summary role="button">
                               {t.sources?.[0]?.title && cleanTitle(t.sources[0].title).replace(/( · [^·]+)\1$/, '$1') ||
                                 t.files?.[0]?.name || 'Supporting passage'}
+                              {t.sources?.length > 1 && ` and ${t.sources.length - 1} more`}
                             </summary>
-                            <blockquote>{t.supportingLine}</blockquote>
-                            <button type="button" className="bar-link" onClick={() => {
-                              inspect(i);
-                              select('journal');
-                            }}>Open in Memory</button>
+                            {t.supportingLine && <blockquote>{t.supportingLine}</blockquote>}
+                            {t.sources?.length > 1 ? t.sources.map((source: Row) => (
+                              <button type="button" className="activity-source" key={source.id}
+                                onClick={() => {inspect(i); open(source.id); select('journal');}}>
+                                {cleanTitle(source.title, source.label)}
+                              </button>
+                            )) : (
+                              <button type="button" className="bar-link" onClick={() => {
+                                inspect(i);
+                                open(t.sources?.[0]?.id || '');
+                                select('journal');
+                              }}>Open in Memory</button>
+                            )}
                           </details>
                         )}
                     {!t.proposedQuery && t.answer && !t.savedMemories?.length && (
@@ -2613,7 +2625,7 @@ export function ActivitySheet({
                   phase={phase === 'idle' ? 'thinking' : phase}
                 />
               )}
-              {!busy && !turns.length && selection && !provider && (
+              {!busy && !turns.length && selection && canReplyToSelection && !provider && (
                 <button
                   onClick={() =>
                     void ask(

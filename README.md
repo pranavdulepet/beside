@@ -16,8 +16,8 @@ Beside is a floating assistant for your Mac. Point at the thing you’re working
 
 [![Beside fact-checks a sentence in a TextEdit essay.](website/media/writing.png)](https://pranavdulepet.github.io/beside/#writing)
 
-- [Writing](https://pranavdulepet.github.io/beside/#writing) · Check what Pataliputra’s wall was made of while revising an essay.
-- [Groceries](https://pranavdulepet.github.io/beside/#groceries) · Turn a meal plan into a Trader Joe’s list and paste it into Apple Notes.
-- [Flight](https://pranavdulepet.github.io/beside/#flight) · Decide whether a second checked bag is worth $120 on a flight to Athens.
+- [Writing](https://pranavdulepet.github.io/beside/#writing) · Find who described Pataliputra’s wall in a saved reading note, then revise the essay.
+- [Groceries](https://pranavdulepet.github.io/beside/#groceries) · Turn the week’s dinners into a shopping list, tell Beside what’s already at home, and take the list to the store.
+- [Flight](https://pranavdulepet.github.io/beside/#flight) · Check an Athens packing list against the fare, then use the suitcase’s actual weight to decide whether to pay for a second bag.
 
 [User guide and troubleshooting](docs/guide.md) · [Storage and sharing](docs/guide.md#where-your-data-lives) · [Security](SECURITY.md) · [Build from source](docs/development.md) · [Contribute](CONTRIBUTING.md) · [License](LICENSE) · [Third-party credits](licenses/)

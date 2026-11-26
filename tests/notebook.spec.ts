@@ -562,7 +562,7 @@ test.describe('website walkthroughs', () => {
       await expect(tab).toHaveAttribute('aria-selected', 'true');
       await expect(player.locator('track')).toHaveAttribute(
         'src',
-        `media/${file}.vtt`,
+        new RegExp(`^media/${file}\\.vtt(?:\\?|$)`),
       );
       await page
         .getByRole('button', {name: `Play ${title} walkthrough`})
@@ -655,12 +655,18 @@ test.describe('website walkthroughs', () => {
         const start = await image.evaluate((c: HTMLCanvasElement) =>
           c.toDataURL(),
         );
-        const paused = await seek.inputValue();
+        const end = Number(await seek.getAttribute('max'));
+        const captionsUrl = await page.locator('video track').evaluate((track: HTMLTrackElement) => track.src);
+        const captions = await (await page.request.get(captionsUrl)).text();
+        const lastCue = [...captions.matchAll(/--> (\d\d):(\d\d):([\d.]+)/g)].at(-1);
+        expect(lastCue).toBeDefined();
+        const [, hours, minutes, seconds] = lastCue!;
+        expect(Math.abs(end - (+hours * 3600 + +minutes * 60 + +seconds))).toBeLessThan(0.15);
         await seek.focus();
         await page.keyboard.press('End');
         await expect
           .poll(() => seek.inputValue().then(Number))
-          .toBeGreaterThan(Number(paused) + 10);
+          .toBeCloseTo(end, 1);
         expect(
           (await image.evaluate((c: HTMLCanvasElement) => c.toDataURL())) ===
             start,
@@ -686,7 +692,7 @@ test.describe('website walkthroughs', () => {
     test('the original animation opens as an ordinary image if scripted loading is blocked', async ({
       page,
     }) => {
-      await page.route('**/*.gif', route =>
+      await page.route(/\.gif(?:\?|$)/, route =>
         route.request().resourceType() === 'fetch'
           ? route.abort()
           : route.continue(),
@@ -695,7 +701,7 @@ test.describe('website walkthroughs', () => {
       await page.getByRole('button', {name: 'Play Flight walkthrough'}).tap();
       const animation = page.locator('img.direct-recording');
       await expect(animation).toBeVisible();
-      await expect(animation).toHaveAttribute('src', 'media/baggage.gif');
+      await expect(animation).toHaveAttribute('src', /^media\/baggage\.gif(?:\?|$)/);
       expect(
         await animation.evaluate((img: HTMLImageElement) => img.naturalWidth),
       ).toBe(1024);
@@ -2333,9 +2339,12 @@ test('a long floating reply keeps the next draft and its composer in view', asyn
   const answering = new Promise(resolve => {
     finish = resolve;
   });
-  await page.exposeFunction('sheetIPC', (op: string) => {
+  const packing = {id: 'packing-note', kind: 'note', title: 'Packing list', body: 'Bring the suitcase with wheels.'};
+  await page.exposeFunction('sheetIPC', (op: string, args: Row) => {
     if (op === 'activitySettings') return {enabled: false, localModel: 'local'};
     if (op === 'activityAsk') return answering;
+    if (op === 'activitySource' && args.id === packing.id) return packing;
+    if (op === 'activityJournal') return {events: [], habits: [], remembered: []};
     if (op === 'activityEpoch') return 1;
     return null;
   });
@@ -2347,7 +2356,7 @@ test('a long floating reply keeps the next draft and its composer in view', asyn
       transformCallback: () => 1,
       invoke: (command: string, request: any) =>
         command === 'notebook'
-          ? (window as any).sheetIPC(request.operation)
+          ? (window as any).sheetIPC(request.operation, request.args)
           : Promise.resolve(1),
     };
   });
@@ -2376,7 +2385,7 @@ test('a long floating reply keeps the next draft and its composer in view', asyn
   );
   finish({
     answer: ['## Preparation', ...steps].join('\n'),
-    sources: [],
+    sources: [{id: 'fare', title: 'Baggage allowance'}, {id: packing.id, title: packing.title}],
     epoch: 1,
   });
   await expect(page.locator('.reply ol li')).toHaveCount(30);
@@ -2394,13 +2403,18 @@ test('a long floating reply keeps the next draft and its composer in view', asyn
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBe(width);
   }
+  const sourceLink = page.getByRole('button', {name: packing.title, exact: true});
+  await expect(sourceLink).toBeHidden();
+  await page.getByRole('button', {name: 'Baggage allowance and 1 more'}).click();
+  await sourceLink.click();
+  await expect(page.getByText(packing.body, {exact: true}).first()).toBeVisible();
 });
 
 test('the floating sheet keeps selected text local and offers a visible recording lifecycle', async ({
   page,
 }) => {
   const calls: {op: string; args: any}[] = [];
-  let selection = 'Can you review the marked changes by Friday?';
+  let selection = 'A wall surrounded Pataliputra, Chandragupta Maurya’s capital.';
   let phase = 'idle',
     latest = '';
   await page.exposeFunction('sheetIPC', (op: string, args: any) => {
@@ -2462,6 +2476,10 @@ test('the floating sheet keeps selected text local and offers a visible recordin
     };
   });
   await page.goto('/#activity');
+  await expect(page.getByText('Selected text · on this Mac')).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Draft a reply ↗'})).toHaveCount(0);
+  selection = 'Can you review the marked changes by Friday?';
+  await page.reload();
   const memory = page.getByRole('button', {name: 'What Beside knows'});
   const back = page.getByRole('button', {name: 'Ask Beside'});
   await memory.click();

@@ -164,8 +164,8 @@
         </div>
         <figure id="demo-panel" role="tabpanel" aria-labelledby="writing">
           <div class="player">
-            <video controls playsinline muted preload="none" poster="media/writing.png" aria-describedby="caption" aria-label="Writing walkthrough">
-              <track kind="captions" srclang="en" label="English" src="media/writing.vtt" />
+            <video controls playsinline muted preload="none" poster="media/writing.png?cut=4" aria-describedby="caption" aria-label="Writing walkthrough">
+              <track kind="captions" srclang="en" label="English" src="media/writing.vtt?cut=4" />
             </video>
             <div class="film" hidden>
               <div class="film-screen">
@@ -186,13 +186,13 @@
             </div>
             <img class="direct-recording" alt="Writing walkthrough" hidden />
             <button type="button" class="cover" aria-label="Play Writing walkthrough" hidden>
-              <img src="media/writing.png" width="1440" height="720" alt="" />
+              <img src="media/writing.png?cut=4" width="1440" height="720" alt="" />
               <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 3.6a1 1 0 0 1 1.5-.86l14 8.4a1 1 0 0 1 0 1.72l-14 8.4A1 1 0 0 1 6 20.4z"/></svg>
             </button>
           </div>
-          <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="media/writing.gif">Open the animation</a></p>
-          <figcaption id="caption">Check a detail about Chandragupta Maurya’s capital, then revise the essay in TextEdit.</figcaption>
-          <noscript><p><a href="media/writing.gif">Watch Writing</a> <a href="media/groceries.gif">Watch Groceries</a> <a href="media/baggage.gif">Watch Flight</a></p></noscript>
+          <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="media/writing.gif?cut=4">Open the animation</a></p>
+          <figcaption id="caption">Trace a claim in a TextEdit essay to a reading note and name the witness.</figcaption>
+          <noscript><p><a href="media/writing.gif?cut=4">Watch Writing</a> <a href="media/groceries.gif?cut=4">Watch Groceries</a> <a href="media/baggage.gif?cut=4">Watch Flight</a></p></noscript>
         </figure>
       </section>
     </main>
@@ -209,8 +209,8 @@
       const caption = panel.querySelector('figcaption');
       const demos = {
         writing: ['writing', caption.textContent],
-        groceries: ['groceries', 'Turn a week of meals into a Trader Joe’s shopping list and paste it into Apple Notes.'],
-        flight: ['baggage', 'Compare an Athens packing list with the second-bag fee at United checkout.'],
+        groceries: ['groceries', 'Turn a meal plan into a Trader Joe’s list, update it, and check off the tofu.'],
+        flight: ['baggage', 'Compare a packing list and a scale reading with United’s second-bag fee.'],
       };
       const film = panel.querySelector('.film');
       const direct = panel.querySelector('.direct-recording');
@@ -218,16 +218,17 @@
       function preparePlayer(tab, file) {
         closePlayer?.();
         const base = 'media/' + file;
-        const animationUrl = base + '.gif';
+        const media = extension => base + '.' + extension + '?cut=4';
+        const animationUrl = media('gif');
         const label = tab.textContent + ' walkthrough';
         const controller = new AbortController();
         const {signal} = controller;
         let mode = 'poster', timeout;
         video.hidden = false;
         video.controls = false;
-        video.poster = base + '.png';
+        video.poster = media('png');
         video.setAttribute('aria-label', label);
-        video.querySelector('track').src = base + '.vtt';
+        video.querySelector('track').src = media('vtt');
         direct.alt = label;
         cover.querySelector('img').src = video.poster;
         cover.setAttribute('aria-label', 'Play ' + label);
@@ -253,12 +254,12 @@
           cover.setAttribute('aria-busy', 'true');
           try {
             const [module, response] = await Promise.all([
-              import('./film.js'), fetch(animationUrl, {signal}),
+              import('./film.js?cut=4'), fetch(animationUrl, {signal}),
             ]);
             if (!response.ok) throw new Error('Recording unavailable');
             const bytes = await response.arrayBuffer();
             if (signal.aborted) return;
-            module.playFilm(film, bytes, {label, captionsUrl: base + '.vtt', startAt, signal});
+            module.playFilm(film, bytes, {label, captionsUrl: media('vtt'), startAt, signal});
             video.hidden = true;
             reveal();
           } catch {
@@ -289,7 +290,7 @@
             return;
           }
           mode = 'video';
-          video.src = base + '.mp4?play=2';
+          video.src = media('mp4');
           video.controls = true;
           watchForStall();
           video.play().catch(() => { if (mode === 'video') playImages(); });

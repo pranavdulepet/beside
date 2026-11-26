@@ -88,6 +88,8 @@ To sign the floating sheet, open **What Beside knows → Memory → Your ink mar
 
 Open **Chats** to return to a conversation. Beside stores the turns and their supporting excerpts in your notebook’s encrypted database. A portable export includes them in `records/floatingChat.json`, which is readable by anyone with the exported archive. If Chats offers **Import earlier chats**, you can move the previous local browser history into the current notebook. The earlier copy is removed after a successful import.
 
+Click the source name beneath an answer to check its evidence. When an answer used several sources, you can open each one. A new measurement or an item you already own updates the current answer and leaves the original note intact.
+
 Choose **Correct this reply** beneath an answer and write the preference you want Beside to use. The saved sentence is a private notebook memory. Deleting a chat removes the conversation. A correction you chose to keep can be retired separately in Memory. Forgetting an observation removes chats that cite it. Forgetting all screen history also clears the floating conversations.
 
 When your Mac is idle, Beside can test a proposed memory against what you actually said later. It compares predictions with and without the change before adopting it. Dated follow-ups in floating chats take part in on-device tests only.
