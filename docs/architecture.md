@@ -4,24 +4,21 @@ When you ask “Do I need a second bag?”, Beside needs three things from diffe
 
 ```mermaid
 flowchart TD
-    work["Mac apps, pointer, selection and voice"] --> native["Native macOS capture"]
-    native -->|permitted observations| db["Local encrypted notebook and search indexes"]
-    files["Imported Notes and Mail"] --> db
-    native -->|context at the shortcut| ask["Rust request handler"]
-    ui["Floating sheet or notebook"] -->|question or correction| ask
-    db -->|matching passages and current task| ask
-    folders["Approved folders"] -->|scoped file search| ask
-    ask -->|facts, arithmetic or a revision| rules["Local task logic"]
-    ask -->|language or interpretation| model["Local model runtime"]
-    ask -->|public lookup or configured sharing| network["Exa or a connected model"]
-    rules --> result["Answer and supporting sources"]
+    shortcut["Tap or hold the shortcut"] --> target["Current window, selection and question"]
+    sources["Permitted screen passages, Notes and Mail"] --> index["Encrypted local notebook and indexes"]
+    index --> ask["Rust retrieves evidence and chooses a task"]
+    target --> ask
+    folders["Approved folders"] --> ask
+    index -.-> dot["Optional proactive suggestion"]
+    dot -.->|when opened| ask
+    ask --> rules["Local task logic and arithmetic"]
+    ask --> model["Local inference with Inkling or another model"]
+    ask --> network["Public web search or a connected cloud model"]
+    rules --> result["Answer with sources in the floating sheet"]
     model --> result
     network --> result
-    result --> ui
-    result -->|saved turn| db
-    db -->|later evidence| learning["Memory evaluation and skill upkeep"]
-    learning -->|accepted updates| db
-    learning --> pages["Readable notebook pages and skills"]
+    result --> save["Save this turn and its evidence in the notebook"]
+    save -->|over time| learning["Evaluate memory changes and maintain reusable skills"]
 ```
 
 ## From the shortcut to the answer
