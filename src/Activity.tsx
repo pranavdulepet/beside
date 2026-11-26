@@ -170,7 +170,7 @@ function Evidence({
             <div className="evidence-meta">
               <strong className="evidence-title">{heading}</strong>
               <small>
-                {row.label} · {when(row.stamp)}
+                {row.label}{row.stamp ? ` · ${when(row.stamp)}` : ''}
               </small>
             </div>
             {onClose && (
@@ -312,7 +312,7 @@ function Evidence({
               <div className="lightbox-inner" onClick={e => e.stopPropagation()}>
                 <div className="lightbox-bar">
                   <span>
-                    {heading} · {when(row.stamp)}
+                    {heading}{row.stamp ? ` · ${when(row.stamp)}` : ''}
                   </span>
                   <button
                     type="button"
@@ -1242,6 +1242,8 @@ function loadChats(): SavedChat[] {
 }
 function compactTurnsForStorage(turns: Row[]): Row[] {
   return turns.map(t => ({
+    id: t.id,
+    at: t.at,
     question: t.question,
     answer: t.answer,
     sources: t.sources || [],
@@ -1257,6 +1259,7 @@ function compactTurnsForStorage(turns: Row[]): Row[] {
     quoteTitle: t.quoteTitle,
     supportingLine: t.supportingLine,
     baggageAwaitingWeight: t.baggageAwaitingWeight,
+    workKind: t.workKind,
     pointApp: t.pointApp,
     pointLine: t.pointLine,
     epoch: t.epoch,
@@ -1713,6 +1716,7 @@ export function ActivitySheet({
     if (!q || (busy && !fresh)) return;
     const n = ++sequence.current;
     const turn = crypto.randomUUID();
+    const at = new Date().toISOString();
     setPreview(null);
     setPhase(publicQuery ? 'web' : target ? 'capturing' : 'thinking');
     let off: (() => void) | undefined;
@@ -1731,7 +1735,7 @@ export function ActivitySheet({
           approved: true,
         });
         if (n === sequence.current) {
-          set(t => [...t, {...r, question: q}]);
+          set(t => [...t, {...r, id: turn, at, question: q}]);
           route('');
         }
         return;
@@ -1765,6 +1769,7 @@ export function ActivitySheet({
         },
       ).catch(() => () => {});
       const prior = fresh ? undefined : turns.at(-1);
+      if (prior?.workKind) await writes.current;
       const r = await call('activityAsk', {
         selection: target || fresh ? undefined : selection || undefined,
         gesture: target?.id,
@@ -1777,6 +1782,9 @@ export function ActivitySheet({
         previewId: passage?.id,
         previewEpoch: passage?.epoch,
         turn,
+        chatId,
+        previousTurn: prior?.id,
+        previousWorkKind: prior?.workKind,
         sources: prior?.sources.map((e: Row) => e.id) || [],
         files: prior?.files?.map((f: Row) => f.path) || [],
         previous: prior?.question,
@@ -1797,7 +1805,7 @@ export function ActivitySheet({
             : publicQuery
               ? t.filter(row => !(row.question === q && row.proposedQuery))
               : t),
-          {...r, question: q, gesture: target},
+          {...r, id: turn, at, question: q, gesture: target},
         ]);
       }
     } catch (e) {
@@ -1923,7 +1931,7 @@ export function ActivitySheet({
               onClick={() => open(source === v.id ? '' : v.id)}
             >
               <i aria-hidden="true" />[{n + 1}]{' '}
-              {close ? v.label : v.title || v.label} · {when(v.stamp)}
+              {close ? v.label : v.title || v.label}{v.stamp ? ` · ${when(v.stamp)}` : ''}
             </button>
           ))}
         </div>

@@ -55,6 +55,12 @@ fn binary() -> Res<PathBuf> {
         Err("The bundled runtime is missing. Reinstall Beside.".into())
     }
 }
+pub(crate) fn is_inkling(config: &Value) -> bool {
+    config["runtime"] == "Sumi"
+        && config["name"]
+            .as_str()
+            .is_some_and(|name| name.to_lowercase().contains("inkling"))
+}
 pub fn use_file(s: &Store, path: &Path) -> Res<Value> {
     let mut magic = [0; 4];
     std::fs::File::open(path)
@@ -65,7 +71,22 @@ pub fn use_file(s: &Store, path: &Path) -> Res<Value> {
         return Err("Choose a GGUF model file.".into());
     }
     let config = json!({"runtime":"Sumi","name":path.file_stem().and_then(|n|n.to_str()).unwrap_or("Local model"),"path":path,"private":s.root.join(".sumi")});
-    crate::models::infer(&config, "Reply with one word.", "Ready?", 32)?;
+    if is_inkling(&config) {
+        let ready = inkling_text(
+            &config,
+            "Reply OK.",
+            &json!("Ready?"),
+            4,
+            true,
+            Some(r#"root ::= "OK""#),
+            &mut |_| {},
+        )?;
+        if ready.trim() != "OK" {
+            return Err("The local model did not finish its readiness check.".into());
+        }
+    } else {
+        crate::models::infer(&config, "Reply with one word.", "Ready?", 32)?;
+    }
     s.set("model", &config)?;
     Ok(config)
 }
@@ -132,7 +153,15 @@ pub fn inkling_text_draft(
     const MEAL: &str = r#"root ::= intro? "[what I ate]" ending?
 intro ::= ("I had" | "i had" | "had" | "Had" | "I ate" | "i ate" | "just" | "Just") " "
 ending ::= "." | ((" " | ", " | ". ") ("u?" | "you?" | "hbu?" | "wbu?" | "what about you?" | "what about u?" | "how about you?"))"#;
-    inkling_text(cfg, instruction, input, 72, true, meal_blank.then_some(MEAL), sink)
+    inkling_text(
+        cfg,
+        instruction,
+        input,
+        72,
+        true,
+        meal_blank.then_some(MEAL),
+        sink,
+    )
 }
 pub fn inkling_text(
     cfg: &Value,

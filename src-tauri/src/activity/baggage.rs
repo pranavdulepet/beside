@@ -19,7 +19,7 @@ static WEIGHED: LazyLock<Regex> = LazyLock::new(|| {
 });
 static REPLY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-    r"(?i)^\s*(?:(?:it weighs|it is|it's|it’s|i weighed it[,:]?)\s+)?([0-9]{1,2}(?:\.[0-9])?)\s*(?:kg|kilograms?)[.!]?\s*$").unwrap()
+    r"(?ix)^\s*(?:actually[, ]+)?(?:i\s+(?:just\s+)?(?:re)?weighed\s+(?:it|(?:my|the)\s+(?:bag|suitcase))[.,: —-]*\s*)?(?:(?:it|my\s+(?:packed\s+)?(?:bag|suitcase))(?:\s+weighs|\s+is|['’]s)\s+)?([0-9]{1,2}(?:\.[0-9])?)\s*(?:kg|kilograms?)[.!]?\s*$").unwrap()
 });
 
 fn grams(text: &str) -> Option<i32> {
@@ -352,17 +352,27 @@ pub(crate) fn pin(s: &Store, point: &Value, generation: &Value) -> Res<Option<St
 }
 pub(super) fn answer(s: &Store, a: &Value, q: &str, epoch: &Value) -> Res<Option<Value>> {
     let weight_reply = REPLY.captures(q).and_then(|c| grams(&c[1]));
-    let follow = a["baggageAwaitingWeight"] == true
-        && weight_reply.is_some()
-        && a["previous"].as_str().is_some_and(|p| ASK.is_match(p))
-        && a["epoch"] == *epoch;
+    let task = if weight_reply.is_some() {
+        crate::floating_chats::last_task(s, a, epoch, "baggage")?
+    } else {
+        None
+    };
+    let follow = task.is_some()
+        || (a["baggageAwaitingWeight"] == true
+            && weight_reply.is_some()
+            && a["previous"].as_str().is_some_and(|p| ASK.is_match(p))
+            && a["epoch"] == *epoch);
     if !ASK.is_match(q) && !follow {
         return Ok(None);
     }
     let _guard = s.activity_edit.lock().unwrap();
+    if s.get("activityEpoch")? != *epoch {
+        return Err("Your sources changed. Ask again.".into());
+    }
     let cfg = config(s)?;
     let pointed = a["gesture"]
         .as_str()
+        .filter(|_| !follow)
         .map(|id| crate::point::target(s, id))
         .transpose()?;
     let db = s.db.lock().unwrap();
@@ -370,16 +380,25 @@ pub(super) fn answer(s: &Store, a: &Value, q: &str, epoch: &Value) -> Res<Option
     if cfg["enabled"] != true {
         return Ok(Some(fallback()));
     }
-    let prior = a["sources"]
-        .as_array()
-        .and_then(|v| v.first())
-        .and_then(Value::as_str);
-    let key = pointed
+    let prior = task
         .as_ref()
-        .map(|p| p["bookingId"].as_str().unwrap_or(""))
-        .or(a["anchor"].as_str())
-        .or(if follow { prior } else { None })
-        .unwrap_or("");
+        .and_then(|t| t["sources"].get(0))
+        .and_then(|row| row["id"].as_str())
+        .or_else(|| {
+            a["sources"]
+                .as_array()
+                .and_then(|v| v.first())
+                .and_then(Value::as_str)
+        });
+    let key = if follow {
+        prior
+    } else {
+        pointed
+            .as_ref()
+            .map(|p| p["bookingId"].as_str().unwrap_or(""))
+            .or(a["anchor"].as_str())
+    }
+    .unwrap_or("");
     let row=db.query_row("SELECT a.id,a.source,a.title,a.body,a.stamp,p.note FROM prepared_baggage p JOIN activity a ON a.id=p.booking WHERE p.booking=? AND a.stamp>=? AND NOT EXISTS(SELECT 1 FROM activity b WHERE b.source=a.source AND b.title=a.title AND b.rowid>a.rowid)",params![key,Utc::now().timestamp()-1800],|r|Ok((event(r)?,r.get::<_,Option<String>>(5)?))).optional().msg()?;
     let Some((b, note)) = row else {
         return Ok(Some(fallback()));
@@ -433,8 +452,8 @@ pub(super) fn answer(s: &Store, a: &Value, q: &str, epoch: &Value) -> Res<Option
             });
         let (answer,awaiting)=match high {
             Some(w) if compares_checked && (measured.is_some() || w+500<=fees.limit) && w<=fees.limit=>{
-                let weight=if measured.is_some(){format!("Your packed bag weighs {} kg",kg(w))}else{format!("I’d budget about {} kg for your suitcase and everything listed",kg(w))};
-                (format!("One checked bag should do it. {weight}, under the {} kg limit. Budget {} for the first bag and skip the {} second bag.",kg(fees.limit),fees.first,fees.second),false)
+                let weight=if measured.is_some(){format!("At {} kg, your bag has {} kg to spare against the {} kg limit",kg(w),kg(fees.limit-w),kg(fees.limit))}else{format!("I’d budget about {} kg for your suitcase and everything listed, under the {} kg limit",kg(w),kg(fees.limit))};
+                (format!("One checked bag should do it. {weight}. Budget {} for the first bag and skip the {} second bag.",fees.first,fees.second),false)
             }
             Some(w) if measured.is_some() && compares_checked=>{
                 (format!("Your bag is {} kg over the {} kg limit. Move that weight into another permitted bag or pack lighter. The second checked bag is {}.",kg(w-fees.limit),kg(fees.limit),fees.second),false)
@@ -443,7 +462,7 @@ pub(super) fn answer(s: &Store, a: &Value, q: &str, epoch: &Value) -> Res<Option
             _=>(format!("The first checked bag costs {}. To see whether you can skip it, open the cabin allowance for your fare.",fees.first),false),
         };
         return Ok(Some(
-            json!({"answer":answer,"sources":sources,"supportingLine":fees.line.replace('\t'," · "),"baggageAwaitingWeight":awaiting,"epoch":epoch}),
+            json!({"answer":answer,"sources":sources,"supportingLine":fees.line.replace('\t'," · "),"baggageAwaitingWeight":awaiting,"workKind":"baggage","epoch":epoch}),
         ));
     }
     let Some((limit, line)) = allowance(b["body"].as_str().unwrap_or("")) else {
@@ -486,7 +505,7 @@ pub(super) fn answer(s: &Store, a: &Value, q: &str, epoch: &Value) -> Res<Option
         _=>format!("Your fare allows {} kg. What does your packed carry-on weigh?",kg(limit)),
     };
     Ok(Some(
-        json!({"answer":answer,"sources":sources,"supportingLine":line,"baggageAwaitingWeight":awaiting_weight,"epoch":epoch}),
+        json!({"answer":answer,"sources":sources,"supportingLine":line,"baggageAwaitingWeight":awaiting_weight,"workKind":"baggage","epoch":epoch}),
     ))
 }
 
@@ -620,6 +639,37 @@ mod tests {
             .unwrap()
             .contains("skip the $110 second bag"));
         assert_eq!(result["sources"][1]["title"], "Notes · Rome packing list");
+        let epoch = store.get("activityEpoch").unwrap();
+        let mut previous = result;
+        previous["id"] = json!("first");
+        store
+            .put(
+                "floatingChat",
+                &json!({"id":"trip","epoch":epoch,"turns":[previous]}),
+            )
+            .unwrap();
+        let follow = json!({"chatId":"trip","previousTurn":"first","epoch":epoch,"anchor":"a different window"});
+        let ask_weight = |text: &str, args: &Value| answer(&store, args, text, &epoch).unwrap();
+        let weighed = ask_weight("I just weighed my suitcase. It’s 21.5 kg.", &follow).unwrap();
+        assert!(weighed["answer"]
+            .as_str()
+            .unwrap()
+            .contains("1.5 kg to spare"));
+        assert!(ask_weight("24.5 kg", &follow).unwrap()["answer"]
+            .as_str()
+            .unwrap()
+            .contains("1.5 kg over"));
+        assert!(ask_weight("My laptop weighs 2 kg.", &follow).is_none());
+        assert!(ask_weight(
+            "21 kg",
+            &json!({"chatId":"other","previousTurn":"first","epoch":epoch})
+        )
+        .is_none());
+        assert!(ask_weight(
+            "21 kg",
+            &json!({"chatId":"trip","previousTurn":"other","epoch":epoch})
+        )
+        .is_none());
     }
 
     #[test]

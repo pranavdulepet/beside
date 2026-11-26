@@ -472,11 +472,18 @@ fn dream_shareable(n: &Value) -> bool {
 
 fn holdout(s: &Store, after: &str, hosted: bool) -> Res<Vec<Value>> {
     let conn = s.db.lock().unwrap();
-    let sql = format!("SELECT json_extract(old.value,'$.reply'), json_extract(t.value,'$.question'), json_extract(t.value,'$.id')
+    let sql = format!("SELECT CASE c.kind WHEN 'chat' THEN json_extract(old.value,'$.reply') ELSE json_extract(old.value,'$.answer') END AS situation,
+        json_extract(t.value,'$.question') AS actual, json_extract(t.value,'$.id') AS turn_id
         FROM docs c JOIN json_each(c.v,'$.turns') t JOIN json_each(c.v,'$.turns') old ON old.key=t.key-1
-        WHERE c.kind='chat' AND julianday(json_extract(old.value,'$.at'))>julianday(?1)
+        WHERE ((c.kind='chat' AND (?2=0 OR ({HOSTED_SHEET})))
+          OR (c.kind='floatingChat' AND ?2=0 AND json_extract(c.v,'$.epoch') IS
+            (SELECT json_extract(v,'$') FROM kv WHERE k='activityEpoch')))
+        AND length(trim(situation))>0 AND length(trim(actual))>0 AND length(turn_id)>0
+        AND julianday(json_extract(old.value,'$.at'))>julianday(?1)
+        AND julianday(json_extract(t.value,'$.at'))>=julianday(json_extract(old.value,'$.at'))
         AND julianday(json_extract(t.value,'$.at'))>julianday('now','-60 days')
-        AND (?2=0 OR ({HOSTED_SHEET})) ORDER BY julianday(json_extract(t.value,'$.at')) DESC LIMIT 12");
+        AND julianday(json_extract(t.value,'$.at'))<=julianday('now','+1 minute')
+        ORDER BY julianday(json_extract(t.value,'$.at')) DESC,c.id,t.key DESC LIMIT 12");
     let mut stmt = conn.prepare(&sql).msg()?;
     let mut cases = Vec::new();
     let rows = stmt.query_map(rusqlite::params![after,hosted], |r| Ok(json!({"situation":r.get::<_,String>(0)?,"actual":r.get::<_,String>(1)?,"id":r.get::<_,String>(2)?}))).msg()?;
@@ -558,6 +565,7 @@ pub fn dream_proposal(s: &Store, primary: &Value) -> Res<()> {
             return Ok(());
         };
         if s.get("autoStamp")? == true
+            && holdout(s, after, hosted)? == cases
             && crate::scroll::approved(s)? == current
             && s.optional_doc("proposal", proposal["id"].as_str().unwrap_or(""))?
                 .as_ref()
@@ -645,6 +653,7 @@ pub fn dream_transcript(s: &Store, primary: &Value, quiet: impl Fn() -> bool + C
             return Ok(());
         };
         if core_notes(s, hosted)? != baseline
+            || holdout(s, &at, hosted)? != cases
             || s.get(&format!("forgotNote/{}", hash(quote)))? == true
         {
             return Ok(());
@@ -753,6 +762,7 @@ pub fn dream_core(s: &Store, primary: &Value, idle: impl Fn() -> bool) -> Res<()
         return Ok(());
     };
     if ids(&core_notes(s, false)?) != ids(&baseline)
+        || holdout(s, cutoff, crate::plan::selected(&model))? != cases
         || ids(&core_candidates(&timeline(s)?)) != ids(&candidate)
     {
         return Ok(());
@@ -768,6 +778,34 @@ pub fn dream_core(s: &Store, primary: &Value, idle: impl Fn() -> bool) -> Res<()
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    #[test]
+    fn dated_floating_followups_only_enter_local_replay() {
+        let folder = tempfile::tempdir().unwrap();
+        let s = Store::with_key(folder.path().into(), &[7; 32]).unwrap();
+        let stamp = now();
+        let record = |id, epoch: Value, at: Value| {
+            s.put(
+                "floatingChat",
+                &json!({"id":id,"epoch":epoch,"turns":[
+                {"id":"first","answer":"Two dinners for two.","at":at},
+                {"id":id,"question":"Make it three people.","at":stamp}]}),
+            )
+            .unwrap();
+        };
+        record("current", Value::Null, json!(stamp));
+        record("legacy", Value::Null, Value::Null);
+        record("forgotten", json!("old-epoch"), json!(stamp));
+        let cases = holdout(&s, "2000-01-01", false).unwrap();
+        assert_eq!(
+            cases,
+            [
+                json!({"id":"current","situation":"Two dinners for two.","actual":"Make it three people."})
+            ]
+        );
+        assert!(holdout(&s, "2000-01-01", true).unwrap().is_empty());
+        assert!(holdout(&s, &stamp, false).unwrap().is_empty());
+    }
+
     #[test]
     fn hosted_dreams_reuse_only_public_sheet_turns_and_unrestricted_notes() {
         let folder = tempfile::tempdir().unwrap();
@@ -849,7 +887,10 @@ mod integration {
     fn compares_candidate_with_baseline_before_installing_core() {
         let folder = tempfile::tempdir().unwrap();
         let s = Store::with_key(folder.path().into(), &[18; 32]).unwrap();
-        let model = json!({"name":"llama3.2:3b","runtime":"Ollama"});
+        let model = match std::env::var_os("BESIDE_TEST_GGUF") {
+            Some(file) => crate::bundled::use_file(&s, std::path::Path::new(&file)).unwrap(),
+            None => json!({"name":"llama3.2:3b","runtime":"Ollama"}),
+        };
         let start = Local::now() - chrono::Duration::days(6);
         for day in 0..3 {
             for n in observe(
@@ -874,10 +915,16 @@ mod integration {
         .enumerate()
         {
             let at = (start + chrono::Duration::days(4)).to_rfc3339();
-            s.put("chat",&json!({"id":id(),"turns":[{"id":id(),"at":at,"reply":prompt},{"id":format!("held-{i}"),"at":at,"question":"I would make woodblock prints."}]})).unwrap();
+            let (kind, reply) = if i == 0 {
+                ("chat", "reply")
+            } else {
+                ("floatingChat", "answer")
+            };
+            s.put(kind,&json!({"id":id(),"turns":[{"id":id(),"at":at,(reply):prompt},{"id":format!("held-{i}"),"at":at,"question":"I would make woodblock prints."}]})).unwrap();
         }
         dream_core(&s, &model, || true).unwrap();
         let trial = s.get("lastDreamTrial").unwrap();
+        eprintln!("Local replay result: {trial}");
         assert_eq!(trial["cases"], 2);
         assert_eq!(
             !core_notes(&s, false).unwrap().is_empty(),

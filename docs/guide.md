@@ -57,11 +57,19 @@ grep -rin 'ferry' desk scroll
 These commands search the readable files. Beside also searches its encrypted screen history and imported passages, which a Markdown search cannot see. Use Memory to correct or retire a dated fact. Beside regenerates its Markdown summary from those records.
 
 
+### Check a claim while writing
+
+Select a sentence in TextEdit, point at the selection and tap **⌥⇧Space**. Ask “Does this claim agree with my reading notes?” Beside looks for an independent passage and shows the evidence for a match. Ask “Give me the exact sentence from that note” to reread its saved wording. Choose **Copy** to take it back to your draft.
+
 ### From a meal plan to a shopping note
 
-With the meal plan open in Apple Notes, tap **⌥⇧Space** and ask what to buy. If the plan lists ingredients by dish and says what you already have, local Inkling can suggest quantities for the remaining ingredients. Choose **Copy**, then press **⌘V** in your shopping note. Quantities are suggestions and do not depend on live store inventory.
+With the meal plan open in Apple Notes, tap **⌥⇧Space** and ask what to buy. If the plan lists ingredients by dish and says what you already have, local Inkling can suggest quantities for the remaining ingredients. Tell it “Actually, I already have limes” to cross an item off the current list. The other quantities carry over. Choose **Copy**, then press **⌘V** in your shopping note.
+
+You can also ask “Make a shopping list from my meal plan” in another app. Beside looks for a saved, itemized plan. If two fit, it asks which one you mean.
 
 ### While booking a flight
+
+After an estimate, you can say “I just weighed my suitcase. It’s 21.5 kg.” Beside checks the same booking again, uses the measurement and tells you how much room you have or how much to remove.
 
 Beside prepares pointers to the observed booking and a packing list whose title matches the trip. These pointers live in the encrypted notebook. When you ask about an extra bag, Beside checks the original sources and compares kilograms locally. A measured packed weight takes priority. For itemized lists, Beside counts familiar items and the container using local weight ranges. If the list leaves a material uncertainty or the range falls near the limit, it asks for the packed weight. A fare table must show the same cabin limit across its visible fare columns. On a checkout that lists separate checked-bag fees, Beside reads the destination, the price of each bag and the weight per bag from the same itinerary row. A changed fare can require a new allowance. The originals stay where you put them.
 
@@ -81,6 +89,8 @@ To sign the floating sheet, open **What Beside knows → Memory → Your ink mar
 Open **Chats** to return to a conversation. Beside stores the turns and their supporting excerpts in your notebook’s encrypted database. A portable export includes them in `records/floatingChat.json`, which is readable by anyone with the exported archive. If Chats offers **Import earlier chats**, you can move the previous local browser history into the current notebook. The earlier copy is removed after a successful import.
 
 Choose **Correct this reply** beneath an answer and write the preference you want Beside to use. The saved sentence is a private notebook memory. Deleting a chat removes the conversation. A correction you chose to keep can be retired separately in Memory. Forgetting an observation removes chats that cite it. Forgetting all screen history also clears the floating conversations.
+
+When your Mac is idle, Beside can test a proposed memory against what you actually said later. It compares predictions with and without the change before adopting it. Dated follow-ups in floating chats take part in on-device tests only.
 
 ## Work in the notebook
 

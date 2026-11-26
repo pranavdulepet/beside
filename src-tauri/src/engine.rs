@@ -62,30 +62,39 @@ pub fn predict_ranked(
     prompt: &str,
 ) -> Res<String> {
     let entries = rules.iter().map(|v| &v["text"]).collect::<Vec<_>>();
-    plan::think(
-        s,
-        model,
-        "prediction",
-        prompt,
-        &json!({"situation":q,"rules":entries}),
-        72,
-        None,
-    )
+    let input = json!({"situation":q,"rules":entries});
+    if crate::bundled::is_inkling(model) {
+        return crate::bundled::inkling_text(model, prompt, &input, 72, false, None, &mut |_| {});
+    }
+    plan::think(s, model, "prediction", prompt, &input, 72, None)
 }
 pub fn grade(s: &Store, m: &Value, q: &str, guess: &str, actual: &str) -> Res<u32> {
     if guess.trim().eq_ignore_ascii_case(actual.trim()) {
         return Ok(3);
     }
+    let input = json!({"situation":q,"prediction":guess,"observed":actual});
+    if crate::bundled::is_inkling(m) {
+        // The same rubric is used on both sides of a replay. Only its score
+        // enters the comparison, so the grader can stop after one digit.
+        let instruction = format!("{GRADE}\nApply that rubric. Output only the grade digit.");
+        let digit = crate::bundled::inkling_text(
+            m,
+            &instruction,
+            &input,
+            3,
+            true,
+            Some("root ::= [0-3]"),
+            &mut |_| {},
+        )?;
+        return digit
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|n| *n <= 3)
+            .ok_or_else(|| "The local model did not return a grade.".into());
+    }
     let schema = json!({"type":"object","properties":{"reason":{"type":"string"},"grade":{"type":"integer","enum":[0,1,2,3]}},"required":["reason","grade"],"additionalProperties":false});
-    let r = plan::think(
-        s,
-        m,
-        "grading",
-        GRADE,
-        &json!({"situation":q,"prediction":guess,"observed":actual}),
-        120,
-        Some(&schema),
-    )?;
+    let r = plan::think(s, m, "grading", GRADE, &input, 120, Some(&schema))?;
     parsed(&r)?["grade"]
         .as_u64()
         .filter(|n| *n <= 3)

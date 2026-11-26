@@ -5,6 +5,30 @@ use serde_json::{json, Value};
 
 const KIND: &str = "floatingChat";
 
+/// Read the most recent version of a task from the same local conversation.
+/// An old window, a cleared notebook, or a different thread cannot supply it.
+pub fn last_task(s: &Store, a: &Value, epoch: &Value, kind: &str) -> Res<Option<Value>> {
+    let (Some(chat), Some(turn)) = (a["chatId"].as_str(), a["previousTurn"].as_str()) else {
+        return Ok(None);
+    };
+    if &a["epoch"] != epoch {
+        return Ok(None);
+    }
+    let Some(record) = s.optional_doc(KIND, chat)? else {
+        return Ok(None);
+    };
+    Ok(record["turns"]
+        .as_array()
+        .and_then(|turns| turns.last())
+        .filter(|t| {
+            &record["epoch"] == epoch
+                && &t["epoch"] == epoch
+                && t["id"] == turn
+                && t["workKind"] == kind
+        })
+        .cloned())
+}
+
 pub fn list(s: &Store) -> Res<Value> {
     let mut rows = s.list(KIND)?;
     rows.sort_by_key(|row| std::cmp::Reverse(row["updatedAt"].as_i64().unwrap_or_default()));

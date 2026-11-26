@@ -1379,6 +1379,29 @@ pub fn ask_with_phases(
     }
     let epoch = s.get("activityEpoch")?;
     if let Some(answer) = baggage::answer(s, a, question, &epoch)? { return Ok(answer); }
+    if let Some(answer) = connections::quoted_followup(s, a, question, &epoch)? { return Ok(answer); }
+    if a["previousWorkKind"] == "meal-choice" {
+        if let Some(task) = crate::floating_chats::last_task(s, a, &epoch, "meal-choice")? {
+            if let Some(chosen) = shopping::choose_plan(&task["sources"], question) {
+                let mut context = a.clone();
+                context["history"] = json!([]);
+                context["gesture"] = Value::Null;
+                context["selectedPlan"] = chosen["id"].clone();
+                return guide_answer(s, &context, task["question"].as_str().unwrap_or(""), &epoch, sink, phase);
+            }
+        }
+    }
+    if let Some(remove) = shopping::revision(question) {
+        let _edit = s.activity_edit.lock().unwrap();
+        if s.get("activityEpoch")? == epoch {
+            if let Some(task) = crate::floating_chats::last_task(s, a, &epoch, "shopping")? {
+                if let Some(answer) = task["answer"].as_str()
+                    .and_then(|list| shopping::revised_list(list, &remove)) {
+                    return Ok(json!({"answer":answer,"sources":task["sources"].as_array().cloned().unwrap_or_default(),"epoch":epoch,"workKind":"shopping"}));
+                }
+            }
+        }
+    }
     let turn_id = a["turn"].as_str().unwrap_or("turn");
     if let Some(id) = a["relatedSource"].as_str() {
         let cfg = config(s)?;
@@ -1529,7 +1552,7 @@ pub fn ask_with_phases(
             return guide_answer(s, a, &format!("{previous} in {question}"), &epoch, sink, phase);
         }
     }
-    if force_web
+    if force_web || shopping::asks_for_plan(question)
         || (a["gesture"].is_string() && !crate::web_search::current_screen_question(question))
         || a["publicQuery"].is_string()
         || (a["allowGeneral"] == true
@@ -2632,18 +2655,42 @@ fn guide_answer(
     }
     // When the user asks to transform a visible note, the whole visible
     // editor is the source. Do not mix in similarly worded open windows.
-    if let Some(document) = point["document"].as_str().filter(|text| !text.trim().is_empty()) {
-        let shopping_list = lower.contains("shopping list") || lower.contains("grocer");
+    let visible = point["document"].as_str().filter(|text| !text.trim().is_empty());
+    let mut saved_document = None;
+    let first_turn = !a["history"].as_array().is_some_and(|v| !v.is_empty());
+    if first_turn && approved.is_none() && !lookup && shopping::asks_for_plan(q)
+        && !visible.is_some_and(|doc| shopping::meal_title(doc.lines().next().unwrap_or(""))) {
+        let mut plans = shopping::saved_plans(s, q)?;
+        if let Some(selected) = a["selectedPlan"].as_str() {
+            plans.retain(|r| r["id"] == selected);
+        }
+        if plans.len() != 1 {
+            if !plans.is_empty() {
+                output["workKind"] = json!("meal-choice");
+                output["sources"] = json!(plans.iter().take(2).map(|row| json!({"id":row["id"],"title":row["title"],"label":"Notes","stamp":row["stamp"]})).collect::<Vec<_>>());
+            }
+            output["answer"] = json!(if plans.is_empty() {
+                "Open your meal plan or share the dinners you have in mind.".to_string()
+            } else {
+                format!("Which meal plan should I use? I found “{}” and “{}”.", plans[0]["title"].as_str().unwrap_or(""), plans[1]["title"].as_str().unwrap_or(""))
+            });
+            checked()?;
+            return Ok(output);
+        }
+        let row = &plans[0];
+        output["sources"] = json!([{"id":row["id"],"title":row["title"],"label":"Notes","stamp":row["stamp"]}]);
+        saved_document = Some(format!("{}\n{}",row["title"].as_str().unwrap_or(""),row["body"].as_str().unwrap_or("")));
+    }
+    if let Some(document) = saved_document.as_deref().or(visible) {
+        let shopping_list = lower.contains("shopping list") || lower.contains("grocer") || shopping::asks_for_plan(q);
         let title = document.lines().next().unwrap_or("").to_lowercase();
-        let meal_plan = ["meal", "dinner", "menu", "lunch", "breakfast", "grocer"]
-            .iter().any(|topic| title.contains(topic));
+        let meal_plan = shopping::meal_title(&title);
         let transform = (shopping_list && meal_plan) || ["turn this", "rewrite this", "summarize this", "summarise this",
             "from this note", "from this plan", "from these", "based on this note"]
             .iter().any(|phrase| lower.contains(phrase));
         let cross_source = ["my other", "my notes", "my email", "earlier", "last time", "compare", "relate", "connect"]
             .iter().any(|phrase| lower.contains(phrase));
-        if transform && !cross_source && approved.is_none() && !lookup
-            && !a["history"].as_array().is_some_and(|v| !v.is_empty()) {
+        if transform && (!cross_source || saved_document.is_some()) && approved.is_none() && !lookup && first_turn {
             let excerpt: String = document.chars().take(6000).collect();
             let opts = crate::brain::BrainOpts { max_tokens: response_token_budget(q),
                 direct_reply: true, job: "edit-note", ..Default::default() };
@@ -2660,11 +2707,10 @@ fn guide_answer(
             } else { Default::default() };
             let mut input = json!({"request":q,"visible_note":excerpt});
             let local_inkling = &active_brain["localModel"];
-            let itemized = shopping_list && active_brain["mode"] == "local"
-                && local_inkling["runtime"] == "Sumi"
-                && local_inkling["name"].as_str().unwrap_or("").to_lowercase().contains("inkling");
+            let itemized = shopping_list && active_brain["mode"] == "local" && crate::bundled::is_inkling(local_inkling);
             let ingredients = itemized.then(|| shopping::listed_ingredients(&excerpt)).flatten();
             let (answer, brain) = if let Some(mut items) = ingredients {
+                output["workKind"] = json!("shopping");
                 items.retain(|item| !stocked.contains(item));
                 let answer = if items.is_empty() {
                     "You already have every listed ingredient.".to_owned()

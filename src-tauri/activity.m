@@ -1082,6 +1082,35 @@ NSDictionary *sumi_point_window(CGPoint p) {
     return nil;
 }
 
+// Use the author's selection only when the pointer is actually over it in
+// a supported editor. A selection elsewhere in the document is unrelated.
+static NSString *selectedPassage(NSDictionary *window, CGPoint point) {
+    if (![@[@"com.apple.TextEdit", @"com.apple.Notes", @"com.apple.iWork.Pages"] containsObject:window[@"bundle"]]
+        || !AXIsProcessTrusted()) return nil;
+    id app = CFBridgingRelease(AXUIElementCreateApplication([window[@"pid"] intValue]));
+    AXUIElementRef owner = (__bridge AXUIElementRef)app, raw = NULL;
+    AXUIElementSetMessagingTimeout(owner, 0.15);
+    if (AXUIElementCopyElementAtPosition(owner, point.x, point.y, &raw) != kAXErrorSuccess) return nil;
+    id element = CFBridgingRelease(raw);
+    AXUIElementRef field = (__bridge AXUIElementRef)element;
+    if (![attribute(field,kAXRoleAttribute) isEqual:(__bridge NSString *)kAXTextAreaRole]) return nil;
+    id range = attribute(field,kAXSelectedTextRangeAttribute);
+    CFRange selection = {0, 0};
+    if (!range || CFGetTypeID((__bridge CFTypeRef)range) != AXValueGetTypeID()
+        || !AXValueGetValue((__bridge AXValueRef)range,kAXValueCFRangeType,&selection)
+        || selection.length < 1 || selection.length > 1200) return nil;
+    CFTypeRef rawBounds = NULL;
+    if (AXUIElementCopyParameterizedAttributeValue(field,kAXBoundsForRangeParameterizedAttribute,
+            (__bridge CFTypeRef)range,&rawBounds) != kAXErrorSuccess) return nil;
+    id box = CFBridgingRelease(rawBounds);
+    CGRect rect = CGRectZero;
+    if (!box || CFGetTypeID((__bridge CFTypeRef)box) != AXValueGetTypeID()
+        || !AXValueGetValue((__bridge AXValueRef)box,kAXValueCGRectType,&rect)
+        || !CGRectContainsPoint(rect,point)) return nil;
+    NSString *text = clean(attribute(field,kAXSelectedTextAttribute));
+    return text.length > 0 && text.length <= 1200 ? text : nil;
+}
+
 NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary *settings) {
     if (!window || ![settings[@"enabled"] boolValue]) return nil;
     pid_t pid = [window[@"pid"] intValue];
@@ -1115,6 +1144,7 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
     }
     if (!displays && ![settings[@"sources"] containsObject:source]) return nil;
     if (!availableSession() || !screenAccess(YES)) return nil;
+    NSString *selection = selectedPassage(window, point);
     dispatch_semaphore_t done=dispatch_semaphore_create(0);
     __block NSDictionary *result=nil;
     [SCShareableContent getShareableContentExcludingDesktopWindows:YES onScreenWindowsOnly:YES completionHandler:^(SCShareableContent *content,NSError *error) {
@@ -1186,7 +1216,7 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
                         @"source":source,
                         @"app":window[@"app"],
                         @"bundle":window[@"bundle"],
-                        @"line":line,
+                        @"line":selection ?: line,
                         @"nearby":nearby,
                         @"image":[jpeg base64EncodedStringWithOptions:0] ?: @"",
                         @"fullImage":fullB64,

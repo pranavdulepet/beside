@@ -256,13 +256,7 @@ fn infer_local(
             );
         }
     }
-    if model["runtime"] == "Sumi"
-        && model["name"]
-            .as_str()
-            .unwrap_or("")
-            .to_lowercase()
-            .contains("inkling")
-    {
+    if bundled::is_inkling(model) {
         return bundled::inkling_text(
             model,
             system,

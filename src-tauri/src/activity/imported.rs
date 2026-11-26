@@ -16,7 +16,12 @@ pub fn count(s: &Store, kind: &str) -> Res<i64> {
 pub fn refresh_notes(s: &Store) -> Res<Value> {
     let epoch = s.get("activityEpoch")?;
     let output = std::process::Command::new("/usr/bin/osascript")
-        .args(["-l", "JavaScript", "-e", include_str!("read_apple_notes.js")])
+        .args([
+            "-l",
+            "JavaScript",
+            "-e",
+            include_str!("read_apple_notes.js"),
+        ])
         .output()
         .msg()?;
     if !output.status.success() {
@@ -56,7 +61,9 @@ pub(super) fn replace(s: &Store, kind: &str, notes: &[[String; 3]], epoch: &Valu
             }
         }
     }
-    if kind=="note" {super::baggage::refresh_recent(&tx,&cfg,Utc::now().timestamp())?;}
+    if kind == "note" {
+        super::baggage::refresh_recent(&tx, &cfg, Utc::now().timestamp())?;
+    }
     tx.execute(
         "INSERT OR REPLACE INTO kv VALUES ('activityEpoch',?)",
         [json!(id()).to_string()],
@@ -72,6 +79,15 @@ pub fn remove(s: &Store, kind: &str) -> Res<Value> {
 }
 
 pub fn candidates(s: &Store, focus: &[String], context: &[String]) -> Res<Vec<Value>> {
+    candidates_of_kind(s, focus, context, None)
+}
+
+pub(super) fn candidates_of_kind(
+    s: &Store,
+    focus: &[String],
+    context: &[String],
+    kind: Option<&str>,
+) -> Res<Vec<Value>> {
     if focus.is_empty() {
         return Ok(vec![]);
     }
@@ -89,8 +105,8 @@ pub fn candidates(s: &Store, focus: &[String], context: &[String]) -> Res<Vec<Va
         query = format!("({query}) AND ({query} OR {})", group(context));
     }
     let db = s.db.lock().unwrap();
-    let mut q = db.prepare("SELECT id,title,body,kind FROM imported_passages WHERE imported_passages MATCH ? ORDER BY bm25(imported_passages,0,4,1,0),id LIMIT 24").msg()?;
-    let rows = q.query_map([query], row).msg()?;
+    let mut q = db.prepare("SELECT id,title,body,kind FROM imported_passages WHERE imported_passages MATCH ? AND (?2 IS NULL OR kind=?2) ORDER BY bm25(imported_passages,0,4,1,0),id LIMIT 24").msg()?;
+    let rows = q.query_map(params![query, kind], row).msg()?;
     rows.collect::<Result<Vec<_>, _>>().msg()
 }
 
