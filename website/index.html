@@ -38,7 +38,7 @@
         opacity: 0.18;
         pointer-events: none;
       }
-      canvas {
+      body > canvas {
         position: fixed;
         inset: 0;
         width: 100%;
@@ -96,8 +96,9 @@
       }
       :focus-visible { outline: 2px solid light-dark(#34656d, #a2cccd); outline-offset: 3px; }
       figure { margin: 0; }
+      [hidden] { display: none !important; }
       .player { position: relative; }
-      video, .cover img { display: block; width: 100%; aspect-ratio: 2 / 1; border-radius: 10px; }
+      video, .cover img, .direct-recording { display: block; width: 100%; aspect-ratio: 2 / 1; border-radius: 10px; }
       video { background: #263433; }
       .cover img { height: auto; }
       .cover {
@@ -119,6 +120,29 @@
       @media (prefers-reduced-motion: reduce) { .cover[aria-busy="true"]::after { animation: none; } }
       .player-message { margin: 10px auto 0; font-size: 14px; }
       .player-message a { display: inline; padding: 0; font: inherit; }
+      .film { border-radius: 10px; overflow: hidden; background: #1c2929; color: #faf8f1; }
+      .film-screen { position: relative; }
+      .film canvas { display: block; width: 100%; height: auto; }
+      .film-cue {
+        position: absolute; inset: auto 4% 4%; margin: 0 auto; width: fit-content; max-width: 92%;
+        background: #142120eb; border-radius: 4px; padding: 3px 8px; font: 500 14px/1.35 Geist, sans-serif;
+      }
+      .transport { display: flex; align-items: center; gap: 4px; padding: 0 4px; }
+      .transport button {
+        display: grid; place-items: center; width: 44px; height: 44px; flex: none;
+        font: 600 13px Geist, sans-serif; color: inherit; background: transparent; border: 0;
+        cursor: pointer; border-radius: 6px; touch-action: manipulation;
+      }
+      .transport button[aria-pressed="true"] { color: #faeab1; text-decoration: underline; }
+      .transport svg { width: 18px; height: 18px; }
+      .transport input { flex: 1; min-width: 28px; height: 36px; margin: 0; accent-color: #faeab1; }
+      .film-time { font: 12px Geist, sans-serif; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .cinema { inset: 0; max-width: none; max-height: none; width: 100%; height: 100%;
+        border: 0; background: #142120; padding: env(safe-area-inset-top) env(safe-area-inset-right)
+        env(safe-area-inset-bottom) env(safe-area-inset-left); }
+      .cinema[open] { display: grid; align-items: center; }
+      .cinema::backdrop { background: #142120; }
+      .cinema .film canvas { max-height: calc(100dvh - 52px); object-fit: contain; }
       figcaption { margin: 11px auto 0; font-size: 14px; line-height: 1.5; text-wrap: balance; }
       small { margin-top: 9px; font-size: 12px; }
       small a { display: inline; padding: 0; font: inherit; }
@@ -140,20 +164,40 @@
         </div>
         <figure id="demo-panel" role="tabpanel" aria-labelledby="writing">
           <div class="player">
-            <video controls playsinline muted preload="none" poster="media/writing.png" src="media/writing.mp4?play=2" aria-describedby="caption" aria-label="Writing walkthrough">
+            <video controls playsinline muted preload="none" poster="media/writing.png" aria-describedby="caption" aria-label="Writing walkthrough">
               <track kind="captions" srclang="en" label="English" src="media/writing.vtt" />
             </video>
+            <div class="film" hidden>
+              <div class="film-screen">
+                <canvas width="1024" height="512" role="img" aria-label="Writing walkthrough"></canvas>
+                <p class="film-cue" hidden></p>
+              </div>
+              <div class="transport" role="group" aria-label="Recording controls">
+                <button type="button" class="toggle" aria-label="Pause recording">
+                  <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M4 3h4v14H4zm8 0h4v14h-4z"/></svg>
+                </button>
+                <input type="range" min="0" step="0.01" value="0" aria-label="Recording position" />
+                <span class="film-time">0:00</span>
+                <button type="button" class="captions" aria-label="Captions" aria-pressed="false">CC</button>
+                <button type="button" class="expand" aria-label="Expand recording">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/></svg>
+                </button>
+              </div>
+            </div>
+            <img class="direct-recording" alt="Writing walkthrough" hidden />
             <button type="button" class="cover" aria-label="Play Writing walkthrough" hidden>
               <img src="media/writing.png" width="1440" height="720" alt="" />
               <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 3.6a1 1 0 0 1 1.5-.86l14 8.4a1 1 0 0 1 0 1.72l-14 8.4A1 1 0 0 1 6 20.4z"/></svg>
             </button>
           </div>
-          <p class="player-message" role="status" hidden>Couldn’t play this video. <a href="media/writing.mp4?play=2" download>Download the recording</a></p>
+          <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="media/writing.gif">Open the animation</a></p>
           <figcaption id="caption">Check a detail about Chandragupta Maurya’s capital, then revise the essay in TextEdit.</figcaption>
+          <noscript><p><a href="media/writing.gif">Watch Writing</a> <a href="media/groceries.gif">Watch Groceries</a> <a href="media/baggage.gif">Watch Flight</a></p></noscript>
         </figure>
       </section>
     </main>
-    <script>
+    <dialog class="cinema" aria-label="Expanded walkthrough"></dialog>
+    <script type="module">
       if (location.protocol === 'file:' || ['localhost', '127.0.0.1'].includes(location.hostname)) {
         document.querySelector('a[download]').href = 'Beside-macOS.zip';
       }
@@ -168,79 +212,108 @@
         groceries: ['groceries', 'Turn a week of meals into a Trader Joe’s shopping list and paste it into Apple Notes.'],
         flight: ['baggage', 'Compare an Athens packing list with the second-bag fee at United checkout.'],
       };
+      const film = panel.querySelector('.film');
+      const direct = panel.querySelector('.direct-recording');
       let closePlayer;
-      function preparePlayer(tab, file, playImmediately = false) {
+      function preparePlayer(tab, file) {
         closePlayer?.();
-        const source = 'media/' + file + '.mp4?play=2';
+        const base = 'media/' + file;
+        const animationUrl = base + '.gif';
         const label = tab.textContent + ' walkthrough';
         const controller = new AbortController();
         const {signal} = controller;
-        let objectUrl, recovering = false, requested = false;
-        video.src = source;
-        video.poster = 'media/' + file + '.png';
-        video.querySelector('track').src = 'media/' + file + '.vtt';
-        video.setAttribute('aria-label', label);
+        let mode = 'poster', timeout;
+        video.hidden = false;
         video.controls = false;
+        video.poster = base + '.png';
+        video.setAttribute('aria-label', label);
+        video.querySelector('track').src = base + '.vtt';
+        direct.alt = label;
         cover.querySelector('img').src = video.poster;
         cover.setAttribute('aria-label', 'Play ' + label);
         cover.removeAttribute('aria-busy');
         cover.hidden = false;
-        message.querySelector('a').href = source;
+        message.querySelector('a').href = animationUrl;
         message.hidden = true;
 
-        function showPoster(failed) {
-          cover.removeAttribute('aria-busy');
-          cover.hidden = false;
-          video.controls = false;
-          message.hidden = !failed;
-        }
-        function play() {
-          requested = true;
-          cover.setAttribute('aria-busy', 'true');
-          video.controls = true;
-          const attemptedSource = video.src;
-          video.play().catch(error => {
-            if (signal.aborted || video.src !== attemptedSource || error.name === 'AbortError') return;
-            if (error.name === 'NotAllowedError') showPoster(!objectUrl);
-            else recover();
-          });
-        }
-        async function recover() {
-          if (!requested || signal.aborted) return;
-          if (objectUrl) { showPoster(true); return; }
-          if (recovering) return;
-          recovering = true;
-          const time = video.currentTime;
-          try {
-            // Some mobile connections can fetch the file but fail byte-range playback.
-            const response = await fetch(source, {signal, cache: 'reload'});
-            if (!response.ok || response.status === 206) throw new Error('Incomplete video');
-            const data = await response.blob();
-            if (signal.aborted) return;
-            objectUrl = URL.createObjectURL(data);
-            video.src = objectUrl;
-            if (time > 0) video.currentTime = time;
-            play();
-          } catch {
-            if (!signal.aborted) showPoster(true);
-          }
-        }
-        cover.onclick = () => {
-          if (message.hidden) play();
-          else preparePlayer(tab, file, true);
-        };
-        video.addEventListener('error', () => { if (video.error) recover(); }, {signal});
-        video.addEventListener('playing', () => {
+        function reveal() {
           cover.removeAttribute('aria-busy');
           cover.hidden = true;
           message.hidden = true;
+        }
+        async function playImages() {
+          if (signal.aborted || mode === 'images') return;
+          const startAt = video.currentTime || 0;
+          mode = 'images';
+          clearTimeout(timeout);
+          video.pause();
+          video.removeAttribute('src');
+          video.load();
+          cover.hidden = false;
+          cover.setAttribute('aria-busy', 'true');
+          try {
+            const [module, response] = await Promise.all([
+              import('./film.js'), fetch(animationUrl, {signal}),
+            ]);
+            if (!response.ok) throw new Error('Recording unavailable');
+            const bytes = await response.arrayBuffer();
+            if (signal.aborted) return;
+            module.playFilm(film, bytes, {label, captionsUrl: base + '.vtt', startAt, signal});
+            video.hidden = true;
+            reveal();
+          } catch {
+            if (signal.aborted) return;
+            // A plain image can also play when a browser blocks fetch or scripts.
+            direct.onload = () => {
+              video.hidden = true;
+              direct.hidden = false;
+              reveal();
+            };
+            direct.onerror = () => {
+              mode = 'poster';
+              cover.removeAttribute('aria-busy');
+              message.hidden = false;
+            };
+            direct.src = animationUrl;
+          }
+        }
+        function watchForStall() {
+          clearTimeout(timeout);
+          timeout = setTimeout(playImages, 5000);
+        }
+        cover.onclick = () => {
+          if (mode === 'images') return;
+          cover.setAttribute('aria-busy', 'true');
+          if (matchMedia('(pointer: coarse)').matches || !video.canPlayType('video/mp4')) {
+            playImages();
+            return;
+          }
+          mode = 'video';
+          video.src = base + '.mp4?play=2';
+          video.controls = true;
+          watchForStall();
+          video.play().catch(() => { if (mode === 'video') playImages(); });
+        };
+        video.addEventListener('error', () => { if (mode === 'video') playImages(); }, {signal});
+        video.addEventListener('waiting', () => {
+          if (mode === 'video' && !video.paused) watchForStall();
         }, {signal});
+        video.addEventListener('playing', () => {
+          if (mode !== 'video') return;
+          clearTimeout(timeout);
+          reveal();
+        }, {signal});
+        video.addEventListener('pause', () => { if (cover.hidden) clearTimeout(timeout); }, {signal});
         closePlayer = () => {
           controller.abort();
+          clearTimeout(timeout);
           video.pause();
-          if (objectUrl) URL.revokeObjectURL(objectUrl);
+          video.removeAttribute('src');
+          video.load();
+          direct.onload = direct.onerror = null;
+          direct.removeAttribute('src');
+          direct.hidden = true;
         };
-        if (playImmediately) play();
       }
       function selectDemo(id, updateAddress) {
         const tab = tabs.find(item => item.id === id) || tabs[0];

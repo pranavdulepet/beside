@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - website/**
+      - package.json
+      - package-lock.json
       - public/fonts/**
       - public/materials/**
       - licenses/**
@@ -27,9 +29,11 @@ jobs:
       - name: Assemble the public site
         run: |
           mkdir -p site/licenses
+          npm ci --ignore-scripts --no-audit --no-fund
+          ./node_modules/.bin/esbuild website/film.js --bundle --format=esm --target=safari15 --minify --outfile=site/film.js
           cp website/index.html public/fonts/{Geist,Newsreader}.ttf public/materials/{paper,beside}.png LICENSE site/
           cp -R website/media site/media
-          cp licenses/{Paper-and-ink,Geist,Newsreader}.txt site/licenses/
+          cp licenses/{Paper-and-ink,Geist,Newsreader,omggif}.txt site/licenses/
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: site

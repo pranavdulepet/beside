@@ -547,9 +547,7 @@ test('a requested export arrives after reopening and waits for consent', async (
 });
 
 test.describe('website walkthroughs', () => {
-  test.use({hasTouch: true, viewport: {width: 393, height: 852}});
-
-  test('tap each recording, play and seek, then reopen the selected tab', async ({
+  test('desktop recordings play, seek and reopen the selected tab', async ({
     page,
   }) => {
     await page.goto('/website/index.html');
@@ -560,17 +558,20 @@ test.describe('website walkthroughs', () => {
       ['Flight', 'baggage'],
     ]) {
       const tab = page.getByRole('tab', {name: title});
-      await tab.tap();
+      await tab.click();
       await expect(tab).toHaveAttribute('aria-selected', 'true');
       await expect(player.locator('track')).toHaveAttribute(
         'src',
         `media/${file}.vtt`,
       );
-      await page.getByRole('button', {name: `Play ${title} walkthrough`}).tap();
+      await page
+        .getByRole('button', {name: `Play ${title} walkthrough`})
+        .click();
       await expect
         .poll(() =>
           player.evaluate(
             (v: HTMLVideoElement, slug: string) =>
+              !!v.currentSrc &&
               new URL(v.currentSrc).pathname.endsWith('/' + slug + '.mp4') &&
               !v.paused &&
               !v.error &&
@@ -605,45 +606,102 @@ test.describe('website walkthroughs', () => {
     ).toBeVisible();
   });
 
-  test('recover from a failed stream and offer a download if the whole file also fails', async ({
+  test('a rejected desktop play request automatically shows the same recording as images', async ({
     page,
   }) => {
-    const pattern = '**/media/*.mp4*';
-    await page.route(pattern, route =>
-      route.request().resourceType() === 'media'
-        ? route.abort()
-        : route.continue(),
-    );
+    await page.addInitScript(() => {
+      HTMLMediaElement.prototype.play = () =>
+        Promise.reject(new DOMException('Media blocked', 'NotAllowedError'));
+    });
     await page.goto('/website/index.html#groceries');
-    await page.getByRole('button', {name: 'Play Groceries walkthrough'}).tap();
-    const player = page.locator('video');
+    await page
+      .getByRole('button', {name: 'Play Groceries walkthrough'})
+      .click();
+    await expect(
+      page.getByRole('img', {name: 'Groceries walkthrough'}),
+    ).toBeVisible();
     await expect
-      .poll(() =>
-        player.evaluate(
-          (v: HTMLVideoElement) =>
-            v.currentSrc.startsWith('blob:') &&
-            !v.error &&
-            v.currentTime > 0.15,
-        ),
-      )
-      .toBe(true);
-    await page.unroute(pattern);
-    await page.route(pattern, route => route.abort());
-    await page.getByRole('tab', {name: 'Flight'}).tap();
-    await page.getByRole('button', {name: 'Play Flight walkthrough'}).tap();
-    const download = page.getByRole('link', {name: 'Download the recording'});
-    await expect(download).toBeVisible();
-    await expect(download).toHaveAttribute('href', /media\/baggage\.mp4/);
-    await page.unroute(pattern);
-    await page.getByRole('button', {name: 'Play Flight walkthrough'}).tap();
-    await expect
-      .poll(() =>
-        player.evaluate(
-          (v: HTMLVideoElement) => !v.error && v.currentTime > 0.15,
-        ),
-      )
-      .toBe(true);
-    await expect(download).toBeHidden();
+      .poll(() => page.getByRole('slider').inputValue().then(Number))
+      .toBeGreaterThan(0.2);
+  });
+
+  test.describe('phone playback', () => {
+    test.use({
+      hasTouch: true,
+      isMobile: true,
+      viewport: {width: 393, height: 852},
+    });
+
+    test('all three show moving, seekable frames when every MP4 is unavailable', async ({
+      page,
+    }) => {
+      let videoRequests = 0;
+      await page.route('**/*.mp4*', route => {
+        videoRequests++;
+        return route.abort();
+      });
+      await page.goto('/website/index.html');
+      const seek = page.getByRole('slider', {name: 'Recording position'});
+      for (const title of ['Writing', 'Groceries', 'Flight']) {
+        await page.getByRole('tab', {name: title}).tap();
+        await page
+          .getByRole('button', {name: 'Play ' + title + ' walkthrough'})
+          .tap();
+        await expect
+          .poll(() => seek.inputValue().then(Number))
+          .toBeGreaterThan(0.15);
+        await page.getByRole('button', {name: 'Pause recording'}).tap();
+        const image = page.getByRole('img', {name: title + ' walkthrough'});
+        const start = await image.evaluate((c: HTMLCanvasElement) =>
+          c.toDataURL(),
+        );
+        const paused = await seek.inputValue();
+        await seek.focus();
+        await page.keyboard.press('End');
+        await expect
+          .poll(() => seek.inputValue().then(Number))
+          .toBeGreaterThan(Number(paused) + 10);
+        expect(
+          (await image.evaluate((c: HTMLCanvasElement) => c.toDataURL())) ===
+            start,
+        ).toBe(false);
+        await page.keyboard.press('Home');
+        await page.getByRole('button', {name: 'Captions'}).tap();
+        await page.getByRole('button', {name: 'Play recording'}).tap();
+        await expect(page.locator('.film-cue')).toBeVisible();
+      }
+      expect(videoRequests).toBe(0);
+      await page.getByRole('button', {name: 'Expand recording'}).tap();
+      await expect(
+        page.getByRole('dialog', {name: 'Expanded walkthrough'}),
+      ).toBeVisible();
+      await page.getByRole('button', {name: 'Exit expanded view'}).tap();
+      await expect(page.getByRole('dialog')).toBeHidden();
+      await page.reload();
+      await expect(
+        page.getByRole('button', {name: 'Play Flight walkthrough'}),
+      ).toBeVisible();
+    });
+
+    test('the original animation opens as an ordinary image if scripted loading is blocked', async ({
+      page,
+    }) => {
+      await page.route('**/*.gif', route =>
+        route.request().resourceType() === 'fetch'
+          ? route.abort()
+          : route.continue(),
+      );
+      await page.goto('/website/index.html#flight');
+      await page.getByRole('button', {name: 'Play Flight walkthrough'}).tap();
+      const animation = page.locator('img.direct-recording');
+      await expect(animation).toBeVisible();
+      await expect(animation).toHaveAttribute('src', 'media/baggage.gif');
+      expect(
+        await animation.evaluate((img: HTMLImageElement) => img.naturalWidth),
+      ).toBe(1024);
+      await page.getByRole('tab', {name: 'Writing'}).tap();
+      await expect(animation).toBeHidden();
+    });
   });
 });
 
@@ -656,7 +714,7 @@ test('paper, brush and downloadable local Mac archive', async ({
   await page.mouse.down();
   await page.mouse.move(165, 105, {steps: 12});
   await page.mouse.up();
-  const painted = await page.locator('canvas').evaluate(el => {
+  const painted = await page.locator('body > canvas').evaluate(el => {
     const canvas = el as HTMLCanvasElement;
     return canvas
       .getContext('2d')!
