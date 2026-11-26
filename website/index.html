@@ -19,8 +19,8 @@
       }
       body {
         margin: 0;
-        background: light-dark(#f2f1ec, #241f24);
-        color: light-dark(#29242a, #f8f2e9);
+        background: light-dark(#f8f6f0, #20211f);
+        color: light-dark(#292824, #f2f0e9);
         font:
           17px Geist, sans-serif;
       }
@@ -108,7 +108,7 @@
         ink.moveTo(from.x, from.y);
         ink.lineTo(to.x + 0.01, to.y + 0.01);
         ink.lineCap = 'round';
-        ink.strokeStyle = dark.matches ? '#efaaca' : '#6d284b';
+        ink.strokeStyle = dark.matches ? '#dfa9ac' : '#803f52';
         ink.lineWidth = (from.w + to.w) / 2 + spread;
         ink.globalAlpha = spread ? 0.09 : 0.85;
         ink.stroke();

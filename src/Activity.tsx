@@ -2022,7 +2022,7 @@ export function ActivitySheet({
         <button
           type="button"
           className="assistant-wordmark"
-          title="Memory & Sources"
+          aria-expanded={tab !== 'ask' && tab !== 'suggestion'}
           aria-label="What Beside knows"
           onClick={() => {
             inspect(null);
@@ -2097,10 +2097,11 @@ export function ActivitySheet({
         <nav aria-label="Beside menu" className="activity-navigation">
           <button
             type="button"
+            aria-label="Ask Beside"
             aria-current={tab === 'ask' ? 'page' : undefined}
             onClick={() => select('ask')}
           >
-            Ask Beside
+            Ask
           </button>
           {!close && (
             <button

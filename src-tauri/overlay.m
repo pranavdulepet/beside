@@ -482,7 +482,7 @@ void sumi_overlay_highlight(
         CAShapeLayer *ring = [CAShapeLayer layer];
         ring.path = CGPathCreateWithRoundedRect(padded, radius, radius, NULL);
         ring.fillColor = [NSColor colorWithRed:0.43 green:0.16 blue:0.29 alpha:0.14].CGColor;
-        ring.strokeColor = [NSColor colorWithRed:0.90 green:0.91 blue:0.61 alpha:0.98].CGColor;
+        ring.strokeColor = [NSColor colorWithRed:0.87 green:0.66 blue:0.67 alpha:0.98].CGColor;
         ring.lineWidth = 2.5;
         ring.shadowColor = [NSColor colorWithRed:0.17 green:0.27 blue:0.44 alpha:0.65].CGColor;
         ring.shadowRadius = 10;
@@ -536,7 +536,7 @@ void sumi_overlay_highlight(
             pill.layer.backgroundColor = [NSColor colorWithRed:0.16 green:0.14 blue:0.16 alpha:0.95].CGColor;
             pill.layer.cornerRadius = 15;
             pill.layer.borderWidth = 1;
-            pill.layer.borderColor = [NSColor colorWithRed:0.90 green:0.91 blue:0.61 alpha:0.45].CGColor;
+            pill.layer.borderColor = [NSColor colorWithRed:0.87 green:0.66 blue:0.67 alpha:0.45].CGColor;
             pill.layer.shadowColor = NSColor.blackColor.CGColor;
             pill.layer.shadowOpacity = 0.4;
             pill.layer.shadowRadius = 12;
@@ -545,7 +545,7 @@ void sumi_overlay_highlight(
             NSView *dot = [[NSView alloc] initWithFrame:NSMakeRect(10, 11, 8, 8)];
             dot.wantsLayer = YES;
             dot.layer.cornerRadius = 4;
-            dot.layer.backgroundColor = [NSColor colorWithRed:0.90 green:0.91 blue:0.61 alpha:1.0].CGColor;
+            dot.layer.backgroundColor = [NSColor colorWithRed:0.87 green:0.66 blue:0.67 alpha:1.0].CGColor;
             [pill addSubview:dot];
 
             text.frame = NSMakeRect(24, 6, pillW - 34, 18);

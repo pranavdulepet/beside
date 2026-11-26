@@ -2901,3 +2901,45 @@ test('a suggestion waits for the user and keeps the screen that prompted it', as
     await rm(folder, {recursive: true, force: true});
   }
 });
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`floating memory keeps the ink mark clear in ${scheme} mode`, async ({page}, info) => {
+    await page.emulateMedia({colorScheme: scheme});
+    await page.setViewportSize({width: 390, height: 440});
+    await page.addInitScript(() => {
+      (window as any).__TAURI_INTERNALS__ = {
+        transformCallback: () => 1,
+        invoke: async (_: string, p: Row) => {
+          if (p?.operation === 'activitySettings') return {enabled: true, localModel:'Inkling'};
+          if (p?.operation === 'activityJournal') return {
+            events: [{
+              id: 'timetable', label: 'Notes', title: 'Friday train tickets',
+              snippet: 'Maple Express arrives at 6:10 PM.',
+              stamp: 1795616100, hasPreview: true,
+            }],
+            habits: [], remembered: [{id:'deadline', text:'Reach the pier by 6:30 PM on Friday.'}],
+          };
+          return null;
+        },
+      };
+    });
+    await page.goto('/#activity');
+    const mark = page.getByRole('button', {name: 'What Beside knows'});
+    await mark.click();
+    await expect(page.getByText('Friday train tickets', {exact:true})).toBeVisible();
+    await mark.hover();
+    await expect(mark.locator('.signature')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(mark).not.toHaveAttribute('title', /.+/);
+    const ask = page.getByRole('button', {name:'Ask Beside'});
+    await expect(ask).toHaveText('Ask');
+    await expect(ask).toHaveCSS('white-space', 'nowrap');
+    await page.evaluate(() => document.fonts.ready);
+    await page.screenshot({path: info.outputPath('memory-' + scheme + '.png')});
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Shift+Tab');
+    await expect(mark).toBeFocused();
+    await expect(mark).toHaveCSS('outline-style', 'solid');
+    await ask.click();
+    await expect(page.locator('.screen-composer textarea')).toBeVisible();
+  });
+}
