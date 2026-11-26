@@ -503,8 +503,6 @@ test.describe('website walkthroughs', () => {
   const demos = [
     ['Correction', 'learning'],
     ['Groceries', 'groceries'],
-    ['Print handoff', 'email'],
-    ['Setup', 'setup'],
     ['Flight', 'baggage'],
   ];
   async function choose(page: import('@playwright/test').Page, title: string) {
@@ -717,15 +715,15 @@ test.describe('website walkthroughs', () => {
       page,
     }) => {
       await page.route(/\.(?:mp4|gif)(?:\?|$)/, route => route.abort());
-      await page.goto('/website/index.html#email');
+      await page.goto('/website/index.html#flight');
       await page
-        .getByRole('button', {name: 'Play Print handoff walkthrough'})
+        .getByRole('button', {name: 'Play Flight walkthrough'})
         .tap();
       const backup = page.getByRole('link', {name: 'Download the MP4'});
       await expect(backup).toBeVisible();
       await expect(backup).toHaveAttribute(
         'href',
-        'https://github.com/pranavdulepet/beside/raw/refs/heads/main/website/media/email.mp4',
+        'https://github.com/pranavdulepet/beside/raw/refs/heads/main/website/media/baggage.mp4',
       );
       await choose(page, 'Correction');
       await expect(backup).toBeHidden();

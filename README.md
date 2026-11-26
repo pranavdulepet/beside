@@ -18,8 +18,6 @@ Beside is a floating assistant for your Mac. Point at what you’re working on a
 
 - Ask Beside to open project updates with the risk. In a fresh chat, see how it starts a different brief. [A correction that sticks](https://pranavdulepet.github.io/beside/#learning)
 - Add two dinner guests, check what’s in the pantry, and paste the revised Trader Joe’s list into Notes. [Groceries](https://pranavdulepet.github.io/beside/#groceries)
-- Open a printer’s email and ask for the file format, bleed and deadline from a saved handoff note. [Print handoff](https://pranavdulepet.github.io/beside/#email)
-- Start with an empty notebook, connect an installed local model, and save your first preference. [First-time setup](https://pranavdulepet.github.io/beside/#setup)
 - At an airline’s checked-bag selector, ask “Should I add a bag?” See how Beside finds the packing note for the right trip, checks the arrival forecast and explains whether the extra fee is worth paying. [Flight](https://pranavdulepet.github.io/beside/#flight)
 
 [User guide](docs/guide.md) · [Walkthroughs](docs/walkthroughs.md) · [Architecture](docs/architecture.md) · [Storage and sharing](docs/guide.md#where-your-data-lives) · [Security](SECURITY.md) · [Build from source](docs/development.md) · [Contribute](CONTRIBUTING.md) · [License](LICENSE) · [Third-party credits](licenses/)
