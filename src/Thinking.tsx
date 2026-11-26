@@ -74,7 +74,7 @@ export function Think({
           act={async (op, args) => {
             const r = await act(op, args);
             if (
-              ['downloadBundled', 'model', 'importModel'].includes(op) &&
+              ['downloadBundled', 'useInstalledModel', 'model', 'importModel'].includes(op) &&
               r?.name
             )
               confirm('Ready to think on this Mac.');

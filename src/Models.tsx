@@ -3,19 +3,7 @@ import {call, type Row, type Action} from './api';
 
 function modelSubtitle(m: Row, active: boolean) {
   if (m.fits === false) return `Needs ${m.ram} GB RAM`;
-  const lower = (m.label || '').toLowerCase();
-  const ready = active || m.cached;
-  if (lower.includes('inkling')) {
-    return ready
-      ? 'Fast · Everyday companion'
-      : `Fast · ${(m.total / 1e9).toFixed(1)} GB download`;
-  }
-  if (lower.includes('gemma')) {
-    return ready
-      ? 'Stronger · Deeper reasoning'
-      : `Stronger · ${(m.total / 1e9).toFixed(1)} GB download`;
-  }
-  return ready
+  return active || m.cached || m.installedCopy
     ? 'Ready on this Mac'
     : `${(m.total / 1e9).toFixed(1)} GB download`;
 }
@@ -81,8 +69,8 @@ export function Models({
     busy(op === 'downloadBundled' ? 'gguf' : label);
     note('');
     try {
-      await act(op, args);
-      note(`✓ Now using ${label}.`);
+      const selected = await act(op, args);
+      if (selected?.name) note(`Now using ${op === 'importModel' ? selected.name : label}.`);
     } catch (e) {
       note(String(e));
     } finally {
@@ -94,7 +82,8 @@ export function Models({
     <section aria-label="Local models" className="model-list">
       {choices.map(m => {
         const active = current === m.file?.replace(/\.gguf$/, '');
-        const space = m.cached || (fit?.freeDisk ?? 0) >= m.required;
+        const existing = m.cached || m.installedCopy;
+        const space = existing || (fit?.freeDisk ?? 0) >= m.required;
         const isLoading = working === 'gguf' && downloading === m.label;
         return (
           <div className="row" key={m.label}>
@@ -110,14 +99,14 @@ export function Models({
                 className="btn-sm"
                 disabled={!!working || !space || m.fits === false}
                 onClick={() =>
-                  void selectModel('downloadBundled', {label: m.label}, m.label)
+                  void selectModel(m.installedCopy && !m.cached ? 'useInstalledModel' : 'downloadBundled', {label: m.label}, m.label)
                 }
               >
                 {isLoading
                   ? 'Installing…'
                   : !space
                     ? 'Low disk'
-                    : m.cached
+                    : existing
                       ? 'Use'
                       : m.bytes
                         ? 'Resume'
@@ -182,7 +171,11 @@ export function Models({
         </div>
       )}
 
-      {!simple && (
+      {simple ? (
+        <button type="button" className="bar-link" disabled={!!working} onClick={() => void selectModel('importModel', {}, 'model file')}>
+          Choose a model file…
+        </button>
+      ) : (
         <details>
           <summary>Advanced · Import custom GGUF</summary>
           <div className="details-body">

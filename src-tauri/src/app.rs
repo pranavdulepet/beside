@@ -110,6 +110,35 @@ pub fn state(s: &Store) -> Res<Value> {
     });
     Ok(out)
 }
+fn finish_setup(s: &Store, companion: bool) -> Res<Value> {
+    let _lock = s.edit.lock().unwrap();
+    let lesson = s.get("firstCorrection")?;
+    if companion && (s.get("onboarded")? == true || !lesson.is_null() || !s.get("firstReading")?.is_null()) {
+        return Ok(Value::Null);
+    }
+    if s.get("mark")?.is_null() {
+        if !companion {
+            return Err("Your seal needs a brushstroke.".into());
+        }
+        let house_mark = serde_json::from_str(include_str!("../../src/signature.json")).msg()?;
+        s.set("mark", &house_mark)?;
+    }
+    if s.get("onboardedAt")?.is_null() {
+        s.set("onboardedAt", &json!(now()))?;
+    }
+    if lesson["kept"] == true
+        && lesson["sheet"] == s.get("current")?
+        && s.list("sealed")?
+            .iter()
+            .any(|v| v["sheet"] == lesson["sheet"] && !v["actual"].is_null())
+    {
+        s.new_sheet()?;
+    }
+    s.set("onboarded", &json!(true))?;
+    s.set("firstCorrection", &Value::Null)?;
+    Ok(Value::Null)
+}
+
 pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
     match op {
         "brainStatus" => crate::brain::status(s),
@@ -125,6 +154,7 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
             "nudge": crate::proactive::latest()
         })),
         "proactiveConfigure" => crate::proactive::configure(s, a),
+        "proactiveReadMemory" => crate::proactive::read_profile(s, a),
         "proactiveDismiss" => {
             crate::proactive::dismiss(a["id"].as_str().unwrap_or(""));
             Ok(Value::Null)
@@ -140,6 +170,17 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
         "activityApps" => crate::activity::apps(),
         "personalMark" => s.get("mark"),
         "activitySettings" => crate::activity::settings(s),
+        "discardOnDemandPoint" => { crate::point::dismiss(); Ok(Value::Null) }
+        "companionSetup" => {
+            let step = text(a, "step")?;
+            match step {
+                "screen" | "point" => {}
+                "ready" => { finish_setup(s, true)?; }
+                _ => return Err("Unknown setup step.".into()),
+            }
+            s.set("companionSetup", &json!(step))?;
+            Ok(Value::Null)
+        }
         "activityConfigure" => crate::activity::configure(s, a),
         "activityPermission" => crate::activity::permission(text(a, "kind")?),
         "activityRecallPreview" => crate::activity::recall_preview(s, a),
@@ -228,6 +269,7 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
         }
         "models" => Ok(json!(models::inventory())),
         "downloadBundled" => crate::weights::download(s, a["label"].as_str()),
+        "useInstalledModel" => crate::weights::use_installed(s, text(a, "label")?),
         "modelDownloadStatus" => Ok(crate::weights::status(s)),
         "importModel" => {
             if let Some(p) = rfd::FileDialog::new()
@@ -350,27 +392,7 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
         "readCorrection" => crate::correction::read(s, text(a, "text")?, &a["context"]),
         "keepCorrection" => crate::correction::keep(s, text(a, "id")?, text(a, "text")?),
         "tryCorrection" => crate::correction::decide(s, text(a, "id")?, text(a, "question")?),
-        "finish" => {
-            let _lock = s.edit.lock().unwrap();
-            if s.get("onboardedAt")?.is_null() {
-                s.set("onboardedAt", &json!(now()))?;
-            }
-            if s.get("mark")?.is_null() {
-                return Err("Your seal needs a brushstroke.".into());
-            }
-            let lesson = s.get("firstCorrection")?;
-            if lesson["kept"] == true
-                && lesson["sheet"] == s.get("current")?
-                && s.list("sealed")?
-                    .iter()
-                    .any(|v| v["sheet"] == lesson["sheet"] && !v["actual"].is_null())
-            {
-                s.new_sheet()?;
-            }
-            s.set("onboarded", &json!(true))?;
-            s.set("firstCorrection", &Value::Null)?;
-            Ok(Value::Null)
-        }
+        "finish" => finish_setup(s, false),
         "addSource" => {
             let k = text(a, "id")?;
             let (_, path, label) = sources::locations()

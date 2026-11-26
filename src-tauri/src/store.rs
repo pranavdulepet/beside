@@ -124,6 +124,10 @@ impl Store {
     CREATE INDEX IF NOT EXISTS moments_pair ON moments(situation,action,split);
     CREATE INDEX IF NOT EXISTS moments_split ON moments(split,stamp);
     CREATE TABLE IF NOT EXISTS docs(kind TEXT NOT NULL,id TEXT NOT NULL,v TEXT NOT NULL,PRIMARY KEY(kind,id));
+    CREATE TABLE IF NOT EXISTS floating_context(
+        kind TEXT NOT NULL DEFAULT 'floatingChat' CHECK (kind='floatingChat'),
+        chat TEXT PRIMARY KEY, covered INTEGER NOT NULL, through_turn TEXT NOT NULL, refs TEXT NOT NULL,
+        FOREIGN KEY(kind,chat) REFERENCES docs(kind,id) ON DELETE CASCADE);
     CREATE INDEX IF NOT EXISTS docs_kind ON docs(kind);
     CREATE INDEX IF NOT EXISTS waiting_agent_log ON docs(kind) WHERE kind='log' AND json_extract(v,'$.status')='waiting';").msg()?;
         Ok(Self {

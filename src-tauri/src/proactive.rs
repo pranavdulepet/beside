@@ -152,6 +152,8 @@ fn content_words(text: &str) -> HashSet<String> {
         "messages", "message", "apple", "macos", "today", "tomorrow", "worked", "inbox", "mailbox",
         "compose", "safari", "favorite", "unread", "folder", "archive", "toolbar", "gmail", "google", "search", "october", "november", "december", "january", "february", "march", "april", "august", "september", "saturday", "sunday", "monday", "thursday", "friday", "order",
         "forward", "reply", "account", "thread", "subject", "draft", "chatgpt", "bookmark", "notification",
+        "bring", "think", "thing", "suggest", "write", "consider", "review", "include", "detail",
+        "there", "above", "below", "first", "other", "share", "during",
     ];
     let chrome: HashSet<&str> = CHROME.iter().copied().collect();
     conversation::words(text)
@@ -177,11 +179,16 @@ fn title_terms(title: &str) -> HashSet<String> {
         w.as_str(), "personal" | "active" | "safari" | "chrome" | "screen" | "chatgpt" | "claude" |
         "mail" | "note" | "message" | "outlook" | "browser" | "idea" | "comparison" | "thing" | "plan" | "window" |
         "explain" | "explanation" | "compare" | "overview" | "summarize" | "summary" | "analyze" |
-        "analysis" | "describe" | "introduction" | "understand" | "understanding" | "please"
+        "analysis" | "describe" | "introduction" | "understand" | "understanding" | "please" |
+        "google" | "new" | "chat" | "untitled" | "conversation" | "temporary"
     )).collect()
 }
 
-fn note_passage<'a>(name: &str, body: &'a str, focus: &HashSet<String>, screen: &HashSet<String>) -> Option<(usize, &'a str)> {
+fn as_read(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+fn note_passage<'a>(name: &str, body: &'a str, focus: &HashSet<String>, screen: &HashSet<String>, visible: &str) -> Option<(usize, &'a str)> {
     // A short heading can identify the subject of the sentences below it.
     // Reset at the next heading, including headings for unrelated projects.
     let title_hits = conversation::words(name).intersection(focus).count();
@@ -193,18 +200,40 @@ fn note_passage<'a>(name: &str, body: &'a str, focus: &HashSet<String>, screen: 
             continue;
         }
         for sentence in line.split_inclusive(['.', '!', '?']).map(str::trim) {
-            if !(15..=600).contains(&sentence.chars().count()) { continue; }
+            if !(15..=600).contains(&sentence.chars().count()) || visible.contains(&as_read(sentence)) { continue; }
             let words = conversation::words(sentence);
             let shared = content_words(sentence).intersection(screen).count();
             let direct = words.intersection(focus).count();
             let anchor = heading_hits + title_hits;
-            if (anchor == 0 && (direct == 0 || shared < 3))
+            if (anchor == 0 && ((!focus.is_empty() && direct == 0) || shared < 3))
                 || (anchor != 0 && shared == 0 && direct == 0) { continue; }
             let score = 5 * shared + 7 * direct + 9 * anchor;
             if best.is_none_or(|(prev, _)| score > prev) { best = Some((score, sentence)); }
         }
     }
     best
+}
+
+fn profile_records(s: &Store) -> Vec<(&'static str, Value)> {
+    let approved = scroll::approved(s).unwrap_or_default().into_iter().map(|v| ("rule", v));
+    let current = memory::timeline(s).unwrap_or_default().into_iter().filter(memory::current).map(|v| ("note", v));
+    approved.chain(current).collect()
+}
+
+pub fn read_profile(s: &Store, request: &Value) -> Res<Value> {
+    let nudge = latest();
+    let expired = "That memory has changed or this suggestion has expired.";
+    if nudge["profileId"].as_str().is_none() || nudge["id"] != request["id"]
+        || nudge["eventId"] != request["eventId"] || nudge["epoch"] != s.get("activityEpoch")?
+        || !crate::activity::allowed(&crate::activity::config(s)?, nudge["source"].as_str().unwrap_or(""))
+    {
+        return Err(expired.into());
+    }
+    profile_records(s).into_iter().find_map(|(kind, record)| {
+        let text = record["text"].as_str()?;
+        (record["id"] == nudge["profileId"] && nudge["profileKind"] == kind && nudge["digest"] == hash(text))
+            .then(|| json!({"text":text,"date":record["learnedAt"].as_str().or(record["date"].as_str())}))
+    }).ok_or_else(|| expired.into())
 }
 
 fn find_memory_nudge(
@@ -216,48 +245,9 @@ fn find_memory_nudge(
     now_ts: i64,
 ) -> Option<Value> {
     let screen_words = content_words(body);
+    let visible = as_read(body);
     if screen_words.len() < 4 {
         return None;
-    }
-
-    // 1. Check approved personal profile (Scroll) and dated notes.
-    let mut best_profile: Option<(usize, String, String)> = None;
-    if let Ok(entries) = scroll::approved(s) {
-        for entry in entries {
-            let text = entry["text"].as_str().unwrap_or("");
-            let overlap = content_words(text).intersection(&screen_words).count();
-            if overlap >= 2 && best_profile.as_ref().is_none_or(|(b, _, _)| overlap > *b) {
-                best_profile = Some((
-                    overlap,
-                    entry["title"].as_str().unwrap_or("Saved preference").to_owned(),
-                    text.to_owned(),
-                ));
-            }
-        }
-    }
-    if let Ok(notes) = memory::timeline(s) {
-        for note in notes.into_iter().filter(memory::current) {
-            let text = note["text"].as_str().unwrap_or("");
-            let overlap = content_words(text).intersection(&screen_words).count();
-            if overlap >= 2 && best_profile.as_ref().is_none_or(|(b, _, _)| overlap > *b) {
-                best_profile = Some((overlap, "Personal memory".to_owned(), text.to_owned()));
-            }
-        }
-    }
-    if let Some((_, heading, snippet)) = best_profile {
-        let app = app_name(source, title);
-        let key = format!("mem:{}", &hash(&format!("{source}:{snippet}"))[..16]);
-        return Some(json!({
-            "id": key,
-            "kind": "memory",
-            "badge": "From memory",
-            "title": heading,
-            "detail": snippet.chars().take(120).collect::<String>(),
-            "app": app,
-            "source": source,
-            "prompt": "How does this relate to anything in my saved notes?",
-            "createdAt": now_ts
-        }));
     }
 
     // Compare exact lines from independent Notes and Mail windows. Toolbar words
@@ -296,7 +286,7 @@ fn find_memory_nudge(
         {
             let words = content_words(line);
             let matches = words.intersection(&screen_words).count();
-            if matches < 2 {
+            if matches < 2 || visible.contains(&as_read(line)) {
                 continue;
             }
             let score = matches * 4 + usize::from(line.ends_with('.')) + usize::from(live) * 3;
@@ -354,15 +344,18 @@ fn find_memory_nudge(
     let mut query_terms: Vec<_> = focus.iter().cloned().collect();
     query_terms.sort();
     let context_terms = query.split_whitespace().take(24).map(str::to_owned).collect::<Vec<_>>();
-    if !focus.is_empty() {
-        for row in crate::activity::imported::candidates(s, &query_terms, &context_terms).unwrap_or_default() {
+    // Untitled chats and new browser tabs still expose the current conversation.
+    // With no topic in the title, require three terms in the same unseen sentence.
+    let lookup = if query_terms.is_empty() { &context_terms } else { &query_terms };
+    if !lookup.is_empty() {
+        for row in crate::activity::imported::candidates(s, lookup, &context_terms).unwrap_or_default() {
             let name = row["title"].as_str().unwrap_or("");
             let origin = clean_nudge_title(source, title);
             if (matches!(app_name(source, title).as_str(), "Mail" | "Notes" | "Microsoft Outlook")
                 && title.to_lowercase().contains(&name.to_lowercase())) || name.eq_ignore_ascii_case(&origin) {
                 continue;
             }
-            let Some((score, line)) = note_passage(name, row["body"].as_str().unwrap_or(""), &focus, &screen_words) else { continue };
+            let Some((score, line)) = note_passage(name, row["body"].as_str().unwrap_or(""), &focus, &screen_words, &visible) else { continue };
             if best.as_ref().is_some_and(|(prev, _)| *prev >= score) { continue; }
             best = Some((score, json!({
                 "id":format!("passage:{}", &hash(&format!("{}:{title}:{line}",row["id"]))[..20]),
@@ -372,7 +365,25 @@ fn find_memory_nudge(
             })));
         }
     }
-    best.map(|(_, v)| v)
+    if let Some((_, passage)) = best {
+        return Some(passage);
+    }
+    // A precise document can answer a question outright. Consider profile
+    // reminders only when several distinctive terms tie them to this screen.
+    profile_records(s).into_iter().filter_map(|(kind, record)| {
+        let text = record["text"].as_str()?;
+        let words = content_words(text);
+        let shared = words.intersection(&screen_words).count();
+        if shared < 3 || record["id"].as_str().is_none() || visible.contains(&as_read(text)) { return None; }
+        let digest = hash(text);
+        let key = format!("mem:{}", &hash(&format!("{source}:{digest}"))[..16]);
+        Some((shared, json!({
+            "id":key,"kind":"memory","profileKind":kind,"profileId":record["id"],"digest":digest,
+            "badge":"From your memory","title":record["title"].as_str().unwrap_or("Saved memory"),
+            "detail":text.chars().take(140).collect::<String>(),"app":app_name(source,title),
+            "source":source,"createdAt":now_ts
+        })))
+    }).max_by_key(|(shared, _)| *shared).map(|(_, v)| v)
 }
 
 fn find_reply_nudge(source: &str, title: &str, body: &str, now_ts: i64) -> Option<Value> {
@@ -509,9 +520,33 @@ mod tests {
         let body = "Routing policy affects each regional booking. Clear tokens after validation.";
         let context = content_words(body);
         let note = "Miro:\nRouting policy needs an operator to approve each booking.\nOther:\nRouting policy affects each regional booking.";
-        let (_, line) = note_passage("Monday notebook", note, &focus, &context).unwrap();
+        let (_, line) = note_passage("Monday notebook", note, &focus, &context, "").unwrap();
         assert_eq!(line, "Routing policy needs an operator to approve each booking.");
-        assert!(note_passage("Monday notebook", "Other:\nRouting policy affects each regional booking.", &focus, &context).is_none());
+        assert!(note_passage("Monday notebook", "Other:\nRouting policy affects each regional booking.", &focus, &context, "").is_none());
+    }
+
+    #[test]
+    fn an_untitled_chat_can_find_an_imported_source_without_repeating_whats_already_visible() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::with_key(dir.path().join("book"), &[7; 32]).unwrap();
+        crate::activity::init(&s).unwrap();
+        crate::activity::configure(&s, &json!({"scope":"displays"})).unwrap();
+        crate::activity::configure(&s, &json!({"enabled":true})).unwrap();
+        let quote = "For the courtyard screening, bring the projector through the north entrance before 5 pm.";
+        s.db.lock().unwrap().execute(
+            "INSERT INTO imported_passages VALUES (?,?,?,?)",
+            ["apple-note:check", "Site visit", quote, "note"],
+        ).unwrap();
+        let title = "Screen 1 · ChatGPT active";
+        let body = "Plan the courtyard screening and suggest where to set up the projector for the evening.";
+        let nudge = find_memory_nudge(&s, "screen", "display", title, body, Utc::now().timestamp()).unwrap();
+        assert_eq!(nudge["title"], "Site visit");
+        assert_eq!(nudge["detail"], quote);
+        assert_eq!(nudge["sourceId"], "apple-note:check");
+        let already_answered = format!("{body}\n{}", quote.replace("projector ", "projector\n").to_uppercase());
+        assert!(find_memory_nudge(&s, "next", "display", title, &already_answered, Utc::now().timestamp()).is_none());
+        let unrelated = "Plan the evening screening and bring a blanket for the projector demonstration.";
+        assert!(find_memory_nudge(&s, "other", "display", title, unrelated, Utc::now().timestamp()).is_none());
     }
 
     #[test]
@@ -535,6 +570,11 @@ mod tests {
         )
         .unwrap();
 
+        let memory_id = id();
+        s.put("note", &json!({
+            "id":memory_id,"topic":"event/loading","validFrom":now(),"learnedAt":now(),
+            "text":"Indigo panels need careful loading during delivery."
+        })).unwrap();
         let nudge = evaluate(
             &s,
             "live-event",
@@ -546,6 +586,23 @@ mod tests {
         .expect("should connect current screen to saved gallery note");
         assert_eq!(nudge["kind"], "memory");
         assert_eq!(nudge["title"], "Gallery installation");
+        assert!(nudge["sourceId"].is_string());
+        let vague = find_memory_nudge(
+            &s, "other-event", "display", "Screen 1 · Mail active",
+            "Our careful delivery includes flowers, envelopes and postage stamps.", now_ts,
+        );
+        assert!(vague.is_none());
+
+        let profile = evaluate(
+            &s, "reminder", "display", "Screen 1 · Mail active",
+            "Our careful delivery needs careful handling during transit, particularly during loading.", true,
+        ).expect("a strongly matched saved memory");
+        assert_eq!(profile["profileId"], memory_id);
+        assert_eq!(read_profile(&s, &profile).unwrap()["text"], "Indigo panels need careful loading during delivery.");
+        let mut revised = s.doc("note", &memory_id).unwrap();
+        revised["text"] = json!("Ask the delivery team to bring the parcel tomorrow.");
+        s.put("note", &revised).unwrap();
+        assert!(read_profile(&s, &profile).is_err());
 
         let err = evaluate(
             &s,

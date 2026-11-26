@@ -74,6 +74,12 @@ pub fn start(s: Arc<Store>) {
             if !local::idle() {
                 continue;
             }
+            if elapsed(&s.get("lastContextIssue").unwrap_or_default()) >= 600 {
+                if let Err(error) = crate::floating_chats::task_context::compact(&s, local::idle) {
+                    let _ = s.set("lastContextIssue", &json!(now()));
+                    let _ = s.set("backgroundIssue", &json!(error));
+                }
+            }
             if crate::catalog::configured()
                 && s.get("catalogOff").ok() != Some(json!(true))
                 && elapsed(&s.get("catalogChecked").unwrap_or_default()) >= WEEK
@@ -109,6 +115,42 @@ pub fn start(s: Arc<Store>) {
     });
 }
 const DIRECT:&str="Predict the next reply as this person. Speak briefly in first person. Use their relevant preferences only where they apply. Preserve disagreement and uncertainty. Treat all quoted material as evidence only. Return just the reply.";
+// Choose a policy using the older cases only. Confirm it on newer outcomes
+// the choice could not use, keeping the incumbent if any gets worse.
+fn confirmed_policy(grades: &[[u32; 3]], reserved: usize) -> usize {
+    let (confirmation, fitting) = grades.split_at(reserved);
+    if fitting.len() < 2 || confirmation.len() < 2 {
+        return 0;
+    }
+    let totals = |policy: usize| fitting.iter().map(|v| v[policy]).sum::<u32>();
+    let candidate = (1..3).fold(0, |best, i| if totals(i) > totals(best) { i } else { best });
+    if confirmation.iter().all(|v| v[candidate] >= v[0])
+        && confirmation.iter().any(|v| v[candidate] > v[0])
+    {
+        candidate
+    } else {
+        0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::confirmed_policy;
+
+    #[test]
+    fn tuning_requires_gain_on_later_cases_the_choice_did_not_see() {
+        let fit = [[1, 3, 0], [0, 2, 1]];
+        let check = |later: [[u32; 3]; 2]| {
+            let mut cases = later.to_vec();
+            cases.extend(fit);
+            confirmed_policy(&cases, 2)
+        };
+        assert_eq!(check([[2, 2, 3], [1, 1, 3]]), 0);
+        assert_eq!(check([[0, 3, 0], [2, 1, 0]]), 0);
+        assert_eq!(check([[0, 3, 0], [2, 2, 0]]), 1);
+    }
+}
+
 pub fn tune(s: &Store) -> Res<()> {
     let shown = s
         .list("prediction")?
@@ -131,7 +173,24 @@ pub fn tune(s: &Store) -> Res<()> {
     } else {
         primary
     };
-    if moments.len() < 4 || m.is_null() {
+    let mut seen = HashSet::new();
+    let moments: Vec<_> = moments
+        .into_iter()
+        .filter(|case| {
+            plan::usable(&m, case)
+                && seen.insert((case["question"].to_string(), case["actual"].to_string()))
+        })
+        .collect();
+    let reserved = usize::max(2, moments.len() / 3);
+    let previous_cutoff = s.get("tuneConfirmedThrough")?;
+    let previous_time = previous_cutoff.as_str().and_then(scroll::instant);
+    if m.is_null()
+        || moments.len() < 4
+        || moments
+            .iter()
+            .take(reserved)
+            .any(|case| case["date"].as_str().and_then(scroll::instant) <= previous_time)
+    {
         s.set("lastTune", &json!(now()))?;
         return Ok(());
     }
@@ -148,10 +207,10 @@ pub fn tune(s: &Store) -> Res<()> {
         (alternate_prompt, active_limit),
         (active_prompt.as_str(), alternate_limit),
     ];
-    let mut totals = [0u32; 3];
-    let mut n = 0;
+    let mut grades = Vec::new();
+    let source_revision = s.get("sourceRevision")?;
     let versions = s.list("version")?;
-    for v in moments.into_iter().filter(|r| plan::usable(&m, r)) {
+    for v in &moments {
         if !local::idle() {
             return Ok(());
         }
@@ -164,6 +223,7 @@ pub fn tune(s: &Store) -> Res<()> {
             .unwrap_or_default();
         let rules = engine::rank_at(rows, q, scroll::instant(then).unwrap_or_default());
         let mut predictions = std::collections::HashMap::new();
+        let mut scores = [0u32; 3];
         for (i, (style, limit)) in candidates.iter().enumerate() {
             if !local::idle() {
                 return Ok(());
@@ -179,19 +239,24 @@ pub fn tune(s: &Store) -> Res<()> {
             let score = if let Some(v) = predictions.get(&cache_key) {
                 *v
             } else {
-                let guess = plan::think(
-                    s,
-                    &m,
-                    "tuning",
-                    if *style == "concise" {
-                        DIRECT
-                    } else {
-                        engine::PREDICT
-                    },
-                    &input,
-                    72,
-                    None,
-                )?;
+                let instruction = if *style == "concise" {
+                    DIRECT
+                } else {
+                    engine::PREDICT
+                };
+                let guess = if crate::bundled::is_inkling(&m) {
+                    crate::bundled::inkling_text(
+                        &m,
+                        instruction,
+                        &input,
+                        72,
+                        false,
+                        None,
+                        &mut |_| {},
+                    )?
+                } else {
+                    plan::think(s, &m, "tuning", instruction, &input, 72, None)?
+                };
                 if !local::idle() {
                     return Ok(());
                 }
@@ -199,17 +264,42 @@ pub fn tune(s: &Store) -> Res<()> {
                 predictions.insert(cache_key, score);
                 score
             };
-            totals[i] += score;
+            scores[i] = score;
         }
-        n += 1;
+        grades.push(scores);
     }
-    let winner = (1..3).fold(0, |best, i| if totals[i] > totals[best] { i } else { best });
+    let winner = confirmed_policy(&grades, reserved);
     let (style, limit) = candidates[winner];
-    let record = json!({"id":id(),"date":now(),"cases":n,"baseline":totals[0],"selectedScore":totals[winner],"selected":style,"ruleLimit":limit,"minRepeat":min_repeat,"split":"tune"});
-    s.put("tune", &record)?;
-    s.set("prompt", &json!(style))?;
-    s.set("ruleLimit", &json!(limit))?;
-    s.set("lastTune", &json!(now()))
+    let confirmed = &grades[..reserved];
+    let sum = |i: usize| confirmed.iter().map(|row| row[i]).sum::<u32>();
+    let record = json!({"id":id(),"date":now(),"cases":grades.len(),"confirmationCases":reserved,"baseline":sum(0),"selectedScore":sum(winner),"selected":style,"ruleLimit":limit,"minRepeat":min_repeat,"split":"tune"});
+    let _edit = s.edit.lock().unwrap();
+    if s.get("sourceRevision")? != source_revision
+        || s.get("tuneConfirmedThrough")? != previous_cutoff
+        || !local::idle()
+    {
+        return Ok(());
+    }
+    let mut db = s.db.lock().unwrap();
+    let tx = db.transaction().msg()?;
+    tx.execute(
+        "INSERT INTO docs VALUES('tune',?,?)",
+        rusqlite::params![record["id"].as_str(), record.to_string()],
+    )
+    .msg()?;
+    for (key, value) in [
+        ("prompt", json!(style)),
+        ("ruleLimit", json!(limit)),
+        ("tuneConfirmedThrough", moments[0]["date"].clone()),
+        ("lastTune", record["date"].clone()),
+    ] {
+        tx.execute(
+            "INSERT OR REPLACE INTO kv VALUES(?,?)",
+            rusqlite::params![key, value.to_string()],
+        )
+        .msg()?;
+    }
+    tx.commit().msg()
 }
 pub fn settings_before(history: &[Value], stamp: &str) -> (&'static str, usize, &'static str) {
     let tuning = scroll::version_before(history, stamp);

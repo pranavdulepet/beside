@@ -57,9 +57,9 @@ For repeated installs on your own Mac, build the app and run `scripts/install-lo
 
 To make and verify the distributable bundle and the website download, run `scripts/release.sh`. The standalone landing page is `website/index.html`. It loads its fonts and paper locally. On disk and on localhost the download uses the adjacent Mac archive. The public page links to the latest release. GitHub Pages deploys the website from `main` through the Pages workflow.
 
-To distribute with Apple notarization, set `BESIDE_SIGN_IDENTITY` to the Developer ID Application identity and `BESIDE_NOTARY_PROFILE` to its Keychain notarytool profile before running `scripts/release.sh`. The script signs the embedded runtime, submits the app, staples the ticket, and verifies the extracted archive. With neither variable set, it builds an ad-hoc signed copy.
+To distribute with Apple notarization, set `BESIDE_SIGN_IDENTITY` to the Developer ID Application identity and `BESIDE_NOTARY_PROFILE` to its Keychain notarytool profile before running `scripts/release.sh`. The script signs the embedded runtime, submits the app, staples the ticket, and verifies the extracted archive. With neither variable set, it builds an ad-hoc signed copy. A successful `codesign --verify --deep --strict` validates that bundle’s signature and sealed content. A Developer ID signature and Apple notarization are separate distribution checks. The first-launch guide explains what to expect from the community download. [First launch](guide.md#first-launch)
 
-The redistributable source archive is built by `python3 scripts/source-archive.py` and written to `release/Beside-source.zip`. The release script runs this step automatically. It packages tracked source files and includes a file inventory for offline repackaging.
+The redistributable source archive is built by `python3 scripts/source-archive.py` and written to `release/Beside-source.zip`. The release script runs this step automatically. Run it from a clean checkout at the release commit. The packager uses the tracked file list and reads the files from the working tree. It adds a file inventory for offline repackaging.
 
 ## Publishing a signed model list
 

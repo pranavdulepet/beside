@@ -1,12 +1,14 @@
 fn main() {
     println!("cargo:rerun-if-changed=native.m");
     println!("cargo:rerun-if-changed=activity.m");
+    println!("cargo:rerun-if-changed=bag_vision.m");
     println!("cargo:rerun-if-changed=meeting.m");
     println!("cargo:rerun-if-changed=voice.m");
     println!("cargo:rerun-if-changed=overlay.m");
     cc::Build::new()
         .file("native.m")
         .file("activity.m")
+        .file("bag_vision.m")
         .file("meeting.m")
         .file("voice.m")
         .file("overlay.m")
@@ -24,6 +26,7 @@ fn main() {
         "ServiceManagement",
         "ImageIO",
         "AppKit",
+        "WebKit",
         "QuartzCore",
         "PDFKit",
         "NaturalLanguage",

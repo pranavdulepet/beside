@@ -13,7 +13,15 @@ import {BesideMark, type Point} from './Ink';
 import {call, type Action, type Row} from './api';
 import './style.css';
 
-type WorkspaceTab = 'Memory' | 'Connect' | 'Chat' | 'Settings';
+const workspacePages = [
+  'memory', 'connections', 'chat', 'settings', 'predictions',
+  'memory/correction', 'chat/correction',
+] as const;
+type WorkspacePage = (typeof workspacePages)[number];
+
+function requestedPage() {
+  return workspacePages.find(page => location.hash === '#' + page);
+}
 
 function localDay() {
   const d = new Date();
@@ -27,10 +35,13 @@ function localDay() {
 function Workspace() {
   const [data, update] = useState<Row | null>(null);
   const [openingMark, setOpeningMark] = useState<Point[]>();
-  const [tab, setTab] = useState<WorkspaceTab>('Memory');
-  const [teaching, teach] = useState(false);
-  const [reply, selectReply] = useState<Row | null>(null);
-  const [predictions, showPredictions] = useState(false);
+  const [requested, setRequested] = useState(requestedPage);
+  const page = requested ?? (data?.firstCorrection ? 'memory/correction' : 'memory');
+  const tab = page === 'predictions' ? 'memory' : page.split('/')[0];
+  const correctionTarget = data?.firstCorrection?.context ?? history.state;
+  const reply = page === 'chat/correction' && correctionTarget?.sheet === data?.current
+    ? data?.chat?.turns.find((turn: Row) => turn.id === correctionTarget?.turn)
+    : undefined;
   const [focusWaiting, setFocusWaiting] = useState(false);
   const [error, fail] = useState('');
   const queue = useRef(Promise.resolve());
@@ -72,13 +83,16 @@ function Workspace() {
     return p;
   }
 
-  function navigate(next: WorkspaceTab, waiting = false) {
-    showPredictions(false);
-    teach(false);
-    selectReply(null);
+  function navigate(next: WorkspacePage, waiting = false, correction?: {sheet: string; turn: string}) {
+    if (location.hash !== '#' + next) history.pushState(correction ?? null, '', '#' + next);
+    setRequested(next);
     setFocusWaiting(waiting);
-    setTab(next);
     void queue.current.then(refresh).catch(e => fail(String(e)));
+  }
+
+  async function finish(openDesk = false) {
+    await act('finish');
+    navigate(openDesk ? 'chat' : requested ?? 'memory');
   }
 
   useEffect(() => {
@@ -95,22 +109,23 @@ function Workspace() {
     void refresh().catch(e => { if (live) fail(String(e)); });
     document.addEventListener('visibilitychange', sync);
     window.addEventListener('focus', sync);
+    function followLocation() {
+      setRequested(requestedPage());
+      setFocusWaiting(false);
+    }
+    window.addEventListener('hashchange', followLocation);
     const changed = listen('notebook-changed', () => {
       if (live && !document.hidden) void refresh().catch(e => fail(String(e)));
     }).catch(() => () => {});
     const off = listen('fresh-sheet', () => {
       if (!live) return;
-      teach(false);
-      selectReply(null);
-      showPredictions(false);
-      setTab('Chat');
-      void record('enterDesk', {day: localDay(), shortcut: true})
-        .then(refresh)
-        .catch(() => {});
+      void record('enterDesk', {day: localDay(), shortcut: true}).catch(() => {});
+      navigate('chat');
     }).catch(() => () => {});
     return () => {
       live = false;
       window.removeEventListener('focus', sync);
+      window.removeEventListener('hashchange', followLocation);
       document.removeEventListener('visibilitychange', sync);
       void changed.then(f => f());
       void off.then(f => f());
@@ -122,19 +137,19 @@ function Workspace() {
       if (!data?.setup) return;
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
-        navigate('Settings');
+        navigate('settings');
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        navigate('Memory');
+        navigate('memory');
       } else if ((e.metaKey || e.ctrlKey) && e.key === '1') {
         e.preventDefault();
-        navigate('Memory');
+        navigate('memory');
       } else if ((e.metaKey || e.ctrlKey) && e.key === '2') {
         e.preventDefault();
-        navigate('Connect');
+        navigate('connections');
       } else if ((e.metaKey || e.ctrlKey) && e.key === '3') {
         e.preventDefault();
-        navigate('Chat');
+        navigate('chat');
       }
     };
     window.addEventListener('keydown', onKey);
@@ -159,7 +174,7 @@ function Workspace() {
             data={data}
             act={act}
             refresh={refresh}
-            finish={() => act('finish')}
+            finish={finish}
           />
         </div>
       ) : (
@@ -192,10 +207,10 @@ function Workspace() {
             <nav className="workspace-nav" aria-label="Workspace sections">
               {(
                 [
-                  ['Memory', 'Memory'],
-                  ['Connect', 'Connections'],
-                  ['Chat', 'Chat'],
-                  ['Settings', 'Settings'],
+                  ['memory', 'Memory'],
+                  ['connections', 'Connections'],
+                  ['chat', 'Chat'],
+                  ['settings', 'Settings'],
                 ] as const
               ).map(([id, label]) => (
                 <button
@@ -237,41 +252,36 @@ function Workspace() {
               </div>
             )}
 
-            {teaching ? (
+            {page === 'memory/correction' || page === 'chat/correction' ? (
               <FirstCorrection
                 data={data}
-                reply={reply}
-                act={async (op, args) => {
-                  const result = await act(op, args);
-                  if (op === 'finish') navigate(tab);
-                  return result;
-                }}
+                reply={reply && {...reply, sheet: data.current}}
+                act={act}
+                finish={() => finish(true)}
+                returnToNotebook={() => navigate(page === 'chat/correction' ? 'chat' : 'memory')}
               />
-            ) : predictions ? (
+            ) : page === 'predictions' ? (
               <>
-                <button className="back-link" onClick={() => showPredictions(false)}>← Memory</button>
+                <button className="back-link" onClick={() => navigate('memory')}>← Memory</button>
                 <Mirror data={data} act={act} />
               </>
-            ) : tab === 'Memory' ? (
+            ) : tab === 'memory' ? (
               <Scroll
                 data={data}
                 act={act}
-                readings={() => showPredictions(true)}
-                teach={() => teach(true)}
+                readings={() => navigate('predictions')}
+                teach={() => navigate('memory/correction')}
               />
-            ) : tab === 'Connect' ? (
+            ) : tab === 'connections' ? (
               <Seal data={data} act={act} focusWaiting={focusWaiting} />
-            ) : tab === 'Chat' ? (
+            ) : tab === 'chat' ? (
               <Desk
                 key={data.current}
                 data={data}
                 act={act}
-                teach={() => teach(true)}
-                correctReply={(turn) => {
-                  selectReply({...turn, sheet: data.current});
-                  teach(true);
-                }}
-                openSeal={() => navigate('Connect', true)}
+                teach={() => navigate('chat/correction')}
+                correctReply={turn => navigate('chat/correction', false, {sheet: data.current, turn: turn.id})}
+                openSeal={() => navigate('connections', true)}
                 record={record}
                 onSave={(id, text) =>
                   record('save', {id, text, day: localDay()})

@@ -67,6 +67,7 @@ export function Desk({
   const sending = useRef(false);
   const pending = useRef<{text: string; id: string} | null>(null);
   const turns: Row[] = data.chat?.turns || [];
+  const replyToCorrect = data.firstCorrection ? undefined : turns.at(-1);
   const leaf = useRef<HTMLDivElement>(null);
   const [reviewQuestion, review] = useState('');
   async function send(approvedQuestion?: string) {
@@ -250,12 +251,10 @@ export function Desk({
             day: 'numeric',
           })}
         </time>
-        <button
-          onClick={() =>
-            turns.length ? correctReply(turns[turns.length - 1]) : teach()
-          }
-        >
-          {turns.length ? 'Correct this reply' : 'Teach a correction'}
+        <button onClick={() => replyToCorrect ? correctReply(replyToCorrect) : teach()}>
+          {data.firstCorrection
+            ? 'Continue your correction'
+            : replyToCorrect ? 'Correct this reply' : 'Teach a correction'}
         </button>
         <button onClick={() => showArchive(!archive)}>
           {archive ? 'Close sheets' : 'Sheets'} <small>⌘O</small>

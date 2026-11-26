@@ -100,10 +100,15 @@ export function BrainPicker({
   const savedModel = brain?.availableCloud?.find((p: Row) => p.id === selectedCloud)?.model;
   useEffect(() => {
     setModelId(savedModel || CLOUD_PRESETS[selectedCloud]?.defaultModel || '');
+  }, [selectedCloud, savedModel]);
+
+  function chooseProvider(id: string) {
+    if (id === selectedCloud) return;
+    setSelectedCloud(id);
     setApiKey('');
     setError('');
     setStatus('');
-  }, [selectedCloud, savedModel]);
+  }
 
   useEffect(() => {
     setConsentChecked(brain?.mode === 'cloud' && brain.provider === selectedCloud && brain.cloudConsent === true);
@@ -263,7 +268,8 @@ export function BrainPicker({
                     (selectedCloud === id ? ' selected' : '') +
                     (active ? ' active' : '')
                   }
-                  onClick={() => setSelectedCloud(id)}
+                  disabled={!!busy}
+                  onClick={() => chooseProvider(id)}
                 >
                   {meta.label}
                   {active ? ' · On' : linked ? ' · Saved' : ''}

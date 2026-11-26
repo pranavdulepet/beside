@@ -16,6 +16,32 @@ static PROJECT: LazyLock<Regex> = LazyLock::new(|| {
 static TASTE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^(?:(?:on|for) (?:my )?weekends?,? i (?:prefer|like|love)|i (?:prefer|like|love|enjoy))\s").unwrap()
 });
+// An explicit scope survives a change of mind; two unrelated preferences
+// such as a writing style and an appointment time must keep different topics.
+static SCOPED_TASTE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(?:actually[, ]+|correction[: ]+)?(?:for|when it comes to) (.{2,70}?),?\s+i (?:now |usually )?(prefer|want|like|need)\s+(.+)$").unwrap()
+});
+static RECALL_TASTE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(?:(?:how|when|what (?:time|format|style|day)) do i (?:usually )?(?:like|prefer)\b|what (?:did i (?:say|tell you|ask you to remember)|(?:is|was|are) my preferences?|do i (?:usually )?prefer) (?:about|for|when|in)\b)").unwrap()
+});
+static CHANGE_TASTE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(?:actually[, ]+|instead[, ]+|from now on[, ]+|correction[: ]+)i (?:now |usually )?(prefer|like|want|need)\s+(.+)$").unwrap()
+});
+
+fn one_off(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    [
+        "this one",
+        "this draft",
+        "this time",
+        "this week",
+        "this occasion",
+        "just today",
+        "for now",
+    ]
+    .iter()
+    .any(|cue| lower.contains(cue))
+}
 static RELATIVE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(next (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|tomorrow|today|yesterday|(?:[0-9]{1,2}|one|two|three|four) (?:days?|weeks?) ago)\b").unwrap()
 });
@@ -87,6 +113,9 @@ pub fn observe(
             || lower.starts_with("yesterday i ")
         {
             (format!("moment/{turn}/{i}"), assertion.to_owned())
+        } else if let Some(parts) = SCOPED_TASTE.captures(assertion) {
+            let scope = parts[1].trim().trim_end_matches(',').trim().to_lowercase();
+            (format!("preference/{scope}"), assertion.to_owned())
         } else if TASTE.is_match(assertion) {
             let scope = if lower.starts_with("on weekends") || lower.starts_with("for weekends") {
                 "weekend preference".to_owned()
@@ -173,6 +202,172 @@ pub fn current(n: &Value) -> bool {
     let until = n["validUntil"].as_str().and_then(crate::scroll::instant);
     from.is_some_and(|t| t <= now) && until.is_none_or(|t| now < t)
 }
+
+/// Find a few current facts anchored to this request. A corrected reply can
+/// also match its original question, even when the new preference is terse.
+pub fn floating_notes(s: &Store, question: &str, hosted: bool) -> Res<Vec<Value>> {
+    let mut query = words(question);
+    query.retain(|word| {
+        !matches!(
+            word.as_str(),
+            "like" | "say" | "did" | "prefer" | "format" | "preference" | "usually"
+        )
+    });
+    if query.is_empty() {
+        return Ok(vec![]);
+    }
+    let mut ranked = Vec::new();
+    let mut chats = HashMap::new();
+    for note in timeline(s)? {
+        let text = note["text"].as_str().unwrap_or("");
+        if !current(&note)
+            || (hosted
+                && (note["private"] == true
+                    || note["restricted"] == true
+                    || crate::local::sensitive(text)))
+        {
+            continue;
+        }
+        let scope = note["topic"]
+            .as_str()
+            .unwrap_or("")
+            .strip_prefix("preference/")
+            .unwrap_or("");
+        let scope_terms = words(scope);
+        let scope_hits = query.intersection(&scope_terms).count();
+        if (SCOPED_TASTE.is_match(text) || note["preferenceVerb"].is_string())
+            && !scope_terms.is_subset(&query)
+        {
+            continue;
+        }
+        let statement_hits = query.intersection(&words(text)).count();
+        let mut anchor_hits = 0;
+        if !hosted {
+            if let (Some(chat_id), Some(turn_id)) =
+                (note["sourceChat"].as_str(), note["sourceTurn"].as_str())
+            {
+                if !chats.contains_key(chat_id) {
+                    chats.insert(
+                        chat_id.to_owned(),
+                        s.optional_doc("floatingChat", chat_id)?.unwrap_or_default(),
+                    );
+                }
+                let asked = chats[chat_id]["turns"]
+                    .as_array()
+                    .and_then(|turns| turns.iter().find(|turn| turn["id"] == turn_id))
+                    .and_then(|turn| turn["question"].as_str())
+                    .unwrap_or("");
+                anchor_hits = query.intersection(&words(asked)).count();
+            }
+        }
+        let score = 3 * scope_hits + 2 * statement_hits + anchor_hits;
+        if score > 0 {
+            ranked.push((score, note["importance"] == 1.0, note));
+        }
+    }
+    // timeline() is ordered from newest to oldest. Keep its order on ties.
+    ranked.sort_by_key(|(score, corrected, _)| std::cmp::Reverse((*score, *corrected)));
+    Ok(ranked
+        .into_iter()
+        .take(6)
+        .map(|(_, _, note)| note)
+        .collect())
+}
+
+pub fn recalled_preference(s: &Store, question: &str) -> Res<Option<Value>> {
+    if !RECALL_TASTE.is_match(question) {
+        return Ok(None);
+    }
+    let notes = floating_notes(s, question, false)?;
+    let query = words(question);
+    let mut matches = notes.iter().filter(|note| {
+        let Some(scope) = note["topic"]
+            .as_str()
+            .and_then(|topic| topic.strip_prefix("preference/"))
+        else {
+            return false;
+        };
+        let scope = words(scope);
+        !scope.is_empty() && scope.is_subset(&query)
+    });
+    let Some(note) = matches.next() else {
+        return Ok(None);
+    };
+    if matches.next().is_some() {
+        return Ok(None);
+    }
+    Ok(Some(note.clone()))
+}
+
+pub fn describe_preference(note: &Value) -> String {
+    let quote = note["text"].as_str().unwrap_or("");
+    if let Some(parts) = SCOPED_TASTE.captures(quote) {
+        return format!(
+            "For {}, you {} {}.",
+            parts[1].trim_end_matches(','),
+            &parts[2],
+            parts[3].trim_end_matches(['.', '!'])
+        );
+    }
+    if let (Some(scope), Some(verb), Some(value)) = (
+        note["topic"]
+            .as_str()
+            .and_then(|s| s.strip_prefix("preference/")),
+        note["preferenceVerb"].as_str(),
+        note["preferenceValue"].as_str(),
+    ) {
+        return format!("For {scope}, you {verb} {value}.");
+    }
+    format!("You told me, “{quote}”")
+}
+
+/// Resolve “Actually, I prefer …” only against the current preference in
+/// the last saved reply of this conversation. One-off task edits stay local
+/// to that conversation.
+pub fn changed_preference(
+    s: &Store,
+    args: &Value,
+    question: &str,
+    epoch: &Value,
+) -> Res<Option<Value>> {
+    if question.ends_with('?') || question.chars().count() > 320 {
+        return Ok(None);
+    }
+    let text = question.trim_end_matches(['.', '!']).trim();
+    let Some(parts) = CHANGE_TASTE.captures(text) else {
+        return Ok(None);
+    };
+    if one_off(text) {
+        return Ok(None);
+    }
+    let _activity = s.activity_edit.lock().unwrap();
+    let _edit = s.edit.lock().unwrap();
+    if &s.get("activityEpoch")? != epoch {
+        return Ok(None);
+    }
+    let Some(turn) = crate::floating_chats::last_task(s, args, epoch, "preference")? else {
+        return Ok(None);
+    };
+    let Some(previous) = timeline(s)?
+        .into_iter()
+        .find(|note| current(note) && note["id"] == turn["preferenceId"])
+    else {
+        return Ok(None);
+    };
+    if !previous["topic"]
+        .as_str()
+        .is_some_and(|topic| topic.starts_with("preference/"))
+        || !(SCOPED_TASTE.is_match(previous["text"].as_str().unwrap_or(""))
+            || previous["preferenceVerb"].is_string())
+    {
+        return Ok(None);
+    }
+    let at = now();
+    let row = json!({"id":id(),"topic":previous["topic"],"value":text,"text":text,"scale":"trait","importance":1.0,"validFrom":at,"learnedAt":at,"private":true,"restricted":true,"dates":[],"sourceChat":args["chatId"],"preferenceVerb":parts[1].to_lowercase(),"preferenceValue":parts[2].trim()});
+    s.put("note", &row)?;
+    project(s)?;
+    Ok(Some(row))
+}
 pub fn relevant(s: &Store, q: &str, outing: bool, hosted: bool) -> Res<Vec<Value>> {
     let terms = words(q);
     let all = timeline(s)?;
@@ -189,7 +384,7 @@ pub fn relevant(s: &Store, q: &str, outing: bool, hosted: bool) -> Res<Vec<Value
         .into_iter()
         .filter(|n| {
             current(n)
-                && (!hosted || n["private"] != true)
+                && (!hosted || (n["private"] != true && n["restricted"] != true))
                 && ((outing
                     && (n["topic"] == "home"
                         || n["topic"]
@@ -386,6 +581,10 @@ pub fn revise(s: &Store, a: &Value, remove: bool) -> Res<Value> {
             replacement["topic"] = note["topic"].clone();
         }
         replacement["text"] = json!(text);
+        if let Some(fields) = replacement.as_object_mut() {
+            fields.remove("preferenceVerb");
+            fields.remove("preferenceValue");
+        }
         if replacement["value"] == note["value"] {
             replacement["value"] = json!(text);
         }
@@ -442,7 +641,7 @@ pub fn core_notes(s: &Store, hosted: bool) -> Res<Vec<Value>> {
         .into_iter()
         .filter(|n| {
             current(n)
-                && (!hosted || n["private"] != true)
+                && (!hosted || dream_shareable(n))
                 && ids.as_array().is_some_and(|v| v.contains(&n["id"]))
         })
         .collect())
@@ -470,26 +669,33 @@ fn dream_shareable(n: &Value) -> bool {
         && crate::plan::clean(&n["text"]).is_ok()
 }
 
-fn holdout(s: &Store, after: &str, hosted: bool) -> Res<Vec<Value>> {
+fn holdout(s: &Store, after: &str, hosted: bool, exclude_chats: &[&str]) -> Res<Vec<Value>> {
     let conn = s.db.lock().unwrap();
-    let sql = format!("SELECT CASE c.kind WHEN 'chat' THEN json_extract(old.value,'$.reply') ELSE json_extract(old.value,'$.answer') END AS situation,
-        json_extract(t.value,'$.question') AS actual, json_extract(t.value,'$.id') AS turn_id
+    let sql = format!("WITH later AS (SELECT CASE c.kind WHEN 'chat' THEN json_extract(old.value,'$.reply') ELSE json_extract(old.value,'$.answer') END AS situation,
+        json_extract(t.value,'$.question') AS actual, json_extract(t.value,'$.id') AS turn_id,
+        julianday(json_extract(t.value,'$.at')) AS observed,
+        row_number() OVER (PARTITION BY c.kind,c.id ORDER BY julianday(json_extract(t.value,'$.at')) DESC,t.key DESC) AS position
         FROM docs c JOIN json_each(c.v,'$.turns') t JOIN json_each(c.v,'$.turns') old ON old.key=t.key-1
         WHERE ((c.kind='chat' AND (?2=0 OR ({HOSTED_SHEET})))
           OR (c.kind='floatingChat' AND ?2=0 AND json_extract(c.v,'$.epoch') IS
             (SELECT json_extract(v,'$') FROM kv WHERE k='activityEpoch')))
+        AND c.id NOT IN (SELECT value FROM json_each(?3))
         AND length(trim(situation))>0 AND length(trim(actual))>0 AND length(turn_id)>0
         AND julianday(json_extract(old.value,'$.at'))>julianday(?1)
         AND julianday(json_extract(t.value,'$.at'))>=julianday(json_extract(old.value,'$.at'))
         AND julianday(json_extract(t.value,'$.at'))>julianday('now','-60 days')
         AND julianday(json_extract(t.value,'$.at'))<=julianday('now','+1 minute')
-        ORDER BY julianday(json_extract(t.value,'$.at')) DESC,c.id,t.key DESC LIMIT 12");
+        ) SELECT situation,actual,turn_id FROM later WHERE position=1 ORDER BY observed DESC,turn_id LIMIT 12");
     let mut stmt = conn.prepare(&sql).msg()?;
     let mut cases = Vec::new();
-    let rows = stmt.query_map(rusqlite::params![after,hosted], |r| Ok(json!({"situation":r.get::<_,String>(0)?,"actual":r.get::<_,String>(1)?,"id":r.get::<_,String>(2)?}))).msg()?;
+    let rows = stmt.query_map(rusqlite::params![after,hosted,json!(exclude_chats).to_string()], |r| Ok(json!({"situation":r.get::<_,String>(0)?,"actual":r.get::<_,String>(1)?,"id":r.get::<_,String>(2)?}))).msg()?;
     for row in rows {
         let case = row.msg()?;
-        if !hosted || crate::plan::clean(&case).is_ok() {
+        if (!hosted || crate::plan::clean(&case).is_ok())
+            && !cases.iter().any(|other: &Value| {
+                other["situation"] == case["situation"] && other["actual"] == case["actual"]
+            })
+        {
             cases.push(case);
         }
         if cases.len() == 3 {
@@ -498,6 +704,26 @@ fn holdout(s: &Store, after: &str, hosted: bool) -> Res<Vec<Value>> {
     }
     Ok(cases)
 }
+#[derive(Default)]
+struct Replay {
+    baseline: u32,
+    candidate: u32,
+    improved: usize,
+    regressed: usize,
+}
+
+impl Replay {
+    fn observe(&mut self, before: u32, after: u32) {
+        self.baseline += before;
+        self.candidate += after;
+        self.improved += usize::from(after > before);
+        self.regressed += usize::from(after < before);
+    }
+    fn promotes(&self) -> bool {
+        self.improved > 0 && self.regressed == 0
+    }
+}
+
 fn replay(
     s: &Store,
     model: &Value,
@@ -505,23 +731,25 @@ fn replay(
     candidate: &[Value],
     cases: &[Value],
     idle: impl Fn() -> bool,
-) -> Res<Option<[u32; 2]>> {
+) -> Res<Option<Replay>> {
     if crate::plan::selected(model) && !baseline.iter().chain(candidate).all(dream_shareable) {
         return Ok(None);
     }
-    let mut scores = [0u32; 2];
+    let mut trial = Replay::default();
     for case in cases {
         let situation = case["situation"].as_str().unwrap_or("");
         let actual = case["actual"].as_str().unwrap_or("");
+        let mut scores = [0; 2];
         for (i, rules) in [baseline, candidate].into_iter().enumerate() {
             if !idle() {
                 return Ok(None);
             }
             let guess = engine::predict_ranked(s, model, situation, rules, engine::PREDICT)?;
-            scores[i] += engine::grade(s, model, situation, &guess, actual)?;
+            scores[i] = engine::grade(s, model, situation, &guess, actual)?;
         }
+        trial.observe(scores[0], scores[1]);
     }
-    Ok(Some(scores))
+    Ok(Some(trial))
 }
 
 // Imported writing habits remain proposals until a later, independent sample
@@ -546,7 +774,7 @@ pub fn dream_proposal(s: &Store, primary: &Value) -> Res<()> {
             .chain(proposal["lastSeen"].as_str())
             .max()
             .unwrap_or("");
-        let cases = holdout(s, after, hosted)?;
+        let cases = holdout(s, after, hosted, &[])?;
         if cases.len() < 2 {
             continue;
         }
@@ -565,13 +793,13 @@ pub fn dream_proposal(s: &Store, primary: &Value) -> Res<()> {
             return Ok(());
         };
         if s.get("autoStamp")? == true
-            && holdout(s, after, hosted)? == cases
+            && holdout(s, after, hosted, &[])? == cases
             && crate::scroll::approved(s)? == current
             && s.optional_doc("proposal", proposal["id"].as_str().unwrap_or(""))?
                 .as_ref()
                 == Some(&proposal)
         {
-            if scores[1] >= scores[0] {
+            if scores.promotes() {
                 crate::scroll::change_locked(s, "stamp", &proposal)?;
             }
             s.set(&key, &json!(signature))?;
@@ -616,7 +844,7 @@ pub fn dream_transcript(s: &Store, primary: &Value, quiet: impl Fn() -> bool + C
             s.set(&key, &json!(true))?;
             continue;
         }
-        let cases = holdout(s, &at, hosted)?;
+        let cases = holdout(s, &at, hosted, &[&sheet])?;
         if cases.len() < 2 {
             continue;
         }
@@ -653,13 +881,13 @@ pub fn dream_transcript(s: &Store, primary: &Value, quiet: impl Fn() -> bool + C
             return Ok(());
         };
         if core_notes(s, hosted)? != baseline
-            || holdout(s, &at, hosted)? != cases
+            || holdout(s, &at, hosted, &[&sheet])? != cases
             || s.get(&format!("forgotNote/{}", hash(quote)))? == true
         {
             return Ok(());
         }
         let existing = timeline(s)?;
-        if grades[1] >= grades[0]
+        if grades.promotes()
             && !existing.iter().any(|n| {
                 n["text"] == quote || (n["topic"] == note["topic"] && n["importance"] == 1.0)
             })
@@ -747,11 +975,20 @@ pub fn dream_core(s: &Store, primary: &Value, idle: impl Fn() -> bool) -> Res<()
         .max()
         .unwrap_or("");
     let model = dream_model(s, primary);
-    let cases = holdout(s, cutoff, crate::plan::selected(&model))?;
+    let origins: Vec<_> = baseline
+        .iter()
+        .chain(&candidate)
+        .flat_map(|v| {
+            [v["sheet"].as_str(), v["sourceChat"].as_str()]
+                .into_iter()
+                .flatten()
+        })
+        .collect();
+    let cases = holdout(s, cutoff, crate::plan::selected(&model), &origins)?;
     if cases.len() < 2 {
         return Ok(());
     }
-    let stamp = hash(&json!([ids(&baseline), ids(&candidate), ids(&cases)]).to_string());
+    let stamp = hash(&json!([baseline, candidate, cases, model]).to_string());
     if s.get("lastDreamTrial")?["stamp"] == stamp {
         return Ok(());
     }
@@ -761,23 +998,177 @@ pub fn dream_core(s: &Store, primary: &Value, idle: impl Fn() -> bool) -> Res<()
     let Ok(_edit) = s.edit.try_lock() else {
         return Ok(());
     };
-    if ids(&core_notes(s, false)?) != ids(&baseline)
-        || holdout(s, cutoff, crate::plan::selected(&model))? != cases
-        || ids(&core_candidates(&timeline(s)?)) != ids(&candidate)
+    if core_notes(s, false)? != baseline
+        || holdout(s, cutoff, crate::plan::selected(&model), &origins)? != cases
+        || core_candidates(&timeline(s)?) != candidate
     {
         return Ok(());
     }
-    if scores[1] >= scores[0] {
+    if scores.promotes() {
         s.set("coreNotes", &json!(ids(&candidate)))?;
         project(s)?;
     }
-    s.set("lastDreamTrial",&json!({"stamp":stamp,"cases":cases.len(),"baseline":scores[0],"candidate":scores[1],"at":now()}))
+    s.set("lastDreamTrial",&json!({"stamp":stamp,"cases":cases.len(),"baseline":scores.baseline,"candidate":scores.candidate,"improved":scores.improved,"regressed":scores.regressed,"promoted":scores.promotes(),"at":now()}))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    #[test]
+    fn a_changed_scoped_preference_transfers_to_a_new_chat_on_the_normal_ask_path() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = Store::with_key(folder.path().into(), &[3; 32]).unwrap();
+        crate::app::setup(&store).unwrap();
+        let ask = |q: &str| {
+            crate::activity::ask(&store, &json!({"text":q,"turn":id(),"chatId":uuid::Uuid::new_v4().to_string(),"allowGeneral":true,"ignoreScreen":true})).unwrap()
+        };
+        let first = "For project updates, I prefer a paragraph of background first";
+        ask(&format!("Remember that {first}."));
+        assert_eq!(ask("How do I like my project updates?")["quote"], first);
+        let latest =
+            "Actually, for project updates, I now prefer the risk first, then the decision";
+        ask(&format!("{latest}."));
+        // Irrelevant newer notes would have displaced an older correction
+        // when the companion selected the ten most recent facts.
+        for n in 0..12 {
+            ask(&format!("Remember that my sketchbook number is {n}."));
+        }
+        let receipt = ask("How do I like my project updates?");
+        assert_eq!(receipt["quote"], latest);
+        assert_eq!(
+            receipt["answer"],
+            "For project updates, you prefer the risk first, then the decision."
+        );
+        let (_, actual) = crate::activity::personal_memory_bundle(
+            &store,
+            "Draft my project update. Two sentences, please.",
+            false,
+        )
+        .unwrap();
+        assert_eq!(actual, [latest]);
+        assert!(
+            crate::activity::personal_memory_bundle(&store, "Update my groceries.", false)
+                .unwrap()
+                .1
+                .is_empty()
+        );
+        assert!(
+            crate::activity::personal_memory_bundle(&store, "Draft my project update.", true)
+                .unwrap()
+                .1
+                .is_empty()
+        );
+        let old = timeline(&store)
+            .unwrap()
+            .into_iter()
+            .find(|note| note["text"] == first)
+            .unwrap();
+        assert!(!current(&old));
+    }
+
+    #[test]
+    fn replay_rejects_ties_and_improvements_that_hide_a_regression() {
+        let mut trial = Replay::default();
+        trial.observe(2, 2);
+        trial.observe(1, 1);
+        assert!(!trial.promotes());
+        trial.observe(0, 3);
+        assert!(trial.promotes());
+        trial.observe(2, 1);
+        assert!(trial.candidate > trial.baseline);
+        assert!(!trial.promotes());
+    }
+
+    #[test]
+    fn a_plain_correction_reuses_only_the_last_active_preference() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::with_key(dir.path().into(), &[3; 32]).unwrap();
+        crate::app::setup(&s).unwrap();
+        let chat = uuid::Uuid::new_v4().to_string();
+        let statement = "For studio sessions, I prefer Wednesday mornings.";
+        let mut response = crate::activity::ask(&s,&json!({"text":statement,"chatId":chat,"turn":"first","allowGeneral":true,"ignoreScreen":true})).unwrap();
+        response["id"] = json!("first");
+        response["question"] = json!(statement);
+        assert_eq!(response["workKind"], "preference");
+        crate::floating_chats::save(
+            &s,
+            &json!({"chats":[{"id":chat,"turns":[response]}]}),
+            false,
+        )
+        .unwrap();
+        let other = json!({"chatId":uuid::Uuid::new_v4().to_string(),"previousTurn":"first"});
+        let correction = "Actually, I prefer Friday afternoons.";
+        assert!(changed_preference(&s, &other, correction, &Value::Null)
+            .unwrap()
+            .is_none());
+        let ask = json!({"text":correction,"chatId":chat,"previousTurn":"first","turn":"new","allowGeneral":true,"ignoreScreen":true});
+        assert!(changed_preference(
+            &s,
+            &ask,
+            "Actually, I prefer Monday for this one.",
+            &Value::Null
+        )
+        .unwrap()
+        .is_none());
+        let changed = crate::activity::ask(&s, &ask).unwrap();
+        assert_eq!(changed["workKind"], "preference");
+        let remembered = recalled_preference(&s, "When do I like my studio sessions?")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            describe_preference(&remembered),
+            "For studio sessions, you prefer Friday afternoons."
+        );
+        assert_eq!(remembered["text"], "Actually, I prefer Friday afternoons");
+        assert!(
+            changed_preference(&s, &ask, "Actually, I prefer Thursdays.", &Value::Null)
+                .unwrap()
+                .is_none(),
+            "a stale reply cannot overwrite the current preference"
+        );
+        revise(
+            &s,
+            &json!({"id":remembered["id"],"text":"Tuesday afternoons work best."}),
+            false,
+        )
+        .unwrap();
+        let new = recalled_preference(&s, "When do I like my studio sessions?")
+            .unwrap()
+            .unwrap();
+        assert!(describe_preference(&new).contains("Tuesday"));
+        assert!(!describe_preference(&new).contains("Friday"));
+    }
+
+    #[test]
+    fn validation_uses_a_distinct_later_conversation_for_each_case() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = Store::with_key(folder.path().into(), &[5; 32]).unwrap();
+        let stamp = now();
+        for (id, topic) in [
+            ("first", "restaurant"),
+            ("second", "train"),
+            ("duplicate", "train"),
+        ] {
+            store.put("floatingChat",&json!({"id":id,"turns":[
+                {"id":"one","at":stamp,"answer":"First idea."},
+                {"id":"two","at":stamp,"question":"Another idea?","answer":format!("Choose the {topic} option?")},
+                {"id":id,"at":stamp,"question":"Yes, book that one."}
+            ]})).unwrap();
+        }
+        let cases = holdout(&store, "2000-01-01", false, &[]).unwrap();
+        assert_eq!(cases.len(), 2);
+        assert!(cases
+            .iter()
+            .all(|case| case["actual"] == "Yes, book that one."));
+        assert_eq!(
+            holdout(&store, "2000-01-01", false, &["first"])
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(holdout(&store, &stamp, false, &[]).unwrap().is_empty());
+    }
     #[test]
     fn dated_floating_followups_only_enter_local_replay() {
         let folder = tempfile::tempdir().unwrap();
@@ -795,15 +1186,15 @@ mod tests {
         record("current", Value::Null, json!(stamp));
         record("legacy", Value::Null, Value::Null);
         record("forgotten", json!("old-epoch"), json!(stamp));
-        let cases = holdout(&s, "2000-01-01", false).unwrap();
+        let cases = holdout(&s, "2000-01-01", false, &[]).unwrap();
         assert_eq!(
             cases,
             [
                 json!({"id":"current","situation":"Two dinners for two.","actual":"Make it three people."})
             ]
         );
-        assert!(holdout(&s, "2000-01-01", true).unwrap().is_empty());
-        assert!(holdout(&s, &stamp, false).unwrap().is_empty());
+        assert!(holdout(&s, "2000-01-01", true, &[]).unwrap().is_empty());
+        assert!(holdout(&s, &stamp, false, &[]).unwrap().is_empty());
     }
 
     #[test]
@@ -825,12 +1216,12 @@ mod tests {
                 json!([])
             };
             store.put("chat", &json!({"id":id,"private":false,"networkClosed":false,"turns":[
-                {"id":"old","reply":"Would you prefer a shorter invitation?","at":stamp,"files":files},
+                {"id":"old","reply":format!("Would you prefer a shorter {id} invitation?"),"at":stamp,"files":files},
                 {"id":id,"question":"Yes, just one paragraph.","at":stamp}
             ]})).unwrap();
         }
-        assert_eq!(holdout(&store, "2000-01-01", false).unwrap().len(), 3);
-        let public = holdout(&store, "2000-01-01", true).unwrap();
+        assert_eq!(holdout(&store, "2000-01-01", false, &[]).unwrap().len(), 3);
+        let public = holdout(&store, "2000-01-01", true, &[]).unwrap();
         assert_eq!(public.len(), 1);
         assert_eq!(public[0]["id"], "share");
         assert!(!dream_shareable(
@@ -928,7 +1319,7 @@ mod integration {
         assert_eq!(trial["cases"], 2);
         assert_eq!(
             !core_notes(&s, false).unwrap().is_empty(),
-            trial["candidate"].as_i64() >= trial["baseline"].as_i64()
+            trial["improved"].as_u64().unwrap() > 0 && trial["regressed"] == 0
         );
         assert!(core_notes(&s, true).unwrap().is_empty());
     }
@@ -940,9 +1331,14 @@ static EXPLICIT_REMEMBER: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Extract and persist explicit or natural personal memories from floating companion messages.
 /// Returns `(saved_notes, was_explicit_only)`.
-pub fn remember_from_chat(s: &Store, raw: &str, turn: &str) -> Res<(Vec<Value>, bool)> {
+pub fn remember_from_chat(
+    s: &Store,
+    raw: &str,
+    turn: &str,
+    chat: Option<&str>,
+) -> Res<(Vec<Value>, bool)> {
     let trimmed = raw.trim();
-    if trimmed.is_empty() || trimmed.len() > 500 {
+    if trimmed.is_empty() || trimmed.chars().count() > 500 {
         return Ok((Vec::new(), false));
     }
     let at = Local::now();
@@ -951,8 +1347,8 @@ pub fn remember_from_chat(s: &Store, raw: &str, turn: &str) -> Res<(Vec<Value>, 
 
     if let Some(cap) = EXPLICIT_REMEMBER.captures(trimmed) {
         let fact = cap[1].trim().trim_end_matches(['.', '!']).trim();
-        if fact.len() >= 3 && fact.len() <= 320 && !trimmed.ends_with('?') {
-            let observed = observe(fact, turn, at, false, false);
+        if (3..=320).contains(&fact.chars().count()) && !trimmed.ends_with('?') {
+            let observed = observe(fact, turn, at, true, true);
             if !observed.is_empty() {
                 notes.extend(observed);
             } else {
@@ -967,37 +1363,51 @@ pub fn remember_from_chat(s: &Store, raw: &str, turn: &str) -> Res<(Vec<Value>, 
                     "validUntil": Value::Null,
                     "validFrom": at.to_rfc3339(),
                     "learnedAt": at.to_rfc3339(),
-                    "private": false,
-                    "restricted": false,
+                    "private": true,
+                    "restricted": true,
                     "dates": []
                 }));
             }
             explicit_only = true;
         }
-    } else if !trimmed.ends_with('?') {
-        notes.extend(observe(trimmed, turn, at, false, false));
+    } else if !trimmed.ends_with('?') && !one_off(trimmed) {
+        notes.extend(observe(trimmed, turn, at, true, true));
+        explicit_only = SCOPED_TASTE.is_match(trimmed);
     }
 
     if notes.is_empty() {
         return Ok((Vec::new(), false));
     }
 
-    let existing = timeline(s).unwrap_or_default();
+    let _edit = s.edit.lock().unwrap();
+    let existing = timeline(s)?;
     let mut saved = Vec::new();
-    for note in notes {
-        let dup = existing.iter().any(|e| {
+    let mut changed = false;
+    for mut note in notes {
+        if let Some(chat) = chat {
+            note["sourceChat"] = json!(chat);
+        }
+        let duplicate_today = existing.iter().find(|e| {
             current(e)
+                && e["topic"] == note["topic"]
+                && e["learnedAt"].as_str().and_then(|v| v.get(..10))
+                    == note["learnedAt"].as_str().and_then(|v| v.get(..10))
                 && e["text"]
                     .as_str()
                     .is_some_and(|t| t.eq_ignore_ascii_case(note["text"].as_str().unwrap_or("")))
         });
-        if !dup {
+        if let Some(previous) = duplicate_today {
+            if explicit_only {
+                saved.push(previous.clone());
+            }
+        } else {
             s.put("note", &note)?;
             saved.push(note);
+            changed = true;
         }
     }
-    if !saved.is_empty() {
-        let _ = project(s);
+    if changed {
+        project(s)?;
     }
     Ok((saved, explicit_only))
 }
@@ -1010,8 +1420,13 @@ mod pages {
         let dir = tempfile::tempdir().unwrap();
         let s = Store::with_key(dir.path().into(), &[7; 32]).unwrap();
         crate::app::setup(&s).unwrap();
-        let (saved, explicit) =
-            remember_from_chat(&s, "Remember that I prefer concise bullet points.", "t1").unwrap();
+        let (saved, explicit) = remember_from_chat(
+            &s,
+            "Remember that I prefer concise bullet points.",
+            "t1",
+            None,
+        )
+        .unwrap();
         assert!(explicit);
         assert_eq!(saved.len(), 1);
         assert!(saved[0]["text"]

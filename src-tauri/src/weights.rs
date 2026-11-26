@@ -38,13 +38,51 @@ const TIERS: [Tier; 2] = [
         sha: "93567e57a8fe10b23569b9d9ec38cd005deedf71e29477c421a4b83f418a538b",
     },
 ];
+
+// A new notebook may reuse the published weights from a standard Beside
+// installation. Never scan user folders or open the other notebook's database.
+fn installed_copy(root: &Path, home: &Path, tier: &Tier) -> Option<PathBuf> {
+    let home = home.canonicalize().ok()?;
+    let current = root.canonicalize().ok()?;
+    for name in ["Beside", "Sumi"] {
+        let notebook = home.join(name);
+        if notebook == current {
+            continue;
+        }
+        let file = notebook.join(".sumi/models").join(tier.file);
+        if file.canonicalize().ok().as_ref() == Some(&file)
+            && file.metadata().is_ok_and(|m| m.is_file() && m.len() == tier.size)
+        {
+            return Some(file);
+        }
+    }
+    None
+}
+
+pub fn use_installed(s: &Store, label: &str) -> Res<Value> {
+    let tier = TIERS
+        .iter()
+        .find(|t| t.label == label)
+        .ok_or("Choose an available local model.")?;
+    let file = installed_copy(&s.root, &crate::sources::home(), tier)
+        .ok_or("The installed model has moved. Choose its file again.")?;
+    if crate::local::fit(s)["memory"].as_u64().unwrap_or(0) < tier.ram * 1_073_741_824 {
+        return Err(format!("{} needs {} GB of memory.", tier.label, tier.ram));
+    }
+    if !spec(s, tier, "").valid(&file)? {
+        return Err("The installed model did not match its publisher’s checksum. Download a fresh copy or choose your model file.".into());
+    }
+    crate::bundled::use_file(s, &file)
+}
+
 fn choices(s: &Store) -> Vec<Value> {
     let fit = crate::local::fit(s);
     TIERS.iter().map(|t|{
         let model=spec(s,t,"");let saved=model.saved();
         json!({"label":t.label,"file":t.file,"bytes":saved,"total":t.size,"ram":t.ram,
             "fits":fit["memory"].as_u64().unwrap_or(0)>=t.ram*1_073_741_824,
-            "required":t.size.saturating_sub(saved)+RESERVE,"cached":model.dest.metadata().is_ok_and(|m|m.len()==t.size)})
+            "required":t.size.saturating_sub(saved)+RESERVE,"cached":model.dest.metadata().is_ok_and(|m|m.len()==t.size),
+            "installedCopy":installed_copy(&s.root,&crate::sources::home(),t).is_some()})
     }).collect()
 }
 const RESERVE: u64 = 3_000_000_000;
@@ -279,6 +317,29 @@ pub fn download(s: &Store, label: Option<&str>) -> Res<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reused_weights_are_limited_to_known_regular_files_and_require_the_published_digest() {
+        let home = tempfile::tempdir().unwrap();
+        let current = home.path().join("new");
+        let previous = home.path().join("Beside/.sumi/models");
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::create_dir_all(&previous).unwrap();
+        let tier = Tier {ram: 1, label: "Test", repo: "test", revision: "a", file: "weights.gguf", size: 4,
+            sha: "b83633aa785344791618f2fddf131b010ea04912a60430760b070bad293f65bd"};
+        let path = previous.join(tier.file);
+        std::fs::write(&path, b"test").unwrap();
+        assert_eq!(installed_copy(&current, home.path(), &tier), path.canonicalize().ok());
+        let expected = Download {dest: path.clone(), url: "", size: tier.size, sha: tier.sha};
+        assert!(!expected.valid(&path).unwrap());
+        std::fs::write(&path, b"GGUF").unwrap();
+        assert!(expected.valid(&path).unwrap());
+        assert!(installed_copy(&home.path().join("Beside"), home.path(), &tier).is_none());
+        let other = home.path().join("other.gguf");
+        std::fs::rename(&path, &other).unwrap();
+        std::os::unix::fs::symlink(&other, &path).unwrap();
+        assert!(installed_copy(&current, home.path(), &tier).is_none());
+    }
+
     #[test]
     fn complete_partial_is_verified_before_reuse() {
         let dir = tempfile::tempdir().unwrap();

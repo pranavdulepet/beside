@@ -1,9 +1,29 @@
 #import <AppKit/AppKit.h>
+#import <ApplicationServices/ApplicationServices.h>
 #import <AVFoundation/AVFoundation.h>
 #import <Speech/Speech.h>
+#import <ScreenCaptureKit/ScreenCaptureKit.h>
+#import <QuartzCore/QuartzCore.h>
+#import <WebKit/WebKit.h>
 
 extern NSDictionary *sumi_point_window(CGPoint p);
 extern NSDictionary *sumi_read_point(NSDictionary *window, CGPoint p, NSDictionary *settings);
+extern int sumi_workspace_available(void);
+
+int sumi_summon_access(void) {
+    if (!sumi_workspace_available()) return 0;
+    if (CGPreflightScreenCaptureAccess()) return 1;
+    // Some Macs grant ScreenCaptureKit while the older Core Graphics check
+    // reports false. Verify that grant afresh; an earlier success can be revoked.
+    dispatch_semaphore_t ready=dispatch_semaphore_create(0);
+    __block BOOL allowed=NO;
+    [SCShareableContent getShareableContentExcludingDesktopWindows:YES onScreenWindowsOnly:YES
+        completionHandler:^(SCShareableContent *content,NSError *error) {
+            allowed=!error && content.displays.count>0;
+            dispatch_semaphore_signal(ready);
+        }];
+    return !dispatch_semaphore_wait(ready,dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC)) && allowed;
+}
 typedef void (*SumiVoiceCallback)(const char *);
 @interface SumiVoice : NSObject
 @property AVAudioEngine *engine;
@@ -22,6 +42,172 @@ typedef void (*SumiVoiceCallback)(const char *);
 static SumiVoice *current;
 static NSValue *replyPosition;
 static NSRect sourceWindow;
+// A receipt for the frontmost app and its focused window. No text or image is read.
+static NSRunningApplication *returnApp;
+static id returnWindow;
+static NSRunningApplication *serviceApp;
+static id serviceWindow;
+static NSRunningApplication *recentServiceSender;
+static NSTimeInterval senderLostFocus;
+
+void sumi_watch_service_origin(void) {
+    NSNotificationCenter *center=NSWorkspace.sharedWorkspace.notificationCenter;
+    [center addObserverForName:NSWorkspaceDidDeactivateApplicationNotification object:nil
+                         queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *event) {
+        NSRunningApplication *app=event.userInfo[NSWorkspaceApplicationKey];
+        if (!app || app.processIdentifier==NSRunningApplication.currentApplication.processIdentifier) return;
+        recentServiceSender=app.activationPolicy==NSApplicationActivationPolicyRegular ? app : nil;
+        senderLostFocus=NSProcessInfo.processInfo.systemUptime;
+    }];
+}
+
+static id focusedWindowOf(NSRunningApplication *app) {
+    if (!app || !AXIsProcessTrusted()) return nil;
+    id owner=CFBridgingRelease(AXUIElementCreateApplication(app.processIdentifier));
+    AXUIElementSetMessagingTimeout((__bridge AXUIElementRef)owner,0.1);
+    CFTypeRef window=NULL;
+    if (AXUIElementCopyAttributeValue((__bridge AXUIElementRef)owner,kAXFocusedWindowAttribute,&window)==kAXErrorSuccess)
+        return CFBridgingRelease(window);
+    return nil;
+}
+
+static void rememberFrontApp(void) {
+    NSRunningApplication *app=NSWorkspace.sharedWorkspace.frontmostApplication;
+    if (!app || app.processIdentifier==NSRunningApplication.currentApplication.processIdentifier) return;
+    returnApp=app;
+    returnWindow=focusedWindowOf(app);
+}
+
+// Capture the sender while its Services menu still owns the selection. The
+// asynchronous WebView presentation can happen after AppKit changes focus.
+void sumi_capture_service_origin(void) {
+    if (!NSThread.isMainThread) {
+        dispatch_sync(dispatch_get_main_queue(),^{ sumi_capture_service_origin(); });
+        return;
+    }
+    NSWorkspace *workspace=NSWorkspace.sharedWorkspace;
+    NSRunningApplication *app=workspace.frontmostApplication;
+    pid_t ourPID=NSRunningApplication.currentApplication.processIdentifier;
+    if (!app || app.processIdentifier==ourPID) app=workspace.menuBarOwningApplication;
+    // Services can activate Beside before delivering the pasteboard. In that
+    // transition AppKit already reports Beside as both front and menu owner.
+    if ((!app || app.processIdentifier==ourPID) &&
+        NSProcessInfo.processInfo.systemUptime-senderLostFocus<2 && !NSApp.keyWindow.visible)
+        app=recentServiceSender;
+    serviceApp=app.processIdentifier==ourPID ? nil : app;
+    serviceWindow=focusedWindowOf(serviceApp);
+}
+
+void sumi_prepare_panel(int fromService) {
+    void (^prepare)(void)=^{
+        if (fromService) {
+            returnApp=serviceApp;
+            returnWindow=serviceWindow;
+            serviceApp=nil;
+            serviceWindow=nil;
+        } else rememberFrontApp();
+    };
+    if (NSThread.isMainThread) prepare();
+    else dispatch_sync(dispatch_get_main_queue(),prepare);
+}
+
+@interface BesidePanelCover : NSView
+@end
+@implementation BesidePanelCover
+- (NSView *)hitTest:(NSPoint)point { return nil; }
+@end
+
+static BesidePanelCover *panelCover;
+static NSUInteger panelPaintGeneration;
+static WKWebView *panelWebView(NSView *view) {
+    if ([view isKindOfClass:WKWebView.class]) return (WKWebView *)view;
+    for (NSView *child in view.subviews) {
+        WKWebView *web = panelWebView(child);
+        if (web) return web;
+    }
+    return nil;
+}
+
+// The WindowServer can briefly reuse the last surface of an ordered-out
+// WKWebView, even after its hidden DOM was replaced. Keep an opaque native
+// view over that surface across orderOut/orderFront. Keyboard input goes
+// straight to the fresh composer underneath.
+void sumi_cover_panel(void *pointer) {
+    NSWindow *panel = (__bridge NSWindow *)pointer;
+    panelPaintGeneration++;
+    panel.alphaValue = 0;
+    NSView *root = panel.contentView;
+    if (!panelCover) {
+        panelCover = [BesidePanelCover new];
+        panelCover.wantsLayer = YES;
+        panelCover.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        [panelCover setAccessibilityElement:NO];
+    }
+    panelCover.frame = root.bounds;
+    BOOL dark = [[panel.effectiveAppearance bestMatchFromAppearancesWithNames:
+        @[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]] isEqual:NSAppearanceNameDarkAqua];
+    NSColor *paper = dark ? [NSColor colorWithSRGBRed:28./255 green:41./255 blue:41./255 alpha:1]
+                          : [NSColor colorWithSRGBRed:250./255 green:248./255 blue:241./255 alpha:1];
+    panelCover.layer.backgroundColor = paper.CGColor;
+    if (panelCover.superview != root)
+        [root addSubview:panelCover positioned:NSWindowAbove relativeTo:nil];
+    [CATransaction flush];
+}
+
+void sumi_reveal_after_paint(void *pointer) {
+    NSWindow *panel = (__bridge NSWindow *)pointer;
+    NSUInteger generation = panelPaintGeneration;
+    WKWebView *web = panelWebView(panel.contentView);
+    [panel.contentView layoutSubtreeIfNeeded];
+    [panel displayIfNeeded];
+    [CATransaction flush];
+    panel.alphaValue = 1;
+    if (!web) return;
+
+    // Order the covered window in first. requestAnimationFrame in a hidden
+    // WKWebView can be suspended indefinitely. Two frames leave a complete
+    // paint interval between the DOM commit and the final screen update.
+    [web callAsyncJavaScript:@"await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))); return true;"
+                   arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld
+           completionHandler:^(id painted, NSError *scriptError) {
+        if (generation != panelPaintGeneration || !panel.visible) return;
+        WKSnapshotConfiguration *config = [WKSnapshotConfiguration new];
+        config.rect = CGRectMake(0, 0, 1, 1);
+        config.afterScreenUpdates = YES;
+        [web takeSnapshotWithConfiguration:config completionHandler:^(NSImage *pixel, NSError *error) {
+            if (generation == panelPaintGeneration && panel.visible && (pixel || [painted boolValue]))
+                [panelCover removeFromSuperview];
+        }];
+    }];
+}
+
+void sumi_dismiss_panel(void *pointer) {
+    NSWindow *panel=(__bridge NSWindow *)pointer;
+    NSRunningApplication *origin=returnApp;
+    id window=returnWindow;
+    returnApp=nil;
+    returnWindow=nil;
+    NSRunningApplication *beside=NSRunningApplication.currentApplication;
+    BOOL shouldReturn=origin && !origin.terminated && !origin.hidden && panel.visible &&
+        NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier==beside.processIdentifier &&
+        (panel.isKeyWindow || !NSApp.keyWindow) && !NSApp.modalWindow && !panel.attachedSheet;
+    BOOL allowed=NO;
+    if (shouldReturn) {
+        // Transfer while we still own activation. Ordering out the key
+        // window first lets the window server choose another application.
+        if (@available(macOS 14.0,*)) {
+            [NSApp yieldActivationToApplication:origin];
+            allowed=[origin activateFromApplication:beside options:0];
+        } else allowed=[origin activateWithOptions:0];
+    }
+    sumi_cover_panel(pointer);
+    [panel orderOut:nil];
+    if (allowed && window && AXIsProcessTrusted()) {
+        AXUIElementSetMessagingTimeout((__bridge AXUIElementRef)window,0.1);
+        AXUIElementPerformAction((__bridge AXUIElementRef)window,kAXRaiseAction);
+    }
+}
+
 void sumi_position_reply(void *pointer) {
     if (!replyPosition) return;
     NSPoint p=replyPosition.pointValue; replyPosition=nil;
@@ -86,7 +272,7 @@ void sumi_position_reply(void *pointer) {
 - (void)deliver {
     if (self.finished || !self.released || !self.speechDone || !self.pointReady) return;
     self.finished=YES; [self stopMic]; [self.task cancel]; self.task=nil; [self.badge orderOut:nil];
-    NSDictionary *payload=@{@"typed":@(self.typed), @"text":self.text ?: @"", @"issue":self.issue ?: @"", @"point":self.point ?: @{},@"generation":self.settings[@"generation"] ?: NSNull.null,@"epoch":self.settings[@"epoch"] ?: NSNull.null};
+    NSDictionary *payload=@{@"typed":@(self.typed), @"text":self.text ?: @"", @"issue":self.issue ?: @"", @"point":self.point ?: @{},@"generation":self.settings[@"generation"] ?: NSNull.null,@"epoch":self.settings[@"epoch"] ?: NSNull.null,@"onDemand":@([self.settings[@"onDemand"] boolValue])};
     NSData *data=[NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
     if (current==self) {
         replyPosition=[NSValue valueWithPoint:self.mouse];
@@ -164,7 +350,7 @@ void sumi_voice_key(int down,const char *raw,SumiVoiceCallback callback) {
             SumiVoice *s=current; if (!s || s.released) return;
             if (!s.held) {
                 // Quick tap = Point & Type: keep the live screen & cursor capture, skip mic.
-                if ([s.window[@"bundle"] isEqual:@"com.apple.MobileSMS"]) {
+                if (![s.settings[@"onDemand"] boolValue] && [s.window[@"bundle"] isEqual:@"com.apple.MobileSMS"]) {
                     current=nil;
                     callback("{\"tap\":true}");
                     return;
@@ -178,11 +364,12 @@ void sumi_voice_key(int down,const char *raw,SumiVoiceCallback callback) {
         }
         if (current && !current.released) return;
         if (current) { current.finished=YES; [current stopMic]; [current.task cancel]; [current.badge orderOut:nil]; }
+        rememberFrontApp();
         SumiVoice *s=[SumiVoice new]; current=s; s.callback=callback;
         s.settings=data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : @{};
         s.mouse=NSEvent.mouseLocation;
         s.position=CGPointMake(s.mouse.x,NSMaxY(NSScreen.screens.firstObject.frame)-s.mouse.y);
-        s.window=sumi_point_window(s.position);
+        if ([s.settings[@"enabled"] boolValue]) s.window=sumi_point_window(s.position);
         // Capture pointer + full-window screenshot immediately on key-down so both
         // Tap (type) and Hold (speak) have instant visual + pointer context.
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{

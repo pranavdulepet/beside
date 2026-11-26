@@ -1,5 +1,5 @@
 import type {Row} from '../src/api';
-import {test, expect} from '@playwright/test';
+import {test, expect, type Page} from '@playwright/test';
 import {execFileSync, spawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {once} from 'node:events';
@@ -8,7 +8,6 @@ import {
   copyFile,
   mkdir,
   truncate,
-  mkdtemp,
   readFile,
   rename,
   rm,
@@ -16,70 +15,8 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import {constants} from 'node:fs';
-import {tmpdir} from 'node:os';
+import {fixtureNotebook} from './fixture';
 import {basename, dirname, join} from 'node:path';
-async function fixtureNotebook(
-  agents = false,
-  datedHistory?: {markdown: string; scores: object[]},
-  existingFolder?: string,
-  event?: (message: any) => void,
-) {
-  const folder = existingFolder ?? (await mkdtemp(join(tmpdir(), 'sumi-ui-')));
-  if (datedHistory) {
-    await mkdir(join(folder, 'scroll'), {recursive: true});
-    await writeFile(join(folder, 'scroll/deciding.md'), datedHistory.markdown);
-    await writeFile(
-      join(folder, 'predictions.json'),
-      JSON.stringify(datedHistory.scores),
-    );
-  }
-  const core = spawn(
-    'src-tauri/target/debug/sumi',
-    [
-      '--fixture-rpc',
-      '--notebook',
-      folder,
-      ...(agents ? ['--fixture-agents'] : []),
-      ...(datedHistory ? ['--fixture-predictions'] : []),
-    ],
-    {stdio: ['pipe', 'pipe', 'inherit']},
-  );
-  const pending: ((s: string) => void)[] = [];
-  createInterface({input: core.stdout}).on('line', s => {
-    const m = JSON.parse(s);
-    if (m.event) {
-      event?.(m);
-      return;
-    }
-    pending.shift()?.(s);
-  });
-  let stopped = '';
-  function stop(reason: string) {
-    stopped = reason;
-    for (const finish of pending.splice(0))
-      finish(JSON.stringify({error: reason}));
-  }
-  core.once('error', e => stop(e.message));
-  core.stdin.on('error', e => stop(e.message));
-  core.once('close', (code, signal) =>
-    stop('Notebook fixture closed (' + (signal || code) + ').'),
-  );
-  function rpc(op: string, args = {}) {
-    return new Promise<any>((resolve, reject) => {
-      if (stopped) return reject(Error(stopped));
-      pending.push(s => {
-        const result = JSON.parse(s);
-        if (result.error) reject(Error(result.error));
-        else resolve(result.ok);
-      });
-      core.stdin.write(
-        JSON.stringify({operation: op, args, stream: !!event}) + '\n',
-      );
-    });
-  }
-  return {core, rpc, folder};
-}
-
 // Exercise automatic discovery with a predictable installed model on the test Mac.
 function withTestModel(rpc: (op: string, args?: object) => Promise<any>) {
   return async (op: string, args: object) => {
@@ -88,6 +25,12 @@ function withTestModel(rpc: (op: string, args?: object) => Promise<any>) {
       ? result.filter((m: {name: string}) => m.name === 'llama3.2:3b')
       : result;
   };
+}
+
+async function openPredictions(page: Page) {
+  await page.getByRole('button', {name: 'Memory', exact: true}).click();
+  await page.getByText('How well Beside guessed', {exact: true}).click();
+  await page.getByRole('button', {name: 'Read the predictions'}).click();
 }
 
 test('brushstroke, real local prediction, correction, history and persisted sheets', async ({
@@ -139,6 +82,16 @@ test('brushstroke, real local prediction, correction, history and persisted shee
     await learned.fill(rule);
     await page.getByRole('button', {name: 'Keep this sentence'}).click();
     await expect(page.getByText(rule, {exact: true})).toBeVisible();
+    await page.getByRole('button', {name: 'Return to my notebook'}).click();
+    await expect(page.getByRole('button', {name: 'Memory', exact: true})).toHaveAttribute('aria-current', 'page');
+    expect((await rpc('state')).firstCorrection.kept).toBe(true);
+    await page.getByRole('button', {name: 'Continue your correction'}).click();
+    await expect(page.getByLabel('Your next decision')).toBeVisible();
+    await page.getByRole('button', {name: 'Chat', exact: true}).click();
+    await page.getByRole('button', {name: 'Continue your correction'}).click();
+    await expect(page.getByText(rule, {exact: true})).toBeVisible();
+    await page.goto('/');
+    await expect(page.getByLabel('Your next decision')).toBeVisible();
     await page.reload();
     await page
       .getByLabel('Your next decision')
@@ -163,8 +116,7 @@ test('brushstroke, real local prediction, correction, history and persisted shee
     const completed = await rpc('state');
     expect(completed.entries).toHaveLength(1);
     expect(completed.firstCorrection).toBeNull();
-    await page.keyboard.press('Meta+,');
-    await page.getByRole('button', {name: 'Start with a correction'}).click();
+    await page.getByRole('button', {name: 'Teach a correction'}).click();
     await expect(page.getByLabel('Your correction')).toHaveValue('');
     await page.getByRole('button', {name: 'Return to my notebook'}).click();
     await expect(page.getByLabel('Desk sheet')).toBeVisible();
@@ -181,22 +133,22 @@ test('brushstroke, real local prediction, correction, history and persisted shee
     await page.getByRole('button', {name: 'Break the seal'}).click();
     await expect(page.getByText('You decided · Keep it brief.')).toBeVisible();
     await page.getByRole('button', {name: 'It missed'}).click();
-    await page.keyboard.press('Meta+3');
+    await openPredictions(page);
     await expect(
       page.getByText('1 of 2 scored guesses matched.'),
     ).toBeVisible();
-    await page.keyboard.press('Meta+2');
+    await page.getByRole('button', {name: '← Memory'}).click();
     await page.getByRole('button', {name: 'Write an entry'}).click();
     await page
       .getByLabel('Your sentence')
       .fill('I choose short meetings when the agenda is clear.');
-    await page.getByRole('button', {name: 'Keep in the Scroll'}).click();
+    await page.getByRole('button', {name: 'Save to memory'}).click();
     await page
       .getByRole('button', {
         name: 'I choose short meetings when the agenda is clear.',
       })
       .click();
-    await page.getByRole('button', {name: 'Edit sentence'}).click();
+    await page.getByRole('button', {name: 'Edit', exact: true}).click();
     await page
       .getByLabel('Correct this entry')
       .fill('I prefer an agenda before accepting a meeting.');
@@ -227,13 +179,13 @@ test('brushstroke, real local prediction, correction, history and persisted shee
       path: info.outputPath('scroll.png'),
       animations: 'disabled',
     });
-    await page.getByRole('button', {name: 'Places'}).click();
-    await page.getByRole('button', {name: /^Settings/}).click();
-    await page.getByRole('button', {name: 'Connected agents'}).click();
+    await page.getByRole('button', {name: 'Connections', exact: true}).click();
     await expect(
-      page.getByRole('heading', {name: 'Seal', exact: true}),
+      page.getByRole('heading', {name: 'Connected tools'}),
     ).toBeVisible();
     await page.reload();
+    await expect(page.getByRole('heading', {name: 'Connected tools'})).toBeVisible();
+    await page.getByRole('button', {name: 'Chat', exact: true}).click();
     await expect(page.getByLabel('Desk sheet')).toHaveValue(/Should I keep/);
     const sheet = (await rpc('state')).current + '.md';
     expect(await readFile(join(folder, 'desk', sheet), 'utf8')).toContain(
@@ -458,13 +410,13 @@ test('a requested export arrives after reopening and waits for consent', async (
             : Promise.resolve(1),
       };
     });
-    await page.goto('/');
+    await page.goto('/#chat');
     await page.getByLabel('Desk sheet').fill('Keep this draft open.');
     await expect
       .poll(async () => (await notebook.rpc('state')).sheet)
       .toBe('Keep this draft open.');
     await page.keyboard.press('Meta+,');
-    await page.getByText('Sources and readings', {exact: true}).click();
+    await page.getByText('Web search and imports', {exact: true}).click();
     await page.getByRole('button', {name: 'Request ChatGPT history ↗'}).click();
     await expect(
       page.getByText('Waiting for your chat export in Downloads.'),
@@ -477,6 +429,7 @@ test('a requested export arrives after reopening and waits for consent', async (
     await expect(
       page.getByRole('button', {name: 'Stop looking'}),
     ).toBeVisible();
+    await page.getByRole('button', {name: 'Chat', exact: true}).click();
     notebook.core.stdin.end();
     await new Promise<void>(resolve =>
       notebook.core.once('close', () => resolve()),
@@ -533,8 +486,8 @@ test('a requested export arrives after reopening and waits for consent', async (
       'Keep this draft open.',
     );
     await page.keyboard.press('Meta+,');
-    await page.getByText('Sources and readings', {exact: true}).click();
-    await page.getByRole('button', {name: 'Read selected sources'}).click();
+    await page.getByText('Web search and imports', {exact: true}).click();
+    await page.getByRole('button', {name: 'Import selected sources'}).click();
     await expect
       .poll(async () => (await notebook.rpc('state')).reading?.training)
       .toBe(1);
@@ -547,19 +500,50 @@ test('a requested export arrives after reopening and waits for consent', async (
 });
 
 test.describe('website walkthroughs', () => {
+  const demos = [
+    ['Correction', 'learning'],
+    ['Groceries', 'groceries'],
+    ['Print handoff', 'email'],
+    ['Setup', 'setup'],
+  ];
+  async function choose(page: import('@playwright/test').Page, title: string) {
+    const tab = page.getByRole('tab', {name: title, exact: true});
+    await tab.click();
+    await expect(tab).toHaveAttribute('aria-selected', 'true');
+  }
+  test('the complete gallery fits one row on a narrow phone and supports keyboard and shared links', async ({page}) => {
+    await page.setViewportSize({width: 320, height: 640});
+    await page.goto('/website/index.html');
+    const choices = page.getByRole('tab');
+    await expect(choices).toHaveCount(demos.length);
+    expect(await choices.allTextContents()).toEqual(demos.map(([name]) => name));
+    const rects = await choices.evaluateAll(elements => elements.map(el => {
+      const {left, right, top, height} = el.getBoundingClientRect();
+      return {left, right, top, height};
+    }));
+    expect(new Set(rects.map(rect => rect.top)).size).toBe(1);
+    expect(Math.min(...rects.map(rect => rect.height))).toBeGreaterThanOrEqual(44);
+    expect(Math.min(...rects.map(rect => rect.left))).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...rects.map(rect => rect.right))).toBeLessThanOrEqual(320);
+    const first = page.getByRole('tab', {name: 'Correction'});
+    await first.focus();
+    await page.keyboard.press('End');
+    await expect(page.getByRole('tab', {name: 'Setup'})).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(first).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page).toHaveURL(/#setup$/);
+    await page.reload();
+    await expect(page.getByRole('button', {name: 'Play Setup walkthrough'})).toBeVisible();
+  });
+
   test('desktop recordings play, seek and reopen the selected tab', async ({
     page,
   }) => {
     await page.goto('/website/index.html');
     const player = page.locator('video');
-    for (const [title, file] of [
-      ['Writing', 'writing'],
-      ['Groceries', 'groceries'],
-      ['Flight', 'baggage'],
-    ]) {
-      const tab = page.getByRole('tab', {name: title});
-      await tab.click();
-      await expect(tab).toHaveAttribute('aria-selected', 'true');
+    for (const [title, file] of demos) {
+      await choose(page, title);
       await expect(player.locator('track')).toHaveAttribute(
         'src',
         new RegExp(`^media/${file}\\.vtt(?:\\?|$)`),
@@ -596,15 +580,25 @@ test.describe('website walkthroughs', () => {
           ),
         )
         .toBeGreaterThan(frames);
+      await player.evaluate((v: HTMLVideoElement) => {
+        v.currentTime = Math.max(0, v.duration - 0.5);
+      });
+      await expect
+        .poll(() =>
+          player.evaluate(
+            (v: HTMLVideoElement) =>
+              v.ended &&
+              !v.error &&
+              Math.abs(v.duration - v.currentTime) < 0.08,
+          ),
+        )
+        .toBe(true);
     }
     await page.reload();
     await expect(
-      page.getByRole('button', {name: 'Play Flight walkthrough'}),
-    ).toBeVisible();
-    await page.getByRole('tab', {name: 'Flight'}).focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(
-      page.getByRole('button', {name: 'Play Writing walkthrough'}),
+      page.getByRole('button', {
+        name: 'Play Setup walkthrough',
+      }),
     ).toBeVisible();
   });
 
@@ -616,15 +610,31 @@ test.describe('website walkthroughs', () => {
         Promise.reject(new DOMException('Media blocked', 'NotAllowedError'));
     });
     await page.goto('/website/index.html#groceries');
-    await page
-      .getByRole('button', {name: 'Play Groceries walkthrough'})
-      .click();
+    const play = page.getByRole('button', {name: 'Play Groceries walkthrough'});
+    await play.focus();
+    await page.keyboard.press('Enter');
+    await expect(
+      page.getByRole('button', {name: 'Pause recording'}),
+    ).toBeFocused();
     await expect(
       page.getByRole('img', {name: 'Groceries walkthrough'}),
     ).toBeVisible();
     await expect
       .poll(() => page.getByRole('slider').inputValue().then(Number))
       .toBeGreaterThan(0.2);
+  });
+
+  test.describe('with JavaScript disabled', () => {
+    test.use({javaScriptEnabled: false});
+    test('all four recordings open directly', async ({page}) => {
+      await page.goto('/website/index.html');
+      await expect(page.getByRole('tab')).toHaveCount(0);
+      for (const [name, file] of demos) {
+        await expect(
+          page.getByRole('link', {name, exact: true}),
+        ).toHaveAttribute('href', 'media/' + file + '.mp4');
+      }
+    });
   });
 
   test.describe('phone playback', () => {
@@ -634,7 +644,7 @@ test.describe('website walkthroughs', () => {
       viewport: {width: 393, height: 852},
     });
 
-    test('all three show moving, seekable frames when every MP4 is unavailable', async ({
+    test('every full recording still plays, seeks and shows captions when the native video fails', async ({
       page,
     }) => {
       let videoRequests = 0;
@@ -644,8 +654,8 @@ test.describe('website walkthroughs', () => {
       });
       await page.goto('/website/index.html');
       const seek = page.getByRole('slider', {name: 'Recording position'});
-      for (const title of ['Writing', 'Groceries', 'Flight']) {
-        await page.getByRole('tab', {name: title}).tap();
+      for (const [title] of demos) {
+        await choose(page, title);
         await page
           .getByRole('button', {name: 'Play ' + title + ' walkthrough'})
           .tap();
@@ -658,27 +668,36 @@ test.describe('website walkthroughs', () => {
           c.toDataURL(),
         );
         const end = Number(await seek.getAttribute('max'));
-        const captionsUrl = await page.locator('video track').evaluate((track: HTMLTrackElement) => track.src);
+        const captionsUrl = await page
+          .locator('video track')
+          .evaluate((track: HTMLTrackElement) => track.src);
         const captions = await (await page.request.get(captionsUrl)).text();
-        const lastCue = [...captions.matchAll(/--> (\d\d):(\d\d):([\d.]+)/g)].at(-1);
+        const lastCue = [
+          ...captions.matchAll(/--> (\d\d):(\d\d):([\d.]+)/g),
+        ].at(-1);
         expect(lastCue).toBeDefined();
         const [, hours, minutes, seconds] = lastCue!;
-        expect(Math.abs(end - (+hours * 3600 + +minutes * 60 + +seconds))).toBeLessThan(0.15);
-        await seek.focus();
+        expect(
+          Math.abs(end - (+hours * 3600 + +minutes * 60 + +seconds)),
+        ).toBeLessThan(0.15);
+        await seek.click();
+        const middle = await image.evaluate((c: HTMLCanvasElement) =>
+          c.toDataURL(),
+        );
         await page.keyboard.press('End');
         await expect
           .poll(() => seek.inputValue().then(Number))
           .toBeCloseTo(end, 1);
-        expect(
-          (await image.evaluate((c: HTMLCanvasElement) => c.toDataURL())) ===
-            start,
-        ).toBe(false);
+        const last = await image.evaluate((c: HTMLCanvasElement) =>
+          c.toDataURL(),
+        );
+        expect(new Set([start, middle, last]).size).toBeGreaterThan(1);
         await page.keyboard.press('Home');
         await page.getByRole('button', {name: 'Captions'}).tap();
         await page.getByRole('button', {name: 'Play recording'}).tap();
         await expect(page.locator('.film-cue')).toBeVisible();
       }
-      expect(videoRequests).toBe(0);
+      expect(videoRequests).toBeGreaterThanOrEqual(demos.length);
       await page.getByRole('button', {name: 'Expand recording'}).tap();
       await expect(
         page.getByRole('dialog', {name: 'Expanded walkthrough'}),
@@ -687,27 +706,56 @@ test.describe('website walkthroughs', () => {
       await expect(page.getByRole('dialog')).toBeHidden();
       await page.reload();
       await expect(
-        page.getByRole('button', {name: 'Play Flight walkthrough'}),
+        page.getByRole('button', {
+          name: 'Play Setup walkthrough',
+        }),
       ).toBeVisible();
+    });
+
+    test('a failed media host offers the selected recording from the repository', async ({
+      page,
+    }) => {
+      await page.route(/\.(?:mp4|gif)(?:\?|$)/, route => route.abort());
+      await page.goto('/website/index.html#email');
+      await page
+        .getByRole('button', {name: 'Play Print handoff walkthrough'})
+        .tap();
+      const backup = page.getByRole('link', {name: 'Download the MP4'});
+      await expect(backup).toBeVisible();
+      await expect(backup).toHaveAttribute(
+        'href',
+        'https://github.com/pranavdulepet/beside/raw/refs/heads/main/website/media/email.mp4',
+      );
+      await choose(page, 'Correction');
+      await expect(backup).toBeHidden();
     });
 
     test('the original animation opens as an ordinary image if scripted loading is blocked', async ({
       page,
     }) => {
+      let videoRequests = 0;
+      await page.route('**/*.mp4*', route => {
+        videoRequests++;
+        return route.abort();
+      });
       await page.route(/\.gif(?:\?|$)/, route =>
         route.request().resourceType() === 'fetch'
           ? route.abort()
           : route.continue(),
       );
-      await page.goto('/website/index.html#flight');
-      await page.getByRole('button', {name: 'Play Flight walkthrough'}).tap();
+      await page.goto('/website/index.html?player=images#groceries');
+      await page.getByRole('button', {name: 'Play Groceries walkthrough'}).tap();
       const animation = page.locator('img.direct-recording');
       await expect(animation).toBeVisible();
-      await expect(animation).toHaveAttribute('src', /^media\/baggage\.gif(?:\?|$)/);
+      expect(videoRequests).toBe(0);
+      await expect(animation).toHaveAttribute(
+        'src',
+        /^media\/groceries\.gif(?:\?|$)/,
+      );
       expect(
         await animation.evaluate((img: HTMLImageElement) => img.naturalWidth),
       ).toBe(1024);
-      await page.getByRole('tab', {name: 'Writing'}).tap();
+      await page.getByRole('tab', {name: 'Correction'}).tap();
       await expect(animation).toBeHidden();
     });
   });
@@ -791,6 +839,9 @@ test('Mirror separates paired blind results by prediction month and model', asyn
       ],
       routes: [],
       tuning: [],
+      versions: [],
+      proposals: [],
+      reading: {tested: 6},
     };
     (window as any).__TAURI_INTERNALS__ = {
       transformCallback: () => 1,
@@ -799,8 +850,10 @@ test('Mirror separates paired blind results by prediction month and model', asyn
     };
   });
   await page.goto('/');
-  await expect(page.getByLabel('Desk sheet')).toBeVisible();
-  await page.keyboard.press('Meta+3');
+  await page.getByRole('button', {name: 'Memory', exact: true}).click();
+  await page.getByText('How well Beside guessed', {exact: true}).click();
+  await expect(page.getByText(/Beside hid 6 replies/)).toBeVisible();
+  await page.getByRole('button', {name: 'Read the predictions'}).click();
   const note = page.getByRole('region', {name: 'Sunday note'});
   await expect(note).toContainText('one new or revised entry');
   await expect(note).toContainText('Sketch before choosing a typeface.');
@@ -889,6 +942,7 @@ test('Desk distinguishes accepted ink, a written alternative, dismissal and movi
       };
     });
     await page.goto('/');
+    await page.getByRole('button', {name: 'Chat', exact: true}).click();
     await sheet.evaluate(el => {
       el.addEventListener(
         'input',
@@ -947,7 +1001,7 @@ test('Desk distinguishes accepted ink, a written alternative, dismissal and movi
     await sheet.press('ArrowLeft');
     hold = false;
     release!();
-    await page.keyboard.press('Meta+3');
+    await openPredictions(page);
     await page.getByText('Details', {exact: true}).click();
     await page.getByText('How the score is measured').click();
     await expect(
@@ -1003,13 +1057,17 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
     });
     await page.clock.setFixedTime(new Date(2026, 9, 31, 21));
     await page.goto('/');
+    const nav = page.getByRole('navigation', {name: 'Workspace sections'});
+    const chat = nav.getByRole('button', {name: 'Chat', exact: true});
+    const connections = nav.getByRole('button', {name: 'Connections'});
+    await chat.click();
     const sheet = page.getByLabel('Desk sheet');
     const evening = 'I want to finish the sketch tomorrow.';
     await sheet.fill(evening);
     await expect.poll(async () => (await rpc('state')).sheet).toBe(evening);
-    await page.keyboard.press('Meta+4');
+    await connections.click();
     await page
-      .getByRole('button', {name: 'Claude Code ＋', exact: true})
+      .getByRole('button', {name: '+ Claude Code', exact: true})
       .click();
     await page
       .getByRole('button', {name: 'Connect Claude Code', exact: true})
@@ -1062,6 +1120,10 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
     expect((await ask('sumi_answer', {ticket: ticket.id})).queued).toBe(true);
     await page.clock.setFixedTime(new Date(2026, 10, 1, 8));
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await chat.click();
+    await expect(sheet).toHaveValue(evening);
+    await page.getByRole('button', {name: /^Sheets/}).click();
+    await page.getByRole('button', {name: '＋ New sheet'}).click();
     await expect(sheet).toHaveValue('');
     await expect(
       page.getByRole('button', {
@@ -1073,6 +1135,7 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
       .poll(async () => (await rpc('state')).sheet)
       .toBe('Start with the ink sketch.');
     await page.reload();
+    await chat.click();
     await expect(sheet).toHaveValue('Start with the ink sketch.');
     await page
       .getByRole('button', {name: /1 question from Claude Code/})
@@ -1092,7 +1155,7 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
       answer: 'Use the ink sketch.',
       decidedBy: 'user',
     });
-    await page.keyboard.press('Meta+1');
+    await chat.click();
     await expect(
       page.getByRole('button', {name: /is waiting for you/}),
     ).toHaveCount(0);
@@ -1100,13 +1163,16 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
     await page.getByRole('button', {name: new RegExp(evening)}).click();
     await expect(sheet).toHaveValue(evening);
     await page.reload();
+    await chat.click();
     await expect(sheet).toHaveValue(evening);
     expect((await rpc('state')).sheets).toHaveLength(2);
-    await page.keyboard.press('Meta+4');
+    await connections.click();
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.keyboard.press('Meta+3');
+    await nav.getByRole('button', {name: 'Memory'}).click();
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
-    await page.keyboard.press('Alt+Space');
+    await chat.click();
+    await page.getByRole('button', {name: /^Sheets/}).click();
+    await page.getByRole('button', {name: '＋ New sheet'}).click();
     await expect(sheet).toHaveValue('');
     expect((await rpc('state')).sheets).toHaveLength(3);
     await test.step('review earned automatic answers and change this agent’s confidence threshold', async () => {
@@ -1126,7 +1192,7 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
         await rpc('respond', {id: reply.id, answer: 'Bullets'});
       }
       expect(qualified).toBe(20);
-      await page.keyboard.press('Meta+4');
+      await connections.click();
       const agentSection = page
         .locator('details')
         .filter({has: page.getByLabel('Permission', {exact: true})});
@@ -1171,7 +1237,7 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
     await writeFile(configPath, installed);
     await page.getByRole('button', {name: 'Finish removal'}).click();
     await expect(
-      page.getByRole('button', {name: 'Claude Code ＋'}),
+      page.getByRole('button', {name: '+ Claude Code'}),
     ).toBeVisible();
     expect(JSON.parse(await readFile(configPath, 'utf8'))).toEqual(personal);
   } finally {
@@ -1240,8 +1306,12 @@ test('three weeks of observed choices lead to one user-approved revision', async
       };
     });
     await page.goto('/');
-    await expect(page.getByLabel('Desk sheet')).toBeVisible();
-    await page.keyboard.press('Meta+3');
+    await page.getByRole('button', {name: 'Memory', exact: true}).click();
+    const reading = page.getByText('How well Beside guessed', {exact: true});
+    await expect(reading).toBeVisible();
+    await reading.click();
+    await expect(page.getByText(/Beside hid \d+ replies/)).toHaveCount(0);
+    await page.getByRole('button', {name: 'Read the predictions'}).click();
     await expect(page.getByText(/possible exceptions on 3 days/)).toBeVisible();
     await page.getByText('Read the 3 observations').click();
     await expect(
@@ -1254,9 +1324,10 @@ test('three weeks of observed choices lead to one user-approved revision', async
     await page
       .getByLabel('How would you word the change or exception?')
       .fill(revised);
+    expect(await readFile(join(folder, 'scroll/deciding.md'), 'utf8')).toContain(text);
     await page.getByRole('button', {name: 'A change', exact: true}).click();
     await expect(page.getByRole('heading', {name: 'Surprises'})).toHaveCount(0);
-    await page.keyboard.press('Meta+2');
+    await page.getByRole('button', {name: '← Memory'}).click();
     await expect(page.getByRole('button', {name: revised})).toBeVisible();
     expect(
       await readFile(join(folder, 'scroll/deciding.md'), 'utf8'),
@@ -1317,6 +1388,8 @@ test('Desk matches approved goals to the active paragraph and remembers a dismis
     });
     await page.clock.install();
     await page.goto('/');
+    const chat = page.getByRole('navigation', {name: 'Workspace sections'}).getByRole('button', {name: 'Chat'});
+    await chat.click();
     const sheet = page.getByLabel('Desk sheet');
     const note = page.getByRole('complementary', {
       name: 'Goal from your Scroll',
@@ -1338,6 +1411,7 @@ test('Desk matches approved goals to the active paragraph and remembers a dismis
       page.getByText('Margin notes quiet for 24 hours.'),
     ).toBeVisible();
     await page.reload();
+    await chat.click();
     await sheet.fill('Read about studio lighting before buying equipment.');
     await page.clock.runFor(900);
     await expect(note).toHaveCount(0);
@@ -1498,7 +1572,6 @@ test('Settings asks for consent and finishes ChatGPT sign-in before switching to
       ],
     });
     let attempts = 0;
-    let connected = false;
     let finishCheck: (() => void) | undefined;
     await page.exposeFunction('sumiTestIPC', async (op: string, args: any) => {
       // Browser automation cannot consent on a person's OpenAI account.
@@ -1508,12 +1581,10 @@ test('Settings asks for consent and finishes ChatGPT sign-in before switching to
         await new Promise<void>(resolve => {
           finishCheck = resolve;
         });
-        connected = true;
-        return true;
+        return rpc('fixturePlanAccount');
       }
-      if (op === 'brainConfigure' && connected) {
+      if (op === 'brainConfigure') {
         expect(args).toMatchObject({mode: 'cloud', provider: 'ChatGPT', cloudConsent: true});
-        return {mode: 'cloud', provider: 'ChatGPT', providerLabel: 'ChatGPT', cloudConsent: true, availableCloud: [{id: 'ChatGPT'}]};
       }
       return rpc(op, args);
     });
@@ -1526,20 +1597,22 @@ test('Settings asks for consent and finishes ChatGPT sign-in before switching to
             : Promise.resolve(1),
       };
     });
-    await page.goto('/');
+    await page.goto('/#settings');
     await page.getByRole('button', {name: 'Set up later'}).click();
-    await page.getByRole('button', {name: 'Settings', exact: true}).click();
+    await expect(page.getByRole('button', {name: 'Settings', exact: true})).toHaveAttribute('aria-current', 'page');
     await page.getByRole('tab', {name: 'Cloud', exact: true}).click();
     const signIn = page.getByRole('button', {name: 'Sign in with ChatGPT'});
     await expect(signIn).toBeDisabled();
     await page.getByRole('checkbox', {name: /Allow screen & memory context/}).check();
     await signIn.click();
     await expect(page.getByRole('alert')).toContainText('cancelled');
+    expect((await rpc('brainStatus')).mode).toBe('local');
     await signIn.click();
     await expect(page.getByRole('button', {name: 'Waiting for sign-in…'})).toBeDisabled();
     finishCheck!();
     await expect(page.getByText('Connected to ChatGPT.', {exact: true})).toBeVisible();
     await expect(page.getByRole('button', {name: 'Disconnect', exact: true})).toBeVisible();
+    expect((await rpc('state')).brain).toMatchObject({mode: 'cloud', provider: 'ChatGPT', cloudConsent: true});
   } finally {
     core.stdin.end();
   }
@@ -1641,7 +1714,15 @@ test('one sheet keeps a conversation, a correction, and a reusable method', asyn
     ).toBeLessThanOrEqual(520);
     await page.getByRole('button', {name: 'Correct this reply'}).click();
     await expect(page.getByText('The reply you’re correcting')).toBeVisible();
+    const state = await rpc('state');
+    const target = {sheet: state.current, turn: state.chat.turns.at(-1).id};
+    await page.reload();
+    await expect(page.locator('.quoted-reply')).toContainText(state.chat.turns.at(-1).reply.slice(0, 100));
     await expect(page.getByLabel('Your correction')).toBeVisible();
+    await page.getByLabel('Your correction').fill('For a short museum visit, ask me about the painting’s colors first.');
+    await page.getByRole('button', {name: 'Read my correction'}).click();
+    await expect(page.getByLabel('What Beside learned')).toBeVisible({timeout: 90000});
+    expect((await rpc('state')).firstCorrection.context).toEqual(target);
   } finally {
     core.stdin.end();
   }
@@ -1673,6 +1754,7 @@ test('a dinner question chooses its own tools and remembers a change of mind', a
       };
     });
     await page.goto('/');
+    await page.getByRole('button', {name: 'Chat', exact: true}).click();
     const field = page.getByLabel('Desk sheet');
     async function say(text: string) {
       await field.fill(text);
@@ -1780,6 +1862,7 @@ test('a weekend plan uses live sources and the current preference from another s
       };
     });
     await page.goto('/');
+    await page.getByRole('button', {name: 'Chat', exact: true}).click();
     const field = page.getByLabel('Desk sheet');
     async function say(text: string) {
       await field.fill(text);
@@ -1813,9 +1896,9 @@ test('a weekend plan uses live sources and the current preference from another s
     await page.getByText('Earlier memories', {exact: true}).click();
     await expect(page.locator('.dated-notes')).toContainText('printmaking');
     await page.keyboard.press('Meta+,');
-    await page.getByText('Web search', {exact: true}).click();
-    await page.getByLabel('Automatically look up weekend listings').check();
-    await page.keyboard.press('Meta+1');
+    await page.getByText('Web search and imports', {exact: true}).click();
+    await page.getByLabel('Automatically look up local listings via Exa').check();
+    await page.keyboard.press('Meta+3');
     async function fresh() {
       await page.getByRole('button', {name: /^Sheets/}).click();
       await page.getByRole('button', {name: /New sheet/}).click();
@@ -1876,13 +1959,12 @@ test('read a workshop schedule, follow up from the file, then correct a dated pr
         invoke: (cmd: string, p: any) => {
           if (cmd === 'notebook')
             return (window as any).sumiTestIPC(p.operation, p.args);
-          if (cmd === 'plugin:event|listen' && p.event === 'reply-delta')
-            (window as any).sumiDelta = (payload: any) =>
-              callbacks.get(p.handler)?.({
-                event: p.event,
-                payload,
-                id: p.handler,
-              });
+          if (cmd === 'plugin:event|listen') {
+            const emit = (payload?: unknown) =>
+              callbacks.get(p.handler)?.({event: p.event, payload, id: p.handler});
+            if (p.event === 'reply-delta') (window as any).sumiDelta = emit;
+            if (p.event === 'fresh-sheet') (window as any).freshDeskShortcut = emit;
+          }
           return Promise.resolve(1);
         },
       };
@@ -1891,6 +1973,7 @@ test('read a workshop schedule, follow up from the file, then correct a dated pr
       };
     });
     await page.goto('/');
+    await page.getByRole('button', {name: 'Chat', exact: true}).click();
     const field = page.getByLabel('Desk sheet');
     await page.getByLabel('Choose attachments').setInputFiles({
       name: 'studio-classes.csv',
@@ -1929,7 +2012,7 @@ test('read a workshop schedule, follow up from the file, then correct a dated pr
     await page
       .getByText('I am working on the spring exhibition', {exact: true})
       .click();
-    await page.getByRole('button', {name: 'Edit memory'}).click();
+    await page.getByRole('button', {name: 'Edit', exact: true}).click();
     await page
       .getByLabel('Correct this memory')
       .fill('I am working on the autumn exhibition.');
@@ -1938,13 +2021,16 @@ test('read a workshop schedule, follow up from the file, then correct a dated pr
       page.getByText('I am working on the autumn exhibition.', {exact: true}),
     ).toBeVisible();
     await page.reload();
-    await expect(page.getByLabel('Desk sheet')).toBeVisible();
-    await page.keyboard.press('Meta+k');
+    await expect(page.getByRole('button', {name: 'Memory', exact: true})).toHaveAttribute('aria-current', 'page');
     await expect(
       page.getByText('I am working on the autumn exhibition.', {exact: true}),
     ).toBeVisible();
-    await page.keyboard.press('Alt+Space');
+    // The macOS global shortcut delivers this event to the notebook webview.
+    const previousSheet = (await rpc('state')).current;
+    await page.evaluate(() => (window as any).freshDeskShortcut());
     await expect(field).toBeVisible();
+    await expect.poll(async () => (await rpc('state')).current).not.toBe(previousSheet);
+    await expect(page.locator('.exchange')).toHaveCount(0);
     await field.fill(
       'What did you say about bookbinding in our previous chat?',
     );
@@ -2010,6 +2096,7 @@ test('ask anywhere remembers a window, credits a source, learns a correction and
   });
   try {
     const page = await context.newPage();
+    page.setDefaultTimeout(12000);
     await page.exposeFunction('sumiActivityIPC', (op: string, args: object) =>
       op === 'activitySize' ? null : rpc(op, args),
     );
@@ -2033,9 +2120,9 @@ test('ask anywhere remembers a window, credits a source, learns a correction and
     await page.getByLabel('Messages', {exact: true}).check();
     await page.getByLabel('Website hostname').fill('x.com');
     await page.getByRole('button', {name: 'Allow site'}).click();
-    await page.getByRole('button', {name: 'Start observation'}).click();
-    await page.getByText('Visual recall', {exact: true}).click();
-    await page.getByLabel('Keep temporary app previews').check();
+    await page.getByRole('button', {name: 'Start', exact: true}).click();
+    await page.getByText('Visual screenshots & vision', {exact: true}).click();
+    await page.getByLabel('Save visual screen previews (24h, encrypted)').check();
     await rpc('fixtureActivity', {
       source: 'site:x.com',
       title: 'Studio announcements',
@@ -2061,6 +2148,7 @@ test('ask anywhere remembers a window, credits a source, learns a correction and
     await rpc('finish');
     await page.goto('/');
     await page.reload();
+    await page.getByRole('navigation', {name: 'Workspace sections'}).getByRole('button', {name: 'Chat'}).click();
     await page
       .getByLabel('Desk sheet')
       .fill('Which exhibition did I discuss with Rowan?');
@@ -2073,16 +2161,17 @@ test('ask anywhere remembers a window, credits a source, learns a correction and
       .getByRole('button', {name: /\[\d+\] Messages/})
       .first()
       .click();
-    await expect(page.locator('.activity-evidence blockquote')).toContainText(
+    await page.getByText(/^Extracted text \(\d+ lines\)/).click();
+    await expect(page.locator('.evidence-raw-body')).toContainText(
       /Saturday morning/i,
     );
     await page.screenshot({path: info.outputPath('local-evidence.png')});
-    await page.getByRole('button', {name: 'Add a correction'}).click();
+    await page.getByRole('button', {name: 'Correct', exact: true}).click();
     await page
       .getByLabel('What should Beside understand here?')
       .fill('For exhibitions with Rowan I prefer Sunday afternoon.');
     await page
-      .getByRole('button', {name: 'Keep correction on this Mac'})
+      .getByRole('button', {name: 'Save correction', exact: true})
       .click();
     await page
       .getByLabel('Your question', {exact: true})
@@ -2118,12 +2207,12 @@ test('ask anywhere remembers a window, credits a source, learns a correction and
       }),
     ).toBeVisible();
     await page.getByRole('button', {name: 'Sources', exact: true}).click();
-    await page.getByRole('button', {name: 'Pause observation'}).click();
+    await page.getByRole('button', {name: 'Pause', exact: true}).click();
     await page.getByText('Forget activity', {exact: true}).click();
-    await page.getByRole('button', {name: 'Forget the last hour'}).click();
-    await page.getByRole('button', {name: 'Confirm forgetting'}).click();
+    await page.getByRole('button', {name: 'Last hour', exact: true}).click();
+    await page.getByRole('button', {name: 'Confirm', exact: true}).click();
     await expect(
-      page.getByRole('status').filter({hasText: 'forgotten'}),
+      page.getByRole('status').filter({hasText: /forgotten/i}),
     ).toBeVisible();
     const journal = await rpc('activityJournal');
     expect(journal.events).toEqual([]);
@@ -2727,25 +2816,45 @@ test('checks a train against an earlier ferry email and reveals the exact source
     await question.fill('Does this train connect with the last ferry?');
     await question.press('Enter');
     const answer = page.locator('.activity-turn .reply');
-    await expect(answer).toContainText(/7:15/, {
-      timeout: 120000,
-    });
-    await expect(answer).toContainText(/miss|too late|after|earlier|already left|before.*arriv/i);
+    await expect(answer).toHaveText(
+      'No. Your 7:40 PM arrival is 25 minutes after the 7:15 PM departure.',
+      {timeout: 120000},
+    );
     expect(asks[0].sources.map((s: Row) => s.title)).toEqual([
       'Mail · Friday crossing',
     ]);
-    expect(asks[0].supportingLine.length).toBeGreaterThan(4);
-    expect(email).toContain(asks[0].supportingLine);
-    await expect(
-      page.getByText(asks[0].supportingLine, {exact: true}),
-    ).toBeHidden();
+    expect(asks[0].supportingLine).toBe(email);
+    const evidence = page.locator('.activity-turn .margin-footnote blockquote');
+    await expect(evidence).toHaveText(email);
+    await expect(evidence).toBeHidden();
     await page.setViewportSize({width: 460, height: 365});
     await page.screenshot({path: info.outputPath('ferry-answer.png')});
     console.log('Grounded connection:', asks[0].answer);
     await page.getByRole('button', {name: /Friday crossing/}).click();
-    await expect(
-      page.getByText(asks[0].supportingLine, {exact: true}),
-    ).toBeVisible();
+    await expect(evidence).toBeVisible();
+    const earlier = await rpc('activityAsk', {
+      allowGeneral: true,
+      text: 'Does this train connect with the last ferry?',
+      selection: 'Friday’s train arrives at Bayport Pier at 6:45 PM.',
+    });
+    expect(earlier.answer).toBe('Yes, on the timetable. Your 6:45 PM arrival leaves 30 minutes before the 7:15 PM departure.');
+    expect(earlier.supportingLine).toBe(email);
+    const otherDay = await rpc('activityAsk', {
+      allowGeneral: true,
+      text: 'Does this train connect with the last ferry?',
+      selection: 'Saturday’s train arrives at Bayport Pier at 6:45 PM.',
+    });
+    expect(otherDay.sources).toEqual([]);
+    expect(otherDay.clarifyConnection).toBe(true);
+    const dressing = 'Use 4½ tbsp of tahini for the maple dressing.';
+    await rpc('fixtureActivity', {source: 'display', title: 'Notes · Maple dressing', body: dressing});
+    const recipe = await rpc('activityAsk', {
+      allowGeneral: true,
+      text: 'Does this relate to anything in my notes? How much tahini did I use?',
+      selection: 'I’m making our maple dressing and need the amount of tahini.',
+    });
+    expect(recipe.answer).toContain('4½ tbsp');
+    expect(recipe.supportingLine).toBe(dressing);
     const miss = await rpc('activityAsk', {
       allowGeneral: true,
       text: 'Is this related to anything I saved?',
@@ -2929,11 +3038,18 @@ test('notebook launch recovers from a failed load and opens every workspace sect
     await expect.poll(async () => (await rpc('state')).setup).toBeTruthy();
     const nav = page.getByRole('navigation', {name: 'Workspace sections'});
     await expect(nav).toBeVisible();
+    await expect(nav.getByRole('button', {name: 'Memory'})).toHaveAttribute('aria-current', 'page');
     await nav.getByRole('button', {name: 'Connections'}).click();
     await expect(
       page.getByRole('heading', {name: 'Connected tools'}),
     ).toBeVisible();
     await nav.getByRole('button', {name: 'Chat', exact: true}).click();
+    await expect(page.getByLabel('Desk sheet')).toBeVisible();
+    await page.reload();
+    await expect(page.getByLabel('Desk sheet')).toBeVisible();
+    await page.goBack();
+    await expect(page.getByRole('heading', {name: 'Connected tools'})).toBeVisible();
+    await page.goForward();
     await expect(page.getByLabel('Desk sheet')).toBeVisible();
     await page.getByRole('button', {name: /Sheets/}).click();
     await expect(page.getByRole('button', {name: /New sheet/})).toBeVisible();
@@ -2968,6 +3084,10 @@ test('notebook launch recovers from a failed load and opens every workspace sect
     await page.getByRole('button', {name: 'Cancel', exact: true}).click();
     await page.getByRole('button', {name: 'Open companion'}).click();
     expect(calls).toContain('openActivity');
+    await page.goto('/#settings');
+    await expect(nav.getByRole('button', {name: 'Settings'})).toHaveAttribute('aria-current', 'page');
+    await page.goto('/');
+    await expect(nav.getByRole('button', {name: 'Memory'})).toHaveAttribute('aria-current', 'page');
   } finally {
     const closed = once(core, 'close');
     core.stdin.end();
@@ -3070,6 +3190,9 @@ test('a suggestion waits for the user and keeps the screen that prompted it', as
     expect(questions[0].relatedSource).toBe(suggestion.sourceId);
     expect(questions[0].relatedLine).toBe(suggestion.detail);
     expect(questions[0].history).toEqual([]);
+    await expect.poll(async () => (await rpc('floatingChats')).find((chat: Row) =>
+      chat.turns.some((turn: Row) => turn.id === questions[0].turn),
+    )?.id).toBe(questions[0].chatId);
     expect((await rpc('proactiveStatus')).nudge).toBeNull();
     await expect(offer).toBeHidden();
   } finally {
@@ -3122,3 +3245,51 @@ for (const scheme of ['light', 'dark'] as const) {
     await expect(page.locator('.screen-composer textarea')).toBeVisible();
   });
 }
+
+test('floating meal plan recalculates guests and pantry, then copies the revised list', async ({page, context}) => {
+  const {core, rpc, folder} = await fixtureNotebook();
+  try {
+    if (process.env.BESIDE_TEST_INKLING === '1') await rpc('fixtureInkling');
+    else await rpc('model', {runtime: 'Ollama', name: 'llama3.2:3b'});
+    await rpc('activityConfigure', {scope: 'displays'});
+    await rpc('activityConfigure', {enabled: true});
+    await rpc('fixtureActivity', {
+      source: 'display', title: 'Notes · Weeknight dinners',
+      body: 'Weeknight dinners\nMonday soup for two\n• 1 can of beans\nThursday tacos for two\n• 2 cans of beans\n• 4 tortillas\nPantry: 1 can of beans.',
+    });
+    await page.exposeFunction('mealNotebook', (op: string, args: Row) =>
+      op === 'activitySize' ? null : rpc(op, args));
+    await page.addInitScript(() => {
+      (window as any).__TAURI_EVENT_PLUGIN_INTERNALS__ = {unregisterListener() {}};
+      (window as any).__TAURI_INTERNALS__ = {
+        transformCallback: () => 1,
+        invoke: (cmd: string, p: Row) => cmd === 'notebook'
+          ? (window as any).mealNotebook(p.operation, p.args) : Promise.resolve(1),
+      };
+    });
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/#activity');
+    const composer = page.getByRole('textbox', {name: /^(Your question|Follow up)$/});
+    const reply = page.locator('.activity-turn .reply').last();
+    for (const [question, expected] of [
+      ['Make a shopping list from my meal plan.', 'beans — 2 cans'],
+      ['Make Thursday dinner for four.', 'beans — 4 cans'],
+      ['Actually, I have three cans of beans.', 'beans — 2 cans'],
+    ]) {
+      await composer.fill(question);
+      await composer.press('Enter');
+      await expect(reply).toContainText(expected);
+    }
+    await expect(reply.getByRole('listitem')).toHaveCount(2);
+    await expect(reply).toContainText('tortillas — 8');
+    await page.getByRole('button', {name: 'Copy list'}).last().click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('beans — 2 cans');
+    const chats = await rpc('floatingChats');
+    expect(chats[0].turns.at(-1).mealTask.stock['can:bean']).toEqual(3);
+  } finally {
+    const closed = once(core, 'close');
+    core.stdin.end();
+    await closed;
+    await rm(folder, {recursive: true, force: true});
+  }
+});

@@ -39,8 +39,8 @@ mod transport;
 mod web_search;
 mod weights;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc, Mutex,
 };
 use store::*;
 use tauri::{
@@ -83,8 +83,16 @@ async fn notebook(
             return Ok(serde_json::json!(selection::take()))
         }
         if operation == "dismissActivity" && window.label() == "activity" {
-            overlay::clear();
-            window.hide().msg()?;
+            dismiss_activity_sheet(&window)?;
+            return Ok(serde_json::Value::Null);
+        }
+        if operation == "pendingActivityPresentation" && window.label() == "activity" {
+            return Ok(PANEL_PRESENTATION.lock().unwrap().as_ref().cloned().unwrap_or_default());
+        }
+        if operation == "activityPresentationReady" && window.label() == "activity" {
+            if let Some(id) = args["id"].as_u64() {
+                reveal_activity_sheet(&window, id)?;
+            }
             return Ok(serde_json::Value::Null);
         }
         if operation == "activitySize" && window.label() == "activity" {
@@ -98,6 +106,8 @@ async fn notebook(
         if operation == "openNotebook" {
             open_workspace(window.app_handle())?;
             if window.label() == "activity" {
+                PANEL_PRESENTATION.lock().unwrap().take();
+                point::dismiss();
                 window.hide().msg()?;
             }
             return Ok(serde_json::Value::Null);
@@ -212,15 +222,61 @@ fn activity_sheet(app: &tauri::AppHandle) {
     let anchor = activity::anchor(&store).unwrap_or_default();
     present_activity_sheet(app, anchor);
 }
+// A shortcut can reuse a hidden WebKit window whose last painted frame belongs
+// to another chat. Reveal only the presentation the renderer has committed.
+static PANEL_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+static PANEL_PRESENTATION: Mutex<Option<serde_json::Value>> = Mutex::new(None);
+fn reveal_activity_sheet(window: &tauri::WebviewWindow, id: u64) -> Res<()> {
+    extern "C" {
+        fn sumi_cover_panel(window: *mut std::ffi::c_void);
+        fn sumi_reveal_after_paint(window: *mut std::ffi::c_void);
+    }
+    let panel = window.clone();
+    window.run_on_main_thread(move || {
+        let mut pending = PANEL_PRESENTATION.lock().unwrap();
+        if pending.as_ref().and_then(|p| p["id"].as_u64()) == Some(id) {
+            pending.take();
+            let Ok(ptr) = panel.ns_window() else { return };
+            unsafe { sumi_cover_panel(ptr) };
+            let _ = panel.show();
+            let _ = panel.set_focus();
+            unsafe { sumi_reveal_after_paint(ptr) };
+        }
+    }).msg()
+}
+fn dismiss_activity_sheet(window: &tauri::WebviewWindow) -> Res<()> {
+    extern "C" { fn sumi_dismiss_panel(window: *mut std::ffi::c_void); }
+    PANEL_PRESENTATION.lock().unwrap().take();
+    point::dismiss();
+    overlay::clear();
+    let panel = window.clone();
+    window.run_on_main_thread(move || {
+        if let Ok(ptr) = panel.ns_window() {
+            unsafe { sumi_dismiss_panel(ptr) };
+        } else {
+            let _ = panel.hide();
+        }
+    }).msg()
+}
 fn present_activity_sheet(app: &tauri::AppHandle, anchor: serde_json::Value) {
+    present_activity_sheet_with_origin(app, anchor, false);
+}
+fn present_activity_sheet_with_origin(app: &tauri::AppHandle, anchor: serde_json::Value, from_service: bool) {
+    extern "C" { fn sumi_prepare_panel(from_service: i32); }
+    unsafe { sumi_prepare_panel(i32::from(from_service)) };
     let _ = app
         .state::<Arc<Store>>()
         .set("activityAnchor", &anchor["id"]);
-    if let Some(w) = app.get_webview_window("activity") {
-        let _ = w.emit("activity-expand", ());
-        let _ = w.emit("activity-anchor", &anchor);
-        let _ = w.show();
-        let _ = w.set_focus();
+    let existing = app.get_webview_window("activity");
+    let request = {
+        let mut pending = PANEL_PRESENTATION.lock().unwrap();
+        let id = PANEL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let request = serde_json::json!({"id":id, "anchor":anchor, "cold":existing.is_none()});
+        *pending = Some(request.clone());
+        request
+    };
+    if let Some(w) = existing {
+        let _ = w.emit("activity-expand", request);
         return;
     }
     let window = tauri::WebviewWindowBuilder::new(
@@ -241,8 +297,6 @@ fn present_activity_sheet(app: &tauri::AppHandle, anchor: serde_json::Value) {
     .build();
     if let Ok(w) = window {
         let _ = size_assistant(&w, false, 144, true);
-        let _ = w.show();
-        let _ = w.set_focus();
     }
 }
 fn fresh_sheet(app: &tauri::AppHandle) {
@@ -482,14 +536,14 @@ fn run() -> Res<()> {
                 }
             });
             let capture_db = s.clone();
+            std::thread::spawn(move || activity::observe_foreground(&capture_db));
+            let capture_db = s.clone();
             let capture_app = app.handle().clone();
             std::thread::spawn(move || {
                 crate::local::background_thread();
                 let mut last_sync = std::time::Instant::now();
                 let mut showing_suggestion = false;
                 let mut published = serde_json::Value::Null;
-                let mut identity = activity::capture_identity(&capture_db);
-                let mut front_changed = false;
                 loop {
                     if last_sync.elapsed() >= std::time::Duration::from_secs(30) {
                         if let Err(err) = activity_files::sync(&capture_db) {
@@ -504,12 +558,6 @@ fn run() -> Res<()> {
                     if quitting() {
                         break;
                     }
-                    if let Err(error) = activity::sample(&capture_db) {
-                        let _ = capture_db.set("activityStatus", &serde_json::json!(error));
-                    }
-                    if front_changed && proactive::latest().is_null() {
-                        let _ = activity::revisit_front(&capture_db);
-                    }
                     let next_nudge = proactive::latest();
                     if next_nudge["id"] != published["id"] || next_nudge["eventId"] != published["eventId"] {
                         published = next_nudge.clone();
@@ -523,6 +571,7 @@ fn run() -> Res<()> {
                     if let Ok(mut c) = activity::config(&capture_db) {
                         c["status"] = capture_db.get("activityStatus").unwrap_or_default();
                         let watching = c["enabled"] == true;
+                        let on_demand = c["scope"] == "on-demand";
                         let suggested = watching && !next_nudge.is_null();
                         if suggested != showing_suggestion {
                             let updated = if suggested {
@@ -547,10 +596,12 @@ fn run() -> Res<()> {
                                 .unwrap_or_else(|| "Exclude current source".into()),
                         );
                         let _ = toggle.set_enabled(
-                            c["scope"] == "displays"
-                                || c["sources"].as_array().is_some_and(|v| !v.is_empty()),
+                            !on_demand && (c["scope"] == "displays"
+                                || c["sources"].as_array().is_some_and(|v| !v.is_empty())),
                         );
-                        let _ = toggle.set_text(if watching {
+                        let _ = toggle.set_text(if on_demand {
+                            "Reads only when you ask"
+                        } else if watching {
                             "Pause observation"
                         } else {
                             "Resume observation"
@@ -561,6 +612,8 @@ fn run() -> Res<()> {
                         if let Some(tray) = capture_app.tray_by_id("sumi") {
                             let state = if suggested {
                                 "Suggestion available"
+                            } else if on_demand {
+                                "Reads only when you ask"
                             } else if watching {
                                 c["status"].as_str().unwrap_or("Observation on")
                             } else {
@@ -571,7 +624,7 @@ fn run() -> Res<()> {
                                 "● REC"
                             } else if suggested {
                                 "●"
-                            } else if watching {
+                            } else if watching || on_demand {
                                 ""
                             } else if capture_db.agent_waiting().unwrap_or(false) {
                                 "●"
@@ -581,20 +634,10 @@ fn run() -> Res<()> {
                             let _ = tray.set_title(Some(mark));
                         }
                     }
-                    front_changed = false;
-                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
                     while std::time::Instant::now() < deadline && !quitting() {
-                        std::thread::sleep(std::time::Duration::from_millis(300));
-                        let next = activity::capture_identity(&capture_db);
-                        if next != identity {
-                            if let Some(row) = &next {
-                                proactive::follow_front(row["source"].as_str().unwrap_or(""), row["title"].as_str().unwrap_or(""));
-                            }
-                            identity = next;
-                            front_changed = true;
-                            break;
-                        }
-                        // A covered Notes or Mail window may finish indexing during this wait.
+                        std::thread::sleep(std::time::Duration::from_millis(150));
+                        // Publish an available suggestion promptly, independently of capture.
                         let current = proactive::latest();
                         if current["id"] != published["id"] || current["eventId"] != published["eventId"] {
                             break;
@@ -692,6 +735,12 @@ fn run() -> Res<()> {
         })
         .on_window_event(|window, event| {
             if window.label() == "activity" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    if let Some(panel) = window.app_handle().get_webview_window("activity") {
+                        api.prevent_close();
+                        let _ = dismiss_activity_sheet(&panel);
+                    }
+                }
                 return;
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -801,6 +850,11 @@ fn fixture_rpc(root: std::path::PathBuf, agents: bool) -> Res<()> {
                 .map(|_| serde_json::Value::Null)
         } else if op == "fixtureActivityDream" {
             activity::dream(&s).map(|_| serde_json::Value::Null)
+        } else if op == "fixturePlanAccount" {
+            // The browser fixture substitutes the completed sign-in, then lets
+            // the real notebook handle consent, provider selection and reloads.
+            s.put("provider", &serde_json::json!({"id":"ChatGPT","standalone":true,"model":"subscription"}))
+                .map(|_| serde_json::Value::Null)
         } else if op == "fixtureInkling" {
             let file = req["args"]["path"]
                 .as_str()

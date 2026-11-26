@@ -195,6 +195,7 @@ pub fn search(s: &Store, question: &str, prior: &Value) -> Res<Vec<Value>> {
         if total > 24 * 1024 * 1024 {
             break;
         }
+        let complete_text = plain && meta.len() == bytes.len() as u64;
         let body = if plain {
             String::from_utf8_lossy(&bytes).into_owned()
         } else {
@@ -213,7 +214,7 @@ pub fn search(s: &Store, question: &str, prior: &Value) -> Res<Vec<Value>> {
         hits.push((
             pinned,
             4 * n + count,
-            json!({"name":name,"path":p,"excerpt":excerpt}),
+            json!({"name":name,"path":p,"excerpt":excerpt,"complete":complete_text && excerpt == body}),
         ));
     }
     hits.sort_by_key(|(p, n, _)| (std::cmp::Reverse(*p), std::cmp::Reverse(*n)));
@@ -243,11 +244,11 @@ mod tests {
         let found = search(&s, "When does Zephyr studio open?", &Value::Null).unwrap();
         assert_eq!(found.len(), 1);
         assert!(found[0]["excerpt"].as_str().unwrap().contains("opens at 7"));
+        assert_eq!(found[0]["complete"], false);
         fs::write(&plan, "Zephyr now opens at 9.").unwrap();
-        assert!(search(&s, "Zephyr", &Value::Null).unwrap()[0]["excerpt"]
-            .as_str()
-            .unwrap()
-            .contains("at 9"));
+        let updated = search(&s, "Zephyr", &Value::Null).unwrap();
+        assert_eq!(updated[0]["excerpt"], "Zephyr now opens at 9.");
+        assert_eq!(updated[0]["complete"], true);
         configure(&s, Some(root.canonicalize().unwrap().to_str().unwrap())).unwrap();
         assert!(search(&s, "Zephyr", &json!([plan])).unwrap().is_empty());
     }

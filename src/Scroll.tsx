@@ -199,6 +199,8 @@ export function Scroll({
     [section, choose] = useState('deciding');
   const versions = [...data.versions].reverse();
   const entries = version ? past : data.entries;
+  const heldOut = data.reading?.tested || 0;
+  const hasScores = data.scores?.some((score: Row) => Number.isInteger(score.grade));
   useEffect(() => {
     let keep = true;
     if (version)
@@ -214,7 +216,9 @@ export function Scroll({
       name="What Beside knows"
       margin={
         <>
-          <button onClick={teach}>Teach a correction</button>
+          <button onClick={teach}>
+            {data.firstCorrection ? 'Continue your correction' : 'Teach a correction'}
+          </button>
           {!version && (
             <button onClick={() => add(!adding)}>
               {adding ? 'Cancel' : 'Write an entry'}
@@ -367,13 +371,14 @@ export function Scroll({
             </p>
           </div>
         )}
-      {!version && data.reading?.tested > 0 && (
+      {!version && (heldOut > 0 || hasScores) && (
         <details>
           <summary>How well Beside guessed</summary>
-          <p>
-            Beside hid {data.reading.tested} replies and compared its guesses with
-            your own words.
-          </p>
+          {heldOut > 0 && (
+            <p>
+              Beside hid {heldOut} replies and compared its guesses with your own words.
+            </p>
+          )}
           <button onClick={readings}>Read the predictions</button>
         </details>
       )}

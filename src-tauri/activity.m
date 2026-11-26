@@ -6,6 +6,8 @@
 #import <ServiceManagement/ServiceManagement.h>
 #import <Vision/Vision.h>
 
+extern NSDictionary *besideVisualBagLayout(CGImageRef image, CGPoint normalizedCursor);
+
 // Called only by the capture worker. Accessibility is used solely for the
 // visible web document of an approved site. Native windows use ScreenCaptureKit.
 static id attribute(AXUIElementRef element, CFStringRef key) {
@@ -138,6 +140,18 @@ int sumi_activity_awake(void) {
     return CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateCombinedSessionState,
                                                   kCGAnyInputEventType) <= 120;
 }
+// Keep the user's opted-in observation responsive while they are working in
+// another app. This activity allows both the display and the system to sleep.
+void sumi_observing_window(int observing) {
+    static id activity;
+    BOOL needed=observing && sumi_activity_awake() && availableSession();
+    if (needed && !activity)
+        activity=[NSProcessInfo.processInfo beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep reason:@"Remembering visible work on this Mac"];
+    else if (!needed && activity) {
+        [NSProcessInfo.processInfo endActivity:activity];
+        activity=nil;
+    }
+}
 static BOOL stillFront(pid_t pid) {
     return availableSession() &&
            NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier == pid;
@@ -154,10 +168,16 @@ static CGWindowID frontWindow(pid_t pid) {
 }
 // Notes OCR can include the folders and note list. Anchor on the visible heading
 // and read the editor column below it. Keep Apple's original strings for citations.
+static NSString *comparableNoteTitle(NSString *value) {
+    NSString *title = value.precomposedStringWithCanonicalMapping;
+    title = [title stringByReplacingOccurrencesOfString:@"[‘’]" withString:@"'" options:NSRegularExpressionSearch range:NSMakeRange(0,title.length)];
+    return [title stringByReplacingOccurrencesOfString:@"[“”]" withString:@"\"" options:NSRegularExpressionSearch range:NSMakeRange(0,title.length)];
+}
 static NSArray<NSString *> *notePassage(NSArray<VNRecognizedTextObservation *> *rows,
                                          NSString *windowTitle) {
     VNRecognizedTextObservation *heading = nil;
     BOOL namedWindow = windowTitle.length && ![windowTitle isEqualToString:@"Notes"];
+    NSString *wanted = comparableNoteTitle(windowTitle);
     double best = -1;
     for (VNRecognizedTextObservation *row in rows) {
         VNRecognizedText *candidate = [row topCandidates:1].firstObject;
@@ -166,7 +186,7 @@ static NSArray<NSString *> *notePassage(NSArray<VNRecognizedTextObservation *> *
         if (candidate.confidence < 0.55 || !text.length || CGRectGetMidY(box) < 0.40 ||
             CGRectGetMidY(box) > 0.97)
             continue;
-        BOOL matches = windowTitle.length && [windowTitle caseInsensitiveCompare:text] == NSOrderedSame;
+        BOOL matches = wanted.length && [wanted caseInsensitiveCompare:comparableNoteTitle(text)] == NSOrderedSame;
         if (namedWindow && !matches) continue;
         if (!matches && (box.size.height < 0.019 || CGRectGetMinX(box) < 0.015))
             continue;
@@ -188,7 +208,7 @@ static NSArray<NSString *> *notePassage(NSArray<VNRecognizedTextObservation *> *
         if (score > best) { best = score; heading = row; }
     }
     if (!heading) return nil;
-    NSString *title = [heading topCandidates:1].firstObject.string;
+    NSString *title = namedWindow ? windowTitle : [heading topCandidates:1].firstObject.string;
     NSMutableArray *body = [NSMutableArray arrayWithObject:title];
     CGRect box = heading.boundingBox;
     NSArray *ordered = [rows sortedArrayUsingComparator:^NSComparisonResult(VNRecognizedTextObservation *a, VNRecognizedTextObservation *b) {
@@ -207,8 +227,159 @@ static NSArray<NSString *> *notePassage(NSArray<VNRecognizedTextObservation *> *
 }
 
 static BOOL fareWindow(NSString *title) {
-    return [title rangeOfString:@"booking|reservation|flight confirmation|flight itinerary|manage trip|check-in|fare types|fare bundles|fare options"
+    return [title rangeOfString:@"booking|reservation|flight confirmation|flight itinerary|manage trip|check-in|fare types|fare bundles|fare options|bags\\s*[|·–-]\\s*ryanair"
                         options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location != NSNotFound;
+}
+
+// The airline serves a table and a card layout. In both, the smallest shared
+// accessibility ancestor must contain one counter, one price and its inclusion
+// notice. An adjacent cabin upgrade or 23 kg selector must never supply a price.
+static NSString *bagReceipt(NSArray<NSString *> *parts) {
+    NSString *raw = [parts componentsJoinedByString:@" "];
+    NSArray *words = [raw componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *line = [[words filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]] componentsJoinedByString:@" "];
+    NSString *pattern = @"^[1-3] +[£€$] *[0-9]{1,4}(?: *[.,] *[0-9]{2})? +1 bag included (?:with|in) [A-Za-z][A-Za-z -]{0,24}$";
+    return [line rangeOfString:pattern options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location != NSNotFound ? line : nil;
+}
+
+static void addBagDestination(NSString *route, NSMutableSet *destinations) {
+    NSString *pattern = @"^[\\p{Lu}][\\p{L}\\p{M}.'’(), -]{0,60} to [\\p{Lu}][\\p{L}\\p{M}.'’(), -]{0,60}$";
+    if (route.length < 140 && [route rangeOfString:pattern options:NSRegularExpressionSearch].location != NSNotFound)
+        [destinations addObject:[[route componentsSeparatedByString:@" to "] lastObject]];
+}
+
+static void findBagOffer(id node, CGRect viewport, int depth, int *budget, NSMutableSet *visited,
+                         NSMutableArray *texts, NSMutableArray *offers, NSMutableSet *destinations) {
+    if (!node || [visited containsObject:node] || *budget <= 0 || depth > 48) return;
+    [visited addObject:node];
+    (*budget)--;
+    AXUIElementRef el = (__bridge AXUIElementRef)node;
+    // One round trip per node matters on a cross-process browser tree.
+    NSArray *keys = @[(__bridge id)kAXRoleAttribute, (__bridge id)kAXTitleAttribute,
+                      (__bridge id)kAXDescriptionAttribute, (__bridge id)kAXValueAttribute, (__bridge id)kAXChildrenAttribute];
+    CFArrayRef raw = NULL;
+    if (AXUIElementCopyMultipleAttributeValues(el, (__bridge CFArrayRef)keys, 0, &raw) != kAXErrorSuccess || !raw) return;
+    NSArray *values = CFBridgingRelease(raw);
+    if (values.count != keys.count) return;
+    NSString *role = clean(values[0]);
+    if ((depth && [role isEqual:@"AXWebArea"]) || [role containsString:@"TextField"] ||
+        [role isEqual:@"AXTextArea"] || [role isEqual:@"AXColumn"] || [role isEqual:@"AXLink"]) return;
+    BOOL isText = [role isEqual:@"AXStaticText"];
+    NSString *label = isText ? clean(values[3]) : clean(values[1]);
+    if (!label.length) label = clean(values[2]);
+    if (!label.length) label = clean(isText ? values[1] : values[3]);
+    label = [label stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (isText || [role isEqual:@"AXHeading"] || [role isEqual:@"AXCell"]) {
+        // A general heading such as "Equipment Need to bring sports ...?" is
+        // not an itinerary. Read named endpoints from the page's own route.
+        addBagDestination(label,destinations);
+    }
+    if (isText) {
+        if (label.length && CGRectIntersectsRect(viewport, bounds(el))) [texts addObject:label];
+        return;
+    }
+    NSUInteger firstText = texts.count, firstOffer = offers.count;
+    if (([role isEqual:@"AXButton"] || [role isEqual:@"AXIncrementArrow"]) &&
+        [label rangeOfString:@"^Add [1-9][0-9]?\\s*kg Check-in Bag$" options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location != NSNotFound &&
+        CGRectIntersectsRect(viewport, bounds(el))) {
+        [offers addObject:[@{@"control":label} mutableCopy]];
+    }
+    // Chrome on macOS exposes an actionable AXIncrementor and hides its
+    // underlying plus/minus HTML buttons. The numeric value is the live
+    // quantity. Keep only the bag name, never the passenger label after it.
+    if ([role isEqual:@"AXIncrementor"] && (![values[4] isKindOfClass:NSArray.class] || ![values[4] count]) &&
+        CGRectIntersectsRect(viewport, bounds(el))) {
+        NSRange bag = [label rangeOfString:@"^[1-9][0-9]?\\s*kg Check-in Bag(?= |$)"
+                                options:NSRegularExpressionSearch|NSCaseInsensitiveSearch];
+        NSString *quantity = [values[3] isKindOfClass:NSNumber.class] ? [values[3] stringValue] : clean(values[3]);
+        if (bag.location != NSNotFound && [@[@"1",@"2",@"3"] containsObject:quantity]) {
+            CFArrayRef actions = NULL;
+            if (AXUIElementCopyActionNames(el, &actions) == kAXErrorSuccess && actions) {
+                NSArray *available = CFBridgingRelease(actions);
+                if ([available containsObject:(__bridge NSString *)kAXIncrementAction]) {
+                    NSString *name = [@"Add " stringByAppendingString:[label substringWithRange:bag]];
+                    [offers addObject:[@{@"control":name} mutableCopy]];
+                    [texts addObject:quantity];
+                }
+            }
+        }
+    }
+    if ([values[4] isKindOfClass:NSArray.class]) {
+        for (id child in values[4]) {
+            if (*budget <= 0) break;
+            findBagOffer(child,viewport,depth+1,budget,visited,texts,offers,destinations);
+        }
+    }
+    // In the card layout "London Stansted to " and "Athens" are two
+    // adjacent text children of the same route label.
+    NSUInteger textCount = texts.count - firstText;
+    if (textCount >= 2 && textCount <= 3) {
+        for (NSUInteger j=firstText+1; j<texts.count; j++) {
+            if ([texts[j-1] hasSuffix:@" to"])
+                addBagDestination([NSString stringWithFormat:@"%@ %@",texts[j-1],texts[j]],destinations);
+        }
+    }
+    if (offers.count != firstOffer + 1 || offers[firstOffer][@"line"]) return;
+    NSUInteger count = texts.count - firstText;
+    if (!count || count > 14) return;
+    NSString *receipt = bagReceipt([texts subarrayWithRange:NSMakeRange(firstText,count)]);
+    if (receipt) offers[firstOffer][@"line"] = receipt;
+}
+
+static NSString *checkedBagPage(id page, CGRect viewport) {
+    AXUIElementRef el = (__bridge AXUIElementRef)page;
+    id raw = attribute(el,kAXURLAttribute);
+    NSURL *url = [raw isKindOfClass:NSString.class] ? [NSURL URLWithString:raw] : raw;
+    if (![url isKindOfClass:NSURL.class] || ![url.scheme isEqual:@"https"] || ![url.host.lowercaseString isEqual:@"www.ryanair.com"] || ![url.path hasSuffix:@"/trip/flights/bags"]) return nil;
+    // Discard cart identifiers and personal details. Rates for multiple
+    // people or legs must not be attributed to a single bag.
+    NSSet *keys = [NSSet setWithArray:@[@"tpDestinationIata",@"tpStartDate",@"tpEndDate",@"tpAdults",@"tpTeens",@"tpChildren",@"tpInfants"]];
+    NSMutableDictionary *trip = [NSMutableDictionary dictionary];
+    for (NSURLQueryItem *item in [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO].queryItems) {
+        if (![keys containsObject:item.name]) continue;
+        if (trip[item.name]) return nil;
+        trip[item.name] = item.value ?: @"";
+    }
+    NSString *code = trip[@"tpDestinationIata"], *day = trip[@"tpStartDate"];
+    if (!code || !day || [code rangeOfString:@"^[A-Z]{3}$" options:NSRegularExpressionSearch].location == NSNotFound ||
+        [day rangeOfString:@"^[0-9]{4}-[0-9]{2}-[0-9]{2}$" options:NSRegularExpressionSearch].location == NSNotFound ||
+        ![trip[@"tpEndDate"] isEqual:@""] || ![trip[@"tpAdults"] isEqual:@"1"] || ![trip[@"tpTeens"] isEqual:@"0"] ||
+        ![trip[@"tpChildren"] isEqual:@"0"] || ![trip[@"tpInfants"] isEqual:@"0"]) return nil;
+    NSMutableArray *offers = [NSMutableArray array], *texts = [NSMutableArray array];
+    NSMutableSet *destinations = [NSMutableSet set], *visited = [NSMutableSet set];
+    int budget = 1200;
+    findBagOffer(page,viewport,0,&budget,visited,texts,offers,destinations);
+    if (budget <= 0 || offers.count != 1 || destinations.count != 1 || !offers.firstObject[@"line"]) return nil;
+    return [NSString stringWithFormat:@"Check-in bag selection\nDestination: %@\nOutbound: %@ %@\n%@\n%@",
+            destinations.anyObject,code,day,offers.firstObject[@"control"],offers.firstObject[@"line"]];
+}
+
+// A browser can switch tabs while the accessibility tree is being read.
+static NSString *currentBagOffer(id page, id focused, CGRect viewport, pid_t pid, CGWindowID wid) {
+    id initialURL = attribute((__bridge AXUIElementRef)page,kAXURLAttribute);
+    NSString *offer = checkedBagPage(page,viewport);
+    if (!offer || !availableSession() || !stillFront(pid) || frontWindow(pid)!=wid) return nil;
+    int budget=220;
+    id activePage=webArea(focused,0,&budget);
+    return [activePage isEqual:page] && [initialURL isEqual:attribute((__bridge AXUIElementRef)page,kAXURLAttribute)] ? offer : nil;
+}
+
+// Only inspect checkout semantics on a visible airline bag page. Other display
+// samples keep their usual capture path, including their original pointer line.
+static NSString *frontBagOffer(NSRunningApplication *app, NSString *title, CGWindowID wid, const CGPoint *point) {
+    if ([title rangeOfString:@"bags\\s*[|·–-]\\s*ryanair" options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location == NSNotFound ||
+        !wid || !AXIsProcessTrusted() || !availableSession() || !stillFront(app.processIdentifier)) return nil;
+    id owner=CFBridgingRelease(AXUIElementCreateApplication(app.processIdentifier));
+    AXUIElementSetMessagingTimeout((__bridge AXUIElementRef)owner,0.25);
+    if ([app.bundleIdentifier isEqual:@"com.google.Chrome"])
+        AXUIElementSetAttributeValue((__bridge AXUIElementRef)owner,CFSTR("AXManualAccessibility"),kCFBooleanTrue);
+    id focused=attribute((__bridge AXUIElementRef)owner,kAXFocusedWindowAttribute);
+    int budget=220;
+    id page=focused ? webArea(focused,0,&budget) : nil;
+    if (!page) return nil;
+    CGRect viewport=CGRectIntersection(bounds((__bridge AXUIElementRef)focused),bounds((__bridge AXUIElementRef)page));
+    if (CGRectIsEmpty(viewport) || (point && !CGRectContainsPoint(viewport,*point))) return nil;
+    return currentBagOffer(page,focused,viewport,app.processIdentifier,wid);
 }
 
 // Vision returns observations in reading blocks. On a fare table, preserve
@@ -355,18 +526,34 @@ static NSData *fingerprint(CGImageRef image) {
     CC_SHA256(pixels, sizeof(pixels), digest);
     return [NSData dataWithBytes:digest length:sizeof(digest)];
 }
+// Core Graphics orders windows front to back across every display. A
+// side-by-side window can come first even when it covers none of the note.
+static CGRect unobscuredNoteFrame(NSArray<NSDictionary *> *windows, pid_t pid, CGWindowID wanted) {
+    CGRect frame = CGRectZero;
+    for (NSDictionary *w in windows.reverseObjectEnumerator) {
+        if ([w[(__bridge NSString *)kCGWindowLayer] intValue] != 0) continue;
+        NSNumber *alpha = w[(__bridge NSString *)kCGWindowAlpha];
+        if (alpha && alpha.doubleValue <= 0) continue;
+        NSDictionary *box = w[(__bridge NSString *)kCGWindowBounds];
+        CGRect rect = CGRectZero;
+        BOOL known = box && CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)box, &rect);
+        if ([w[(__bridge NSString *)kCGWindowOwnerPID] intValue] == pid &&
+            [w[(__bridge NSString *)kCGWindowNumber] unsignedIntValue] == wanted) {
+            if (!known || CGRectIsEmpty(rect)) return CGRectZero;
+            frame = rect;
+        } else if (!CGRectIsEmpty(frame) && (!known || !CGRectIsEmpty(CGRectIntersection(frame, rect)))) {
+            // A window in front of the editor hides part of it. Do not read
+            // behind it with a window-only screenshot or Accessibility.
+            return CGRectZero;
+        }
+    }
+    return frame;
+}
+
 static CGRect visibleNoteWindow(pid_t pid, CGWindowID wanted) {
     NSArray *windows = CFBridgingRelease(CGWindowListCopyWindowInfo(
         kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID));
-    for (NSDictionary *w in windows) {
-        if ([w[(__bridge NSString *)kCGWindowLayer] intValue] != 0) continue;
-        CGRect frame = CGRectZero;
-        if ([w[(__bridge NSString *)kCGWindowOwnerPID] intValue] == pid &&
-            [w[(__bridge NSString *)kCGWindowNumber] unsignedIntValue] == wanted)
-            CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)w[(__bridge NSString *)kCGWindowBounds], &frame);
-        return frame;
-    }
-    return CGRectZero;
+    return unobscuredNoteFrame(windows, pid, wanted);
 }
 
 static NSDictionary *noteFrame(SCContentFilter *filter, SCStreamConfiguration *config,
@@ -607,8 +794,9 @@ char *sumi_activity_front(const char *raw) {
                 NSArray *ws = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, wid));
                 NSString *name = clean(ws.firstObject[(__bridge NSString *)kCGWindowName]);
                 if ([front.bundleIdentifier isEqual:@"com.apple.mail"]) return packed(@{@"source":@"display", @"title":mailWindowTitle(name)});
-                if (!name.length || [name isEqual:@"Notes"]) return NULL;
-                return packed(@{@"source": @"display", @"title": [@"Notes · " stringByAppendingString:name]});
+                if (!name.length || [name isEqual:@"Notes"])
+                    return wid ? packed(@{@"source":@"display", @"title":@"Notes", @"window":@(wid)}) : NULL;
+                return packed(@{@"source": @"display", @"title": [@"Notes · " stringByAppendingString:name], @"window":@(wid)});
             }
             return packed(@{@"source" : @"display", @"title" : displayTitle(pointerDisplay())});
         }
@@ -651,34 +839,67 @@ char *sumi_activity_front(const char *raw) {
         NSString *name = clean(row[(__bridge NSString *)kCGWindowName]);
         if ([bundle isEqual:@"com.apple.Notes"] && name.length)
             name = [@"Notes · " stringByAppendingString:name];
-        return packed(@{@"source": bundle, @"title": name});
+        return packed(@{@"source": bundle, @"title": name, @"window":@(wid)});
     }
 }
-// A short packing list that fits on screen can be read without mixing in
-// words from other windows. Only mark it complete when the entire text is visible.
-static char *visiblePackingList(NSRunningApplication *app, NSString *source) {
-    if (!AXIsProcessTrusted() || !availableSession() || !screenAccess(NO)) return NULL;
-    pid_t pid=app.processIdentifier;
-    id owner=CFBridgingRelease(AXUIElementCreateApplication(pid));
-    AXUIElementRef ax=(__bridge AXUIElementRef)owner;
-    id window=attribute(ax,kAXFocusedWindowAttribute);
-    NSString *name=window ? clean(attribute((__bridge AXUIElementRef)window,kAXTitleAttribute)) : @"";
-    if ([name rangeOfString:@"packing (list|checklist)" options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location==NSNotFound) return NULL;
-    id field=attribute(ax,kAXFocusedUIElementAttribute);
-    if (!field) return NULL;
-    AXUIElementRef el=(__bridge AXUIElementRef)field;
-    if (![attribute(el,kAXRoleAttribute) isEqual:@"AXTextArea"] || ![window isEqual:attribute(el,kAXWindowAttribute)]) return NULL;
+// The app-wide focused field can belong to the previous note. Search the
+// actual focused window for an editor whose own visible text has this title.
+static NSString *matchingEditor(id node, int depth, int *budget, NSString *(^read)(id)) {
+    if (!node || --*budget<0 || depth>12) return nil;
+    AXUIElementRef el=(__bridge AXUIElementRef)node;
+    if ([attribute(el,kAXRoleAttribute) isEqual:@"AXTextArea"]) return read(node);
+    for (id child in attribute(el,kAXChildrenAttribute)) {
+        NSString *text=matchingEditor(child,depth+1,budget,read);
+        if (text) return text;
+    }
+    return nil;
+}
+static NSString *visibleEditorText(id node, id window, NSString *name, BOOL notes, BOOL inWindow) {
+    if (!node) return nil;
+    AXUIElementRef el=(__bridge AXUIElementRef)node;
+    if (![attribute(el,kAXRoleAttribute) isEqual:@"AXTextArea"]) return nil;
+    id owner=attribute(el,kAXWindowAttribute);
+    if (owner ? ![owner isEqual:window] : !inWindow) return nil;
     NSNumber *length=attribute(el,kAXNumberOfCharactersAttribute);
     id visible=attribute(el,kAXVisibleCharacterRangeAttribute);
     CFRange range={0,0};
     if (!length || length.integerValue<1 || length.integerValue>5400 || !visible ||
         CFGetTypeID((__bridge CFTypeRef)visible)!=AXValueGetTypeID() ||
         !AXValueGetValue((__bridge AXValueRef)visible,kAXValueCFRangeType,&range) ||
-        range.location!=0 || range.length<length.integerValue) return NULL;
+        range.location!=0 || range.length<length.integerValue) return nil;
     NSString *text=clean(attribute(el,kAXValueAttribute));
-    if (text.length!=length.integerValue || !stillFront(pid) || ![window isEqual:attribute(ax,kAXFocusedWindowAttribute)]) return NULL;
-    return packed(@{@"source":source,@"title":[NSString stringWithFormat:@"TextEdit · %@ · TextEdit active",name],@"body":text});
+    if (text.length!=length.unsignedIntegerValue) return nil;
+    NSString *heading=[[text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject];
+    if (notes && (![name isEqual:heading] ||
+        ![[text substringFromIndex:heading.length] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length)) return nil;
+    return text;
 }
+static NSDictionary *visibleEditorDocument(NSRunningApplication *app, NSString *source) {
+    if (!AXIsProcessTrusted() || !availableSession() || !screenAccess(NO)) return nil;
+    BOOL notes=[app.bundleIdentifier isEqual:@"com.apple.Notes"];
+    if (!notes && ![app.bundleIdentifier isEqual:@"com.apple.TextEdit"]) return nil;
+    pid_t pid=app.processIdentifier;
+    CGWindowID wid=frontWindow(pid);
+    if (!wid || !stillFront(pid) || CGRectIsEmpty(visibleNoteWindow(pid,wid))) return nil;
+    id owner=CFBridgingRelease(AXUIElementCreateApplication(pid));
+    AXUIElementRef ax=(__bridge AXUIElementRef)owner;
+    AXUIElementSetMessagingTimeout(ax,0.25);
+    id window=attribute(ax,kAXFocusedWindowAttribute);
+    NSString *name=window ? clean(attribute((__bridge AXUIElementRef)window,kAXTitleAttribute)) : @"";
+    if (!name.length || (notes && [name isEqual:@"Notes"]) || (!notes && [name rangeOfString:@"packing (list|checklist)" options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location==NSNotFound)) return nil;
+    NSString *text=visibleEditorText(attribute(ax,kAXFocusedUIElementAttribute),window,name,notes,NO);
+    if (!text && notes) {
+        int budget=120;
+        text=matchingEditor(window,0,&budget,^NSString *(id node) {
+            return visibleEditorText(node,window,name,YES,YES);
+        });
+    }
+    if (!text || !stillFront(pid) || frontWindow(pid)!=wid || CGRectIsEmpty(visibleNoteWindow(pid,wid)) ||
+        ![window isEqual:attribute(ax,kAXFocusedWindowAttribute)] || ![name isEqual:attribute((__bridge AXUIElementRef)window,kAXTitleAttribute)]) return nil;
+    NSString *title=notes ? [@"Notes · " stringByAppendingString:name] : [NSString stringWithFormat:@"TextEdit · %@ · TextEdit active",name];
+    return @{@"source":source,@"title":title,@"body":text};
+}
+
 
 char *sumi_activity_sample(const char *raw) {
     @autoreleasepool {
@@ -694,16 +915,29 @@ char *sumi_activity_sample(const char *raw) {
         pid_t pid = app.processIdentifier;
         BOOL displays = [settings[@"scope"] isEqual:@"displays"];
         if ([bundle isEqual:@"com.apple.TextEdit"] && (displays || [allowed containsObject:bundle])) {
-            char *list=visiblePackingList(app, displays ? @"display" : bundle);
-            if (list) return list;
+            NSDictionary *list=visibleEditorDocument(app, displays ? @"display" : bundle);
+            if (list) return packed(list);
             CGWindowID window=frontWindow(pid);
             NSArray *windows=CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow,window));
             NSString *name=clean(windows.firstObject[(__bridge NSString *)kCGWindowName]);
             if ([name rangeOfString:@"packing (list|checklist)" options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location!=NSNotFound)
                 return sampleNote(app,displays ? @"display" : bundle,keepPreview);
         }
-        if ([bundle isEqual:@"com.apple.Notes"] && (displays || [allowed containsObject:bundle]))
-            return sampleNote(app, displays ? @"display" : bundle, keepPreview);
+        if ([bundle isEqual:@"com.apple.Notes"] && (displays || [allowed containsObject:bundle])) {
+            NSString *source=displays ? @"display" : bundle;
+            NSDictionary *note=visibleEditorDocument(app,source);
+            if (note) return packed(note);
+            return sampleNote(app,source,keepPreview);
+        }
+        if (displays && browser(bundle) && screenAccess(NO)) {
+            CGWindowID wid=frontWindow(pid);
+            if (wid) {
+                NSArray *rows=CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow,wid));
+                NSString *title=clean(rows.firstObject[(__bridge NSString *)kCGWindowName]);
+                NSString *offer=frontBagOffer(app,title,wid,NULL);
+                if (offer) return packed(@{@"source":@"display",@"title":@"Check-in bags · Ryanair",@"body":offer});
+            }
+        }
         BOOL scopedMail = displays && [bundle isEqual:@"com.apple.mail"];
         if (displays && !scopedMail) return sampleDisplay(keepPreview, settings[@"generation"] ?: @"");
         if (!bundle || (!scopedMail && !browser(bundle) && ![allowed containsObject:bundle]))
@@ -737,6 +971,8 @@ char *sumi_activity_sample(const char *raw) {
                                                  bounds((__bridge AXUIElementRef)page));
             if (CGRectIsEmpty(viewport))
                 return status(@"Waiting for visible page text");
+            NSString *offer=currentBagOffer(page,window,viewport,pid,frontWindow(pid));
+            if (offer) return packed(@{@"source":source,@"title":@"Check-in bags · Ryanair",@"body":offer});
             NSMutableString *text = [NSMutableString string];
             budget = 520;
             visibleText(page, viewport, 0, &budget, text);
@@ -876,6 +1112,8 @@ void sumi_size_panel(void *pointer, int layout, bool initial) {
 
 // macOS supplies just the selection when someone invokes Services > Ask Beside.
 static void (*receivedSelection)(const char *);
+extern void sumi_capture_service_origin(void);
+extern void sumi_watch_service_origin(void);
 @interface SumiServices : NSObject
 @end
 @implementation SumiServices
@@ -885,13 +1123,19 @@ static void (*receivedSelection)(const char *);
         if (error) *error = @"Select between 1 and 12,000 characters to use in Beside.";
         return;
     }
-    if (receivedSelection) receivedSelection(text.UTF8String);
+    if (receivedSelection) {
+        sumi_capture_service_origin();
+        receivedSelection(text.UTF8String);
+    }
 }
 @end
 void sumi_register_service(void (*callback)(const char *)) {
     receivedSelection = callback;
     static SumiServices *provider;
-    provider = [SumiServices new];
+    if (!provider) {
+        sumi_watch_service_origin();
+        provider = [SumiServices new];
+    }
     NSApp.servicesProvider = provider;
     NSUpdateDynamicServices();
 }
@@ -1077,7 +1321,7 @@ NSDictionary *sumi_point_window(CGPoint p) {
         NSRunningApplication *app=[NSRunningApplication runningApplicationWithProcessIdentifier:pid];
         if (!app.bundleIdentifier || protectedApp(app.bundleIdentifier)) return nil;
         return @{@"id":row[(__bridge NSString *)kCGWindowNumber], @"app":app.localizedName ?: @"App",
-                 @"bundle":app.bundleIdentifier, @"pid":@(pid), @"frame":[NSValue valueWithRect:frame]};
+                 @"bundle":app.bundleIdentifier, @"pid":@(pid), @"title":clean(row[(__bridge NSString *)kCGWindowName]), @"frame":[NSValue valueWithRect:frame]};
     }
     return nil;
 }
@@ -1085,15 +1329,19 @@ NSDictionary *sumi_point_window(CGPoint p) {
 // Use the author's selection only when the pointer is actually over it in
 // a supported editor. A selection elsewhere in the document is unrelated.
 static NSString *selectedPassage(NSDictionary *window, CGPoint point) {
+    pid_t pid = [window[@"pid"] intValue];
+    CGWindowID wid = [window[@"id"] unsignedIntValue];
     if (![@[@"com.apple.TextEdit", @"com.apple.Notes", @"com.apple.iWork.Pages"] containsObject:window[@"bundle"]]
-        || !AXIsProcessTrusted()) return nil;
-    id app = CFBridgingRelease(AXUIElementCreateApplication([window[@"pid"] intValue]));
+        || !AXIsProcessTrusted() || !wid || !stillFront(pid) || frontWindow(pid) != wid) return nil;
+    id app = CFBridgingRelease(AXUIElementCreateApplication(pid));
     AXUIElementRef owner = (__bridge AXUIElementRef)app, raw = NULL;
     AXUIElementSetMessagingTimeout(owner, 0.15);
     if (AXUIElementCopyElementAtPosition(owner, point.x, point.y, &raw) != kAXErrorSuccess) return nil;
     id element = CFBridgingRelease(raw);
     AXUIElementRef field = (__bridge AXUIElementRef)element;
     if (![attribute(field,kAXRoleAttribute) isEqual:(__bridge NSString *)kAXTextAreaRole]) return nil;
+    id editor = attribute(field,kAXWindowAttribute) ?: attribute(field,kAXTopLevelUIElementAttribute);
+    if (!editor || ![editor isEqual:attribute(owner,kAXFocusedWindowAttribute)]) return nil;
     id range = attribute(field,kAXSelectedTextRangeAttribute);
     CFRange selection = {0, 0};
     if (!range || CFGetTypeID((__bridge CFTypeRef)range) != AXValueGetTypeID()
@@ -1108,7 +1356,7 @@ static NSString *selectedPassage(NSDictionary *window, CGPoint point) {
         || !AXValueGetValue((__bridge AXValueRef)box,kAXValueCGRectType,&rect)
         || !CGRectContainsPoint(rect,point)) return nil;
     NSString *text = clean(attribute(field,kAXSelectedTextAttribute));
-    return text.length > 0 && text.length <= 1200 ? text : nil;
+    return text.length > 0 && text.length <= 1200 && stillFront(pid) && frontWindow(pid) == wid ? text : nil;
 }
 
 NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary *settings) {
@@ -1140,10 +1388,19 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
         if (!line.length) line=clean(attribute((__bridge AXUIElementRef)el,kAXValueAttribute));
         if (!line.length) line=clean(attribute((__bridge AXUIElementRef)el,kAXDescriptionAttribute));
         NSString *title=clean(attribute((__bridge AXUIElementRef)page,kAXTitleAttribute));
+        CGRect viewport=CGRectIntersection(bounds((__bridge AXUIElementRef)focused),bounds((__bridge AXUIElementRef)page));
+        NSString *offer=currentBagOffer(page,focused,viewport,pid,wid);
+        if (offer && [host isEqual:hostOf(page)])
+            return @{@"source":source,@"app":window[@"app"],@"pageTitle":title,@"line":line,@"bookingTitle":@"Check-in bags · Ryanair",@"bookingBody":offer};
         return line.length && line.length<1800 ? @{@"source":source,@"app":window[@"app"],@"pageTitle":title ?: @"",@"line":line} : nil;
     }
     if (!displays && ![settings[@"sources"] containsObject:source]) return nil;
     if (!availableSession() || !screenAccess(YES)) return nil;
+    NSString *checkout=nil;
+    if (browser(window[@"bundle"])) {
+        NSRunningApplication *app=[NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+        checkout=frontBagOffer(app,clean(window[@"title"]),wid,&point);
+    }
     NSString *selection = selectedPassage(window, point);
     dispatch_semaphore_t done=dispatch_semaphore_create(0);
     __block NSDictionary *result=nil;
@@ -1212,11 +1469,13 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
                     CGFloat xPct = frame.size.width > 0 ? round((local.x / frame.size.width) * 1000.0) / 10.0 : 50.0;
                     CGFloat yPct = frame.size.height > 0 ? round((local.y / frame.size.height) * 1000.0) / 10.0 : 50.0;
                     CGImageRelease(band); CGImageRelease(patch);
+                    BOOL selected = selection && [selection isEqual:selectedPassage(window, point)];
                     result=@{
                         @"source":source,
                         @"app":window[@"app"],
                         @"bundle":window[@"bundle"],
-                        @"line":selection ?: line,
+                        @"line":selected ? selection : line,
+                        @"lineKind":selected ? @"selection" : @"point",
                         @"nearby":nearby,
                         @"image":[jpeg base64EncodedStringWithOptions:0] ?: @"",
                         @"fullImage":fullB64,
@@ -1224,22 +1483,43 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
                         @"windowFrame":@{@"x":@(round(frame.origin.x)), @"y":@(round(frame.origin.y)), @"w":@(round(frame.size.width)), @"h":@(round(frame.size.height))}
                     };
                     NSString *title=w.title ?: @"";
+                    if ([NSProcessInfo.processInfo.environment[@"BESIDE_BAG_DIAGNOSTICS"] isEqual:@"1"] && browser(window[@"bundle"]))
+                        fprintf(stderr,"[Beside baggage] screen width=%zu height=%zu fare_title=%d ax_offer=%d\n",CGImageGetWidth(image),CGImageGetHeight(image),fareWindow(title),checkout!=nil);
                     if ([window[@"bundle"] isEqual:@"com.apple.Notes"]) {
                         // Read the editor column from the same frame as the pointer.
                         // The small pointer crop can omit the end of a list or plan.
-                        NSDictionary *note=recognize(image,source,title,NO,YES);
+                        NSDictionary *note=visibleEditorDocument([NSRunningApplication runningApplicationWithProcessIdentifier:pid],source);
+                        if (!note) note=recognize(image,source,title,NO,YES);
                         if ([note[@"body"] length]) {
                             NSMutableDictionary *withNote=[result mutableCopy];
                             withNote[@"document"]=note[@"body"];
                             result=withNote;
                         }
                     }
-                    if (fareWindow(title)) {
-                        NSDictionary *page=recognize(image,source,title,NO,NO);
+                    if (checkout && [checkout isEqual:frontBagOffer(
+                        [NSRunningApplication runningApplicationWithProcessIdentifier:pid],title,wid,&point)]) {
+                        NSMutableDictionary *withOffer=[result mutableCopy];
+                        withOffer[@"bookingTitle"]=@"Check-in bags · Ryanair";
+                        withOffer[@"bookingBody"]=checkout;
+                        result=withOffer;
+                    } else if (fareWindow(title)) {
+                        BOOL airline = browser(window[@"bundle"]) &&
+                            [title rangeOfString:@"bags\\s*[|·–-]\\s*ryanair" options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location!=NSNotFound;
+                        NSDictionary *layout = airline ? besideVisualBagLayout(image,CGPointMake(local.x/frame.size.width,local.y/frame.size.height)) : nil;
+                        NSDictionary *page = layout ? nil : recognize(image,source,title,NO,NO);
+                        if (layout) {
+                            NSMutableDictionary *withLayout=[result mutableCopy];
+                            withLayout[@"bookingTitle"]=@"Check-in bags · Ryanair";
+                            withLayout[@"bagLayout"]=layout;
+                            withLayout[@"bookingControlsUnavailable"]=@(!AXIsProcessTrusted());
+                            result=withLayout;
+                        }
                         if (page[@"body"]) {
                             NSMutableDictionary *withPage=[result mutableCopy];
                             withPage[@"bookingTitle"]=title;
                             withPage[@"bookingBody"]=page[@"body"];
+                            if (browser(window[@"bundle"]) && !AXIsProcessTrusted())
+                                withPage[@"bookingControlsUnavailable"]=@YES;
                             result=withPage;
                         }
                     }

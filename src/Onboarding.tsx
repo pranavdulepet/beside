@@ -164,7 +164,7 @@ export function Onboarding({
 }: {
   data: Row;
   act: Action;
-  finish: () => void;
+  finish: (openDesk?: boolean) => Promise<void>;
   refresh: () => Promise<void>;
 }) {
   const [choice, quiz] = useState<Row | null>(null),
@@ -222,7 +222,7 @@ export function Onboarding({
   if (step === 2 && !job)
     return (
       <main className="first-lesson">
-        <FirstCorrection data={data} act={act} />
+        <FirstCorrection data={data} act={act} finish={() => finish(true)} />
       </main>
     );
   return (
@@ -430,7 +430,7 @@ export function Onboarding({
               />
             </details>
           )}
-          <button className="primary" onClick={finish}>
+          <button className="primary" onClick={() => void finish(true)}>
             Open the Desk
           </button>
         </>

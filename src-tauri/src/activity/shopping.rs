@@ -5,14 +5,48 @@ use std::{collections::HashSet, sync::LazyLock};
 
 pub(super) fn asks_for_plan(q: &str) -> bool {
     let q = q.to_lowercase();
-    (q.contains("grocer") || q.contains("shopping list") || q.contains("what should i buy"))
-        && [
-            "my meal plan",
-            "our meal plan",
-            "my dinner plan",
-            "our dinner plan",
-            "my weekly menu",
-            "our weekly menu",
+    static PURCHASE_REQUEST: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\b(?:what (?:should|do|can) (?:i|we) (?:get|buy|pick up|need)(?: to (?:get|buy|pick up))?|(?:make|write|build|give|put together|update|need|want)\b.{0,32}\b(?:grocer(?:y|ies)|shopping list))\b").unwrap()
+    });
+    let names_plan = [
+        "my meal plan",
+        "our meal plan",
+        "my dinner plan",
+        "our dinner plan",
+        "my weekly menu",
+        "our weekly menu",
+    ]
+    .iter()
+    .any(|part| q.contains(part));
+    if names_plan {
+        return PURCHASE_REQUEST.is_match(&q)
+            || q.contains("shopping list")
+            || q.contains("grocer");
+    }
+    let planning = [
+        "groceries",
+        "grocery list",
+        "shopping list",
+        "for dinner",
+        "week's dinners",
+        "week’s dinners",
+        "for the week",
+        "this week's meals",
+        "this week’s meals",
+        "meal prep",
+    ]
+    .iter()
+    .any(|part| q.contains(part));
+    planning
+        && PURCHASE_REQUEST.is_match(&q)
+        && ![
+            "how much",
+            "cheapest",
+            "price of",
+            "open now",
+            "online",
+            "on sale",
+            "best deal",
         ]
         .iter()
         .any(|part| q.contains(part))
@@ -86,7 +120,7 @@ pub(super) fn saved_plans(
         let body = row["body"].as_str().unwrap_or("");
         if !meal_title(title)
             || !names.insert(title.to_lowercase())
-            || listed_ingredients(body).is_none()
+            || (listed_ingredients(body).is_none() && super::meal_plan::parse(body).is_none())
         {
             continue;
         }
@@ -343,6 +377,21 @@ mod tests {
             json!("one")
         );
         assert!(!asks_for_plan("Is this grocery store open?"));
+        for ask in [
+            "What should I pick up for this week’s meals?",
+            "Make me a grocery list for the week.",
+            "What do we need at the store for dinner?",
+        ] {
+            assert!(asks_for_plan(ask), "{ask}");
+        }
+        for ask in [
+            "Which store is open now?",
+            "How much will my groceries cost?",
+            "What should I get my sister for her birthday?",
+            "What should I buy online for the week?",
+        ] {
+            assert!(!asks_for_plan(ask), "{ask}");
+        }
     }
     #[test]
     fn quantities_follow_the_actual_named_ingredients() {

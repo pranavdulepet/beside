@@ -4,11 +4,21 @@ Once screen memory is on, Beside can use a passage you saw earlier even after yo
 
 The floating sheet is for a question that comes up in another app. Use Chats to reopen a floating conversation, or open the notebook for longer writing and saved preferences. [Install Beside and try the shortcut](../README.md#try-beside)
 
+## First launch
+
+Download **Beside-macOS.zip**, double-click it in Finder, drag **Beside** into **Applications** and open it there. The app requires an Apple silicon Mac running macOS 14 or later. The community build has an ad-hoc signature and Apple has not notarized it. If macOS says it cannot verify the developer and you trust the copy you downloaded, follow Apple’s instructions for **Open Anyway** in **System Settings → Privacy & Security**. [Download Beside](https://github.com/pranavdulepet/beside/releases/latest/download/Beside-macOS.zip) · [Apple’s opening instructions](https://support.apple.com/en-us/102445)
+
+Choose the suggested model in the floating sheet. Beside checks for installed weights and tests the model with a local request. If it offers to download a model, it shows the size before you begin. Managed model downloads start at 16 GB of Mac memory. You can also choose a compatible GGUF file you already have.
+
+**Turn on screen memory** lets Beside save passages as you work. **Only when I ask** reads the pointed window for a local answer when you summon it. That conversation can retain your question, the answer and a supporting line. **Keep it off** leaves screen access disabled. You can change this choice in **Sources**.
+
+For ongoing screen memory, macOS may also ask to let Beside “bypass the system private window picker.” Choose **Allow** if you want Beside to read the screen in the scope you selected. **Last seen** in Sources shows when it last succeeded.
+
 ## Ask from another app
 
 Hold **Option–Shift–Space** with your pointer on the relevant line. Speak when the ink mark appears. Beside shows the words it heard as you speak. Release to see the answer, use the follow-up field to keep going, or press Escape to return to your work. Tap the shortcut to type. In apps that support macOS text services, select text and use **Services → Ask Beside about selection**.
 
-Choose **Notebook** to open the full app. Choose **Open companion** in the notebook to return to the floating sheet. Click the Beside mark to open **What Beside knows**. Inspect **Last question** for the pointer context and passages used. A source beneath a connected answer opens the supporting line. Choose **Use this passage** on an earlier observation to ask about it again. Descriptions such as “my packing list” can match a saved note by subject and contents. If several lists fit, a destination or another detail can help distinguish them.
+Choose **Notebook** to open the full app. Choose **Open companion** in the notebook to return to the floating sheet. Click the Beside mark to open **What Beside knows**. Inspect **Last question** for the pointer context and passages used. A source beneath a connected answer opens the supporting line. Choose **Use this passage** on an earlier observation to ask about it again. You can refer to an item by its contents, such as “the printer’s instructions.”
 
 When suggestions are enabled and observation is running, Beside can match a visible passage to a saved note. A dot in the menu bar and **View suggestion** let you inspect the match. Choose **Show connection** to ask about the screen that produced it, or dismiss it. Manage suggestions in notebook Settings. Beside can surface a matching line from Mail as well as Notes. Opening the suggestion keeps the screen and the source line paired.
 
@@ -56,22 +66,21 @@ grep -rin 'ferry' desk scroll
 
 These commands search the readable files. Beside also searches its encrypted screen history and imported passages, which a Markdown search cannot see. Use Memory to correct or retire a dated fact. Beside regenerates its Markdown summary from those records.
 
-
-### Check a claim while writing
-
-Select a sentence in TextEdit, point at the selection and tap **⌥⇧Space**. Ask “Does this claim agree with my reading notes?” Beside looks for an independent passage and shows the evidence for a match. Ask “Give me the exact sentence from that note” to reread its saved wording. Choose **Copy** to take it back to your draft.
-
 ### From a meal plan to a shopping note
 
-With the meal plan open in Apple Notes, tap **⌥⇧Space** and ask what to buy. If the plan lists ingredients by dish and says what you already have, local Inkling can suggest quantities for the remaining ingredients. Tell it “Actually, I already have limes” to cross an item off the current list. The other quantities carry over. Choose **Copy**, then press **⌘V** in your shopping note.
+With an itemized meal plan open in Apple Notes, tap **⌥⇧Space** and ask what to buy. Beside compares the ingredients with your pantry. Tell it “Actually, I already have limes” to cross an item off the current list. The other quantities carry over. Choose **Copy**, then press **⌘V** in your shopping note.
+
+When dinners have quantities and a head count, Beside can handle changes in the same conversation. For example, “Make Thursday dinner for four” rescales that meal. “Actually, I have three cans of black beans” replaces the earlier pantry count. Beside combines the meals, subtracts what you own and gives you a list to copy.
 
 You can also ask “Make a shopping list from my meal plan” in another app. Beside looks for a saved, itemized plan. If two fit, it asks which one you mean.
 
-### While booking a flight
+### Check a print handoff in Mail
 
-After an estimate, you can say “I just weighed my suitcase. It’s 21.5 kg.” Beside checks the same booking again, uses the measurement and tells you how much room you have or how much to remove.
+While reading the printer’s email, point at the request, tap **⌥⇧Space** and ask “What did the printer ask for again? Check my notes.” Beside can find the saved production note and give you its wording, including the file format, bleed and deadline. Click the source to read the passage or use **Copy** to take the wording into your reply. You decide what to send.
 
-Beside prepares pointers to the observed booking and a packing list whose title matches the trip. These pointers live in the encrypted notebook. When you ask about an extra bag, Beside checks the original sources and compares kilograms locally. A measured packed weight takes priority. For itemized lists, Beside counts familiar items and the container using local weight ranges. If the list leaves a material uncertainty or the range falls near the limit, it asks for the packed weight. A fare table must show the same cabin limit across its visible fare columns. On a checkout that lists separate checked-bag fees, Beside reads the destination, the price of each bag and the weight per bag from the same itinerary row. A changed fare can require a new allowance. The originals stay where you put them.
+### Carry a correction into your next draft
+
+Tell Beside “For project updates, I prefer a paragraph of background first.” If you later change that to “Actually, I want the risk first, then the decision,” Beside saves the new preference. From your next project note, select the brief and ask “Draft my project update. Two sentences, please.” You can check or retire the preference in **What Beside knows → Memory**.
 
 ## Models, web search and sharing
 
@@ -79,16 +88,15 @@ The floating assistant defaults to a local model. If you explicitly enable cloud
 
 In the notebook, an eligible ChatGPT plan or an API provider is optional. A cloud notebook model can receive conversation passages needed for the answer. Private sheets stay local, and attached excerpts have their own sharing control. In the floating sheet, choosing a provider for one typed question sends that text and returns the next question to local thinking. Anthropic uses an API key. Provider usage follows the account you connect.
 
-Ask a current public question and Beside looks it up automatically. Questions about what you’re looking at use local screen memory. Exa receives public search terms. When a lookup needs a location or a private reference cannot be resolved to public terms, Beside asks for the missing detail. The selected model reads the results for a floating answer. In notebook settings you can also manage search approval for weekend listings. Agent access is separate: review the notebook entries each connected tool can read, and revoke access in Settings.
+Ask a current public question and Beside looks it up automatically. Questions about what you’re looking at use local screen memory. Exa receives public search terms. When a lookup needs a location or a private reference cannot be resolved to public terms, Beside asks for the missing detail. The selected model reads the results for a floating answer. In notebook settings you can also manage search approval for weekend listings. In Settings, you can also review which notebook entries a connected agent can read and revoke its access.
 
 ## Floating conversations and corrections
 
 To sign the floating sheet, open **What Beside knows → Memory → Your ink mark**, draw one stroke, and choose **Keep my mark**. The header and the small pen stroke beside a working status use that drawing. With macOS Reduce Motion enabled, the stroke stays still.
 
-
 Open **Chats** to return to a conversation. Beside stores the turns and their supporting excerpts in your notebook’s encrypted database. A portable export includes them in `records/floatingChat.json`, which is readable by anyone with the exported archive. If Chats offers **Import earlier chats**, you can move the previous local browser history into the current notebook. The earlier copy is removed after a successful import.
 
-Click the source name beneath an answer to check its evidence. When an answer used several sources, you can open each one. A new measurement or an item you already own updates the current answer and leaves the original note intact.
+Click the source name beneath an answer to check its evidence. When an answer used several sources, you can open each one. Changing a pantry quantity updates the current shopping list and preserves the original meal plan.
 
 Choose **Correct this reply** beneath an answer and write the preference you want Beside to use. The saved sentence is a private notebook memory. Deleting a chat removes the conversation. A correction you chose to keep can be retired separately in Memory. Forgetting an observation removes chats that cite it. Forgetting all screen history also clears the floating conversations.
 
@@ -107,7 +115,6 @@ Use **Correct this reply** to teach Beside a preference. A red memory mark opens
 - **A note can’t be found.** Check the source scope, retention window and whether Beside ever observed the note. For a document outside the activity history, add its containing folder or attach the file in the notebook.
 - **Voice comes through incorrectly.** Check the live transcript, macOS input device and Microphone and Speech Recognition permissions. Tap the shortcut to enter the exact wording.
 - **There’s no model that fits.** The managed downloads require at least 16 GB of memory. Connect an existing compatible local model for floating questions. A connected cloud provider can handle an explicitly submitted typed question.
-
 
 ### Use Notes and Mail in proactive suggestions
 

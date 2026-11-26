@@ -1,0 +1,6 @@
+The scheduled-airport IATA codes and coordinates in src-tauri/data/airports.tsv
+are derived from the public-domain OurAirports data. Coordinates are rounded to
+two decimal places to locate the forecast area.
+
+Source: https://github.com/davidmegginson/ourairports-data/blob/main/airports.csv
+Public domain dedication: https://ourairports.com/data/

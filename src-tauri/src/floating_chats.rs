@@ -2,6 +2,7 @@
 use crate::store::*;
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
+pub mod task_context;
 
 const KIND: &str = "floatingChat";
 
@@ -85,7 +86,7 @@ pub fn save(s: &Store, args: &Value, migrating: bool) -> Res<Value> {
         let sql = if migrating {
             "INSERT OR IGNORE INTO docs VALUES(?,?,?)"
         } else {
-            "INSERT OR REPLACE INTO docs VALUES(?,?,?)"
+            "INSERT INTO docs VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET v=excluded.v"
         };
         tx.execute(sql, params![KIND, id, row.to_string()]).msg()?;
     }
@@ -118,9 +119,58 @@ pub fn correct(s: &Store, args: &Value) -> Res<Value> {
         return Err("Write a correction of up to 320 characters.".into());
     }
     let key = hash(&json!([id, turn["question"], turn["answer"]]).to_string());
-    let at = now();
-    let row = json!({"id":&key[..32],"topic":format!("reply/{}", &key[..32]),"text":text,"value":text,"scale":"trait","learnedAt":at,"validFrom":at,"importance":1.0,"private":true,"restricted":true,"dates":[]});
-    s.put("note", &row)?;
+    let _edit = s.edit.lock().unwrap();
+    let at = chrono::Local::now();
+    let timeline = crate::memory::timeline(s)?;
+    let linked = turn["preferenceId"]
+        .as_str()
+        .and_then(|id| timeline.iter().find(|note| note["id"] == id));
+    let derived = crate::memory::observe(text, &key, at, true, true)
+        .into_iter()
+        .next()
+        .and_then(|v| v["topic"].as_str().map(str::to_owned));
+    let generic = derived.as_deref().is_none_or(|topic| {
+        topic
+            .strip_prefix("preference/")
+            .is_some_and(|v| v.len() == 16 && v.bytes().all(|b| b.is_ascii_hexdigit()))
+    });
+    let topic = if generic {
+        linked
+            .and_then(|v| v["topic"].as_str())
+            .map(str::to_owned)
+            .or(derived)
+    } else {
+        derived
+    }
+    .unwrap_or_else(|| format!("reply/{}", &key[..32]));
+    let previous = timeline.into_iter().find(|note| {
+        (note["correctionOf"] == key || note["id"] == key[..32]) && crate::memory::current(note)
+    });
+    if previous.as_ref().is_some_and(|note| note["text"] == text) {
+        return Ok(json!(text));
+    }
+    let stamp = at.to_rfc3339();
+    let row = json!({"id":crate::store::id(),"topic":topic,"sourceChat":id,"sourceTurn":turn["id"],"correctionOf":key,"text":text,"value":text,"scale":"trait","learnedAt":stamp,"validFrom":stamp,"importance":1.0,"private":true,"restricted":true,"dates":[]});
+    // An edit to the same reply can change its subject. Close the old version
+    // explicitly so the old and new phrases cannot both be treated as current.
+    {
+        let mut db = s.db.lock().unwrap();
+        let tx = db.transaction().msg()?;
+        if let Some(mut old) = previous.filter(|v| v["topic"] != topic) {
+            old["validUntil"] = json!(stamp);
+            tx.execute(
+                "UPDATE docs SET v=? WHERE kind='note' AND id=?",
+                params![old.to_string(), old["id"].as_str()],
+            )
+            .msg()?;
+        }
+        tx.execute(
+            "INSERT INTO docs VALUES('note',?,?)",
+            params![row["id"].as_str(), row.to_string()],
+        )
+        .msg()?;
+        tx.commit().msg()?;
+    }
     crate::memory::project(s)?;
     Ok(json!(text))
 }
@@ -140,8 +190,17 @@ mod tests {
         let cited = json!({"id":"af8681d6-69c4-4d78-927c-177fcca1a2c9","turns":[{"question":"When?","answer":"Noon","sources":[{"id":event}]}]});
         let separate = json!({"id":"34d9ac7a-90e3-44ec-bdbb-f0e24a757570","turns":[{"question":"Which tea?","answer":"Mint."}]});
         save(&s, &json!({"chats":[cited, separate]}), false).unwrap();
+        s.db.lock().unwrap().execute("INSERT INTO floating_context(chat,covered,through_turn,refs) VALUES(?,1,'one','[]')",[cited["id"].as_str().unwrap()]).unwrap();
         crate::activity::forget(&s, &json!({"scope":"event","id":event})).unwrap();
         assert_eq!(list(&s).unwrap(), json!([separate]));
+        assert_eq!(
+            s.db.lock()
+                .unwrap()
+                .query_row("SELECT count(*) FROM floating_context", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]

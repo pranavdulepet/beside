@@ -1,0 +1,7 @@
+Destination forecasts are provided by Open-Meteo under CC BY 4.0. Beside selects a day from the returned forecast, rounds the displayed values, and provides the source link with the answer.
+
+https://open-meteo.com/
+https://creativecommons.org/licenses/by/4.0/
+
+Use of the hosted API is subject to its service terms. The free endpoint is for non-commercial use.
+https://open-meteo.com/en/terms

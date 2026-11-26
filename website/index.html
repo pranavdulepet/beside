@@ -22,11 +22,27 @@
       }
       html {
         color-scheme: light dark;
+        --paper: #faf8f1;
+        --ink: #334443;
+        --accent: #34656d;
+        --hover: #eeeae0;
+        --selection: #faeab1;
+        --selection-ink: #334443;
+      }
+      @media (prefers-color-scheme: dark) {
+        html {
+          --paper: #1c2929;
+          --ink: #faf8f1;
+          --accent: #a2cccd;
+          --hover: #293b3b;
+          --selection: #334443;
+          --selection-ink: #faeab1;
+        }
       }
       body {
         margin: 0;
-        background: light-dark(#faf8f1, #1c2929);
-        color: light-dark(#334443, #faf8f1);
+        background: var(--paper);
+        color: var(--ink);
         font:
           17px "Söhne", Geist, sans-serif;
       }
@@ -46,6 +62,9 @@
         touch-action: none;
         cursor: crosshair;
       }
+      @media (pointer: coarse) {
+        body > canvas { touch-action: pan-y pinch-zoom; }
+      }
       main {
         position: relative;
         min-height: 100svh;
@@ -59,7 +78,8 @@
       .signature {
         width: 46px;
         height: 38px;
-        background: light-dark(#34656d, #a2cccd);
+        background: var(--accent);
+        -webkit-mask: url('beside.png') center / contain no-repeat;
         mask: url('beside.png') center / contain no-repeat;
       }
       h1 {
@@ -80,25 +100,31 @@
         padding: 5px;
         font-size: 15px;
       }
-      #demo { width: min(840px, calc(100vw - 32px)); margin: 26px 0 0; pointer-events: auto; }
-      [role="tablist"] {
-        display: inline-flex; gap: 3px; margin-bottom: 12px;
-        pointer-events: auto;
+      #demo { width: min(760px, calc(100vw - 32px)); margin: 22px 0 0; pointer-events: auto; }
+      .picker {
+        display: flex; align-items: center; gap: 2px; width: max-content;
+        max-width: 100%; margin: 0 auto 10px; overflow-x: auto;
+        scrollbar-width: none; overscroll-behavior-x: contain;
       }
+      .picker::-webkit-scrollbar { display: none; }
       [role="tab"] {
-        font: inherit; font-size: 15px; font-weight: 500; color: inherit;
-        background: transparent; border: 0; border-radius: 7px;
-        padding: 8px 15px; min-height: 40px; cursor: pointer;
+        display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;
+        min-height: 44px; white-space: nowrap; padding: 8px 12px;
+        border: 0; border-radius: 7px; cursor: pointer; background: transparent;
+        color: inherit; font: 500 15px/1.25 "Söhne", Geist, sans-serif;
       }
-      [role="tab"]:hover { background: light-dark(#eeeae0, #293b3b); }
-      [role="tab"][aria-selected="true"] {
-        background: light-dark(#faeab1, #334443); color: light-dark(#334443, #faeab1);
+      [role="tab"]:hover { background: var(--hover); }
+      [role="tab"][aria-selected="true"] { background: var(--selection); color: var(--selection-ink); }
+      .picker [role="tab"]:focus-visible { outline-offset: -3px; }
+      @media (max-width: 420px) {
+        [role="tab"] { font-size: 14px; padding-inline: 7px; }
       }
-      :focus-visible { outline: 2px solid light-dark(#34656d, #a2cccd); outline-offset: 3px; }
+      :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
       figure { margin: 0; }
+      noscript a { display: inline; padding: 0; font: inherit; }
       [hidden] { display: none !important; }
       .player { position: relative; }
-      video, .cover img, .direct-recording { display: block; width: 100%; height: auto; aspect-ratio: auto 2 / 1; object-fit: contain; border-radius: 10px; }
+      video, .cover img, .direct-recording { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 10; object-fit: contain; border-radius: 10px; }
       video { background: #263433; }
       .cover img { height: auto; }
       .cover {
@@ -147,6 +173,7 @@
       small { margin-top: 9px; font-size: 12px; }
       small a { display: inline; padding: 0; font: inherit; }
     </style>
+    <noscript><style>.picker, .player, #caption, body > canvas { display: none; }</style></noscript>
   </head>
   <body>
     <canvas aria-label="Draw with ink on the paper"></canvas>
@@ -155,21 +182,22 @@
       <h1>Beside</h1>
       <p>A floating assistant for whatever’s open on your Mac.</p>
       <a href="https://github.com/pranavdulepet/beside/releases/latest/download/Beside-macOS.zip" download>Download for Mac ↓</a>
-      <small>Apple silicon · macOS 14+ · <a href="https://github.com/pranavdulepet/beside#try-beside">Setup</a></small>
+      <small>Apple silicon · macOS 14+ · <a href="https://github.com/pranavdulepet/beside#try-beside">Install guide</a></small>
       <section id="demo" aria-label="Beside on a Mac">
-        <div role="tablist" aria-label="Choose a walkthrough">
-          <button id="writing" role="tab" aria-controls="demo-panel" aria-selected="true">Writing</button>
-          <button id="groceries" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1">Groceries</button>
-          <button id="flight" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1">Flight</button>
+        <div class="picker" role="tablist" aria-label="Choose a walkthrough">
+          <button id="learning" role="tab" aria-controls="demo-panel" aria-selected="true" data-caption="Change a preference, then watch Beside use it in the next project update.">Correction</button>
+          <button id="groceries" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="Two more people are coming. Buy 8 tortillas, skip the beans, and paste the list into Notes.">Groceries</button>
+          <button id="email" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="While reading an email in Mail, copy the printer’s PDF settings and deadline from a saved note.">Print handoff</button>
+          <button id="setup" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="Connect local Inkling, turn on screen memory, and save a first preference.">Setup</button>
         </div>
-        <figure id="demo-panel" role="tabpanel" aria-labelledby="writing">
+        <figure id="demo-panel" role="tabpanel" aria-labelledby="learning">
           <div class="player">
-            <video controls playsinline muted preload="none" poster="media/writing.png?take=6" aria-describedby="caption" aria-label="Writing walkthrough">
-              <track kind="captions" srclang="en" label="English" src="media/writing.vtt?take=6" />
+            <video controls playsinline muted preload="none" poster="media/learning.png?take=8" aria-describedby="caption" aria-label="Correction walkthrough">
+              <track kind="captions" srclang="en" label="English" src="media/learning.vtt?take=8" />
             </video>
             <div class="film" hidden>
               <div class="film-screen">
-                <canvas width="1024" height="512" role="img" aria-label="Writing walkthrough"></canvas>
+                <canvas width="1024" height="640" role="img" aria-label="Correction walkthrough"></canvas>
                 <p class="film-cue" hidden></p>
               </div>
               <div class="transport" role="group" aria-label="Recording controls">
@@ -184,15 +212,17 @@
                 </button>
               </div>
             </div>
-            <img class="direct-recording" alt="Writing walkthrough" hidden />
-            <button type="button" class="cover" aria-label="Play Writing walkthrough" hidden>
-              <img src="media/writing.png?take=6" width="1440" height="720" alt="" />
+            <img class="direct-recording" alt="Correction walkthrough" tabindex="-1" hidden />
+            <button type="button" class="cover" aria-label="Play Correction walkthrough" hidden>
+              <img src="media/learning.png?take=8" width="1536" height="960" alt="" />
               <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 3.6a1 1 0 0 1 1.5-.86l14 8.4a1 1 0 0 1 0 1.72l-14 8.4A1 1 0 0 1 6 20.4z"/></svg>
             </button>
           </div>
-          <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="media/writing.gif?take=6">Open the animation</a></p>
-          <figcaption id="caption">Check what Pataliputra’s wall was made of and revise the opening sentence in TextEdit.</figcaption>
-          <noscript><p><a href="media/writing.gif?take=6">Watch Writing</a> <a href="media/groceries.gif?take=6">Watch Groceries</a> <a href="media/baggage.gif?take=6">Watch Flight</a></p></noscript>
+          <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="https://github.com/pranavdulepet/beside/raw/refs/heads/main/website/media/learning.mp4" download>Download the MP4</a></p>
+          <figcaption id="caption">Change a preference, then watch Beside use it in the next project update.</figcaption>
+          <noscript><p>Open a recording in your media player.</p><p>
+            <a href="media/learning.mp4">Correction</a> · <a href="media/groceries.mp4">Groceries</a> · <a href="media/email.mp4">Print handoff</a> · <a href="media/setup.mp4">Setup</a>
+          </p></noscript>
         </figure>
       </section>
     </main>
@@ -202,30 +232,27 @@
         document.querySelector('a[download]').href = 'Beside-macOS.zip';
       }
       const tabs = [...document.querySelectorAll('[role="tab"]')];
+      const imagePlayback = new URLSearchParams(location.search).get('player') === 'images';
       const panel = document.querySelector('#demo-panel');
       const video = panel.querySelector('video');
       const cover = panel.querySelector('.cover');
       const message = panel.querySelector('.player-message');
       const caption = panel.querySelector('figcaption');
-      const demos = {
-        writing: ['writing', caption.textContent],
-        groceries: ['groceries', 'Turn three dinners into a Trader Joe’s list and paste it into Apple Notes.'],
-        flight: ['baggage', 'Use your packing list to decide whether to pay for a second bag on United.'],
-      };
       const film = panel.querySelector('.film');
       const direct = panel.querySelector('.direct-recording');
       let closePlayer;
       function preparePlayer(tab, file) {
         closePlayer?.();
         const base = 'media/' + file;
-        const media = extension => base + '.' + extension + '?take=6';
+        const media = extension => base + '.' + extension + '?take=8';
         const animationUrl = media('gif');
         const label = tab.textContent + ' walkthrough';
         const controller = new AbortController();
         const {signal} = controller;
-        let mode = 'poster', timeout;
+        let mode = 'poster', timeout, firstFrame;
         video.hidden = false;
         video.controls = false;
+        video.tabIndex = -1;
         video.poster = media('png');
         video.setAttribute('aria-label', label);
         video.querySelector('track').src = media('vtt');
@@ -234,18 +261,23 @@
         cover.setAttribute('aria-label', 'Play ' + label);
         cover.removeAttribute('aria-busy');
         cover.hidden = false;
-        message.querySelector('a').href = animationUrl;
+        message.querySelector('a').href = 'https://github.com/pranavdulepet/beside/raw/refs/heads/main/website/media/' + file + '.mp4';
         message.hidden = true;
 
-        function reveal() {
+        function reveal(control = video) {
+          const movedFromCover = document.activeElement === cover;
           cover.removeAttribute('aria-busy');
           cover.hidden = true;
           message.hidden = true;
+          if (control === video) video.tabIndex = 0;
+          if (movedFromCover) control.focus({preventScroll: true});
         }
         async function playImages() {
           if (signal.aborted || mode === 'images') return;
           const startAt = video.currentTime || 0;
           mode = 'images';
+          if (firstFrame !== undefined) video.cancelVideoFrameCallback(firstFrame);
+          firstFrame = undefined;
           clearTimeout(timeout);
           video.pause();
           video.removeAttribute('src');
@@ -254,21 +286,21 @@
           cover.setAttribute('aria-busy', 'true');
           try {
             const [module, response] = await Promise.all([
-              import('./film.js?take=6'), fetch(animationUrl, {signal}),
+              import('./film.js?take=8'), fetch(animationUrl, {signal}),
             ]);
             if (!response.ok) throw new Error('Recording unavailable');
             const bytes = await response.arrayBuffer();
             if (signal.aborted) return;
             module.playFilm(film, bytes, {label, captionsUrl: media('vtt'), startAt, signal});
             video.hidden = true;
-            reveal();
+            reveal(film.querySelector('.toggle'));
           } catch {
             if (signal.aborted) return;
             // A plain image can also play when a browser blocks fetch or scripts.
             direct.onload = () => {
               video.hidden = true;
               direct.hidden = false;
-              reveal();
+              reveal(direct);
             };
             direct.onerror = () => {
               mode = 'poster';
@@ -280,34 +312,47 @@
         }
         function watchForStall() {
           clearTimeout(timeout);
-          timeout = setTimeout(playImages, 5000);
+          timeout = setTimeout(playImages, 3500);
         }
         cover.onclick = () => {
-          if (mode === 'images') return;
+          if (mode !== 'poster') return;
           cover.setAttribute('aria-busy', 'true');
-          if (matchMedia('(pointer: coarse)').matches || !video.canPlayType('video/mp4')) {
+          if (imagePlayback || !video.canPlayType('video/mp4')) {
             playImages();
             return;
           }
           mode = 'video';
           video.src = media('mp4');
           video.controls = true;
+          if ('requestVideoFrameCallback' in video) {
+            firstFrame = video.requestVideoFrameCallback(() => {
+              if (mode !== 'video' || signal.aborted) return;
+              clearTimeout(timeout);
+              reveal();
+            });
+          }
           watchForStall();
           video.play().catch(() => { if (mode === 'video') playImages(); });
         };
         video.addEventListener('error', () => { if (mode === 'video') playImages(); }, {signal});
+        video.addEventListener('progress', () => {
+          if (mode === 'video' && !cover.hidden) watchForStall();
+        }, {signal});
         video.addEventListener('waiting', () => {
           if (mode === 'video' && !video.paused) watchForStall();
         }, {signal});
         video.addEventListener('playing', () => {
           if (mode !== 'video') return;
-          clearTimeout(timeout);
-          reveal();
+          if (cover.hidden || !('requestVideoFrameCallback' in video)) {
+            clearTimeout(timeout);
+            reveal();
+          }
         }, {signal});
         video.addEventListener('pause', () => { if (cover.hidden) clearTimeout(timeout); }, {signal});
         closePlayer = () => {
           controller.abort();
           clearTimeout(timeout);
+          if (firstFrame !== undefined) video.cancelVideoFrameCallback(firstFrame);
           video.pause();
           video.removeAttribute('src');
           video.load();
@@ -323,21 +368,23 @@
           item.setAttribute('aria-selected', String(item === tab));
           item.tabIndex = item === tab ? 0 : -1;
         }
-        const [file, line] = demos[tab.id];
+        const file = tab.dataset.file || tab.id;
         preparePlayer(tab, file);
         panel.setAttribute('aria-labelledby', tab.id);
-        caption.textContent = line;
+        caption.textContent = tab.dataset.caption;
         if (updateAddress) history.replaceState(null, '', '#' + tab.id);
       }
-      for (const [i, tab] of tabs.entries()) {
+      for (const [index, tab] of tabs.entries()) {
         tab.onclick = () => selectDemo(tab.id, true);
         tab.onkeydown = event => {
-          const next = {ArrowLeft: (i + tabs.length - 1) % tabs.length, ArrowRight: (i + 1) % tabs.length,
-                        Home: 0, End: tabs.length - 1}[event.key];
+          const next = {ArrowLeft: (index + tabs.length - 1) % tabs.length,
+            ArrowRight: (index + 1) % tabs.length, Home: 0, End: tabs.length - 1}[event.key];
           if (next === undefined) return;
           event.preventDefault();
-          tabs[next].focus();
-          selectDemo(tabs[next].id, true);
+          const choice = tabs[next];
+          choice.focus({preventScroll: true});
+          choice.scrollIntoView({block: 'nearest', inline: 'nearest'});
+          selectDemo(choice.id, true);
         };
       }
       const readAddress = () => selectDemo(location.hash.slice(1), false);
@@ -401,6 +448,13 @@
         active.points.push(point(e));
         active.at = performance.now();
         schedule();
+      };
+      canvas.onpointercancel = e => {
+        if (active && e.pointerId === pointer) {
+          strokes.pop();
+          active = null;
+          schedule();
+        }
       };
       canvas.onlostpointercapture = () => { active = null; };
       dark.addEventListener('change', schedule);

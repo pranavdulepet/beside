@@ -1,5 +1,7 @@
-import {Fragment, useEffect, useRef, useState} from 'react';
+import {Fragment, useEffect, useId, useRef, useState} from 'react';
+import {flushSync} from 'react-dom';
 import {BrainPicker} from './BrainPicker';
+import {CompanionSetup} from './CompanionSetup';
 import {LiveStatus, type ThinkingPhase} from './LiveStatus';
 import {Meeting} from './Meeting';
 import {Reply} from './Reply';
@@ -124,7 +126,7 @@ function Evidence({
   onUse?: (row: Row) => void;
   onClose?: () => void;
   id: string;
-  changed: (message?: string) => void;
+  changed?: (message?: string) => void;
 }) {
   const [row, set] = useState<Row | null>(null),
     [loading, setLoading] = useState(true),
@@ -153,6 +155,11 @@ function Evidence({
       live = false;
     };
   }, [id]);
+  if (!changed) {
+    if (error) return <p role="alert">{error}</p>;
+    if (loading) return <p role="status">Opening the saved passage…</p>;
+    return <p className="source-original">{row?.body || 'This passage has no saved text.'}</p>;
+  }
   const heading = cleanTitle(row?.title, row?.label);
   const lines = cleanScreenText(row?.body, heading);
   if (row?.kind === 'note') return <article className="evidence-card">
@@ -426,21 +433,25 @@ export function ActivityControls({
     return <p role="status">{err || 'Opening access settings…'}</p>;
   const sources: string[] = config.sources;
   const displays = config.scope === 'displays';
+  const onDemand = config.scope === 'on-demand';
   const visualsOn = config.visuals === true;
   return (
     <section aria-label="Screen access" className="activity-controls">
       <div className="drawer-section-head">
         <div>
           <div className="drawer-title">
-            {config.enabled ? 'Observing your Mac' : 'Observation paused'}
+            {onDemand ? 'Only when you ask' : config.enabled ? 'Observing your Mac' : 'Observation paused'}
           </div>
           <small>
-            {config.lastObservedAt || config.lastSavedAt
+            {onDemand ? 'The shortcut reads one window locally. Your question, answer and quoted line stay in the chat.' : config.lastObservedAt || config.lastSavedAt
               ? freshness(config)
               : 'Allow Screen Recording and start to remember context'}
           </small>
         </div>
-        <button
+        {onDemand ? <button type="button" className="btn-sm" disabled={pending}
+          onClick={() => void run('activityConfigure', {scope: 'selected'}, 'scope-off', 'On-demand access turned off.')}>
+          Turn off
+        </button> : <button
           type="button"
           className={config.enabled ? 'btn-sm' : 'primary btn-sm'}
           disabled={
@@ -464,7 +475,7 @@ export function ActivityControls({
             : config.enabled
               ? 'Pause'
               : 'Start'}
-        </button>
+        </button>}
       </div>
 
       {notice && (
@@ -525,12 +536,13 @@ export function ActivityControls({
 
       <div
         className="segmented full-width"
-        role="radiogroup"
+        role="group"
         aria-label="Screen scope"
       >
         <button
           type="button"
           className={displays ? 'active' : ''}
+          aria-pressed={displays}
           disabled={pending}
           onClick={() =>
             void run(
@@ -545,7 +557,8 @@ export function ActivityControls({
         </button>
         <button
           type="button"
-          className={!displays ? 'active' : ''}
+          className={!displays && !onDemand ? 'active' : ''}
+          aria-pressed={!displays && !onDemand}
           disabled={pending}
           onClick={() =>
             void run(
@@ -558,6 +571,10 @@ export function ActivityControls({
         >
           Selected apps & sites
         </button>
+        <button type="button" aria-pressed={onDemand} className={onDemand ? 'active' : ''} disabled={pending}
+          onClick={() => void run('activityConfigure', {scope: 'on-demand'}, 'scope-on-demand', 'Beside reads a window when you use the shortcut.')}>
+          Only when I ask
+        </button>
       </div>
 
       {displays && (
@@ -567,7 +584,12 @@ export function ActivityControls({
           <span>Include other open windows in local answers</span>
         </label>
       )}
-      {!displays && (
+      <label className="check">
+        <input type="checkbox" checked={config.tripWeather !== false} disabled={pending}
+          onChange={e => void run('activityConfigure', {tripWeather: e.target.checked}, 'trip-weather', 'Forecast preference updated.')} />
+        <span>Check the destination forecast when I ask about baggage</span>
+      </label>
+      {!displays && !onDemand && (
         <fieldset disabled={pending} className="clean-fieldset">
           <legend>Mac apps</legend>
           <small>Reads the front window for apps you check below.</small>
@@ -645,7 +667,7 @@ export function ActivityControls({
         </fieldset>
       )}
 
-      {!displays && (
+      {!displays && !onDemand && (
         <fieldset disabled={pending} className="clean-fieldset">
           <legend>Websites</legend>
           <small>
@@ -1183,6 +1205,82 @@ export function ActivityJournal({
     </section>
   );
 }
+function ReplySources({turn, fail}: {turn: Row; fail: (message: string) => void}) {
+  const [selected, pick] = useState('');
+  const panel = useId();
+  const reading = useRef<HTMLElement>(null);
+  const notes: Row[] = (turn.sources ?? []).filter((s: Row) => s.role === 'packing' && s.id);
+  const pages: Row[] = (turn.webSources ?? [])
+    .filter((p: Row) => typeof p.url === 'string' && p.url)
+    .slice(0, 3);
+  const note = notes.find((s) => s.id === selected);
+  const forecast = notes.length ? pages.find((p) => p.url === selected && p.quote) : undefined;
+  const visit = (url: string) =>
+    void call('visitPublicSource', {url}).catch((e) => fail(String(e)));
+  const toggle = (id: string) => pick((current) => (current === id ? '' : id));
+  useEffect(() => {
+    const detail = reading.current;
+    if (!selected || !detail) return;
+    // The saved note arrives after the click and can grow below the composer.
+    const reveal = new ResizeObserver(() => detail.scrollIntoView({block: 'nearest'}));
+    reveal.observe(detail);
+    return () => reveal.disconnect();
+  }, [selected]);
+  return (
+    <>
+      <div className="web-sources" role="group" aria-label="Sources used">
+        {notes.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className="source-chip"
+            aria-controls={panel}
+            aria-expanded={selected === s.id}
+            onClick={() => toggle(s.id)}
+          >
+            {cleanTitle(s.title, s.label)}
+          </button>
+        ))}
+        {pages.map((p, i) => {
+          const inPlace = notes.length > 0 && !!p.quote;
+          return (
+            <button
+              key={p.url || i}
+              type="button"
+              className="source-chip"
+              aria-expanded={inPlace ? selected === p.url : undefined}
+              aria-controls={inPlace ? panel : undefined}
+              onClick={() => (inPlace ? toggle(p.url) : visit(p.url))}
+            >
+              {p.title}
+              {inPlace ? '' : ' ↗'}
+            </button>
+          );
+        })}
+      </div>
+      <section
+        id={panel}
+        ref={reading}
+        className="source-reading"
+        hidden={!note && !forecast}
+        tabIndex={note ? 0 : undefined}
+        aria-label={note ? cleanTitle(note.title, note.label) : forecast?.title}
+      >
+        {note && <Evidence key={note.id} id={note.id} />}
+        {forecast && (
+          <>
+            <p>{forecast.quote}</p>
+            {forecast.basis && <p className="source-basis">{forecast.basis}</p>}
+            <button type="button" className="bar-link" onClick={() => visit(forecast.url)}>
+              Open forecast ↗
+            </button>
+          </>
+        )}
+      </section>
+    </>
+  );
+}
+
 function PublicLookup({
   query,
   busy,
@@ -1260,6 +1358,8 @@ function compactTurnsForStorage(turns: Row[]): Row[] {
     supportingLine: t.supportingLine,
     baggageAwaitingWeight: t.baggageAwaitingWeight,
     workKind: t.workKind,
+    mealTask: t.mealTask,
+    preferenceId: t.preferenceId,
     pointApp: t.pointApp,
     pointLine: t.pointLine,
     epoch: t.epoch,
@@ -1294,14 +1394,19 @@ export function ActivitySheet({
     [partial, stream] = useState(''),
     [phase, setPhase] = useState<ThinkingPhase>('idle'),
     [nudge, setNudge] = useState<Row | null>(null),
+    [openedProfile, showProfile] = useState<Row | null>(null),
+    [firstSummon, showFirstSummon] = useState(false),
     [preview, setPreview] = useState<Row | null>(null),
     [error, fail] = useState('');
   const busy = !!pendingQuestion;
 
   const field = useRef<HTMLTextAreaElement>(null),
-    sequence = useRef(0);
+    sequence = useRef(0),
+    activeChatId = useRef(chatId);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
   const savedTurns = useRef<Row[] | null>(null);
+  const presentation = useRef(0);
+  const awaitingContext = useRef(false);
   function persist(op: string, args: Row) {
     const request = writes.current.catch(() => {}).then(() => call(op, args));
     writes.current = request;
@@ -1348,6 +1453,8 @@ export function ActivitySheet({
     }
   }
   function startNewChat(message?: string) {
+    awaitingContext.current = false;
+    showFirstSummon(false);
     route('');
     inspect(null);
     write('');
@@ -1362,10 +1469,17 @@ export function ActivitySheet({
     stream('');
     pending('');
     set([]);
-    setChatId(crypto.randomUUID());
+    activeChatId.current = crypto.randomUUID();
+    setChatId(activeChatId.current);
     setAnchor(null);
     setPreview(null);
+    showProfile(null);
+    confirm(false);
     open('');
+  }
+  function acceptIncomingContext() {
+    if (awaitingContext.current) awaitingContext.current = false;
+    else startNewChat();
   }
   function invalidate(message?: string) {
     startNewChat(message);
@@ -1375,10 +1489,13 @@ export function ActivitySheet({
     }
   }
   async function reopenChat(selected: SavedChat) {
+    const requestedAt = sequence.current;
     const epoch = await call('activityEpoch');
     const rows: SavedChat[] = await call('floatingChats');
+    if (requestedAt !== sequence.current) return;
     const chat = rows.find(c => c.id === selected.id);
     if (!chat) {setChats(rows);return;}
+    awaitingContext.current = false;
     route('');
     inspect(null);
 
@@ -1395,6 +1512,7 @@ export function ActivitySheet({
     sequence.current++;
     stream('');
     pending('');
+    activeChatId.current = chat.id;
     setChatId(chat.id);
     write('');
     const restored = chat.turns.map(t => ({...t, epoch}));
@@ -1411,21 +1529,32 @@ export function ActivitySheet({
     } catch (e) { fail(String(e)); }
   }
   const [provider, route] = useState('');
-  const [selection, setSelection] = useState('');
+  const [selection, renderSelection] = useState('');
+  const activeSelection = useRef('');
+  const readPendingSelection = useRef<() => Promise<void>>(() => Promise.resolve());
+  function setSelection(value: string) {
+    activeSelection.current = value;
+    renderSelection(value);
+  }
   useEffect(() => {
     if (close) return;
     let live = true;
-    async function receive() {
-      const text = await call('takeSelection');
-      if (live && typeof text === 'string' && text) {
-        startNewChat();
-        write('');
-        fail('');
-        route('');
-        setSelection(text);
-        select('ask');
-      }
+    let queued = Promise.resolve();
+    function receive() {
+      queued = queued.then(async () => {
+        if (!live) return;
+        const text = await call('takeSelection');
+        if (live && typeof text === 'string' && text) {
+          acceptIncomingContext();
+          fail('');
+          route('');
+          setSelection(text);
+          select('ask');
+        }
+      }).catch(() => {});
+      return queued;
     }
+    readPendingSelection.current = receive;
     const off = listen(
       'selection-ready',
       () => void receive().catch(() => {}),
@@ -1435,20 +1564,34 @@ export function ActivitySheet({
     });
     return () => {
       live = false;
+      readPendingSelection.current = () => Promise.resolve();
       void off.then(f => f());
     };
   }, [close]);
-  const [gesture, setGesture] = useState<Row | null>(null);
-  const receiveVoice = useRef<(v: Row) => void>(() => {});
-  receiveVoice.current = (v: Row) => {
-    startNewChat();
+  const [gesture, renderGesture] = useState<Row | null>(null);
+  const activeGesture = useRef<Row | null>(null);
+  const inputRevision = useRef(0);
+  const readPendingGesture = useRef<() => Promise<void>>(() => Promise.resolve());
+  const submittingTyped = useRef(false);
+  function setGesture(v: Row | null) {
+    activeGesture.current = v;
+    renderGesture(v);
+  }
+  function dropOneTimeWindow() {
+    if (activeGesture.current?.onDemand) setGesture(null);
+  }
+  function dismissSheet() {
+    dropOneTimeWindow();
+    return call('dismissActivity');
+  }
+  const receiveVoice = useRef<(v: Row, draft?: string) => void>(() => {});
+  receiveVoice.current = (v, draft) => {
+    acceptIncomingContext();
     setGesture(v);
-    route('');
-    fail('');
-    write('');
     select('ask');
     if (v.text) void ask(v.text, undefined, '', v, undefined, true);
     else {
+      if (draft !== undefined) write(draft);
       if (!v.typed && v.issue) notify(v.issue);
       window.setTimeout(() => field.current?.focus(), 0);
     }
@@ -1456,19 +1599,39 @@ export function ActivitySheet({
   useEffect(() => {
     if (close) return;
     let live = true;
-    async function receive() {
-      const v = await call('voiceIntent');
-      if (live && v?.id) receiveVoice.current(v);
+    let queued = Promise.resolve();
+    function receive() {
+      const revision = inputRevision.current;
+      const next = queued.then(async () => {
+        if (!live) return;
+        const v = await call('voiceIntent');
+        if (live && v?.id) {
+          // The sheet can already have keyboard focus while its native receipt is in flight.
+          const draft = inputRevision.current !== revision ? field.current?.value : undefined;
+          receiveVoice.current(v, draft);
+        }
+      });
+      queued = next.catch(() => {});
+      return queued;
     }
+    readPendingGesture.current = receive;
+    const focused = () => {
+      if (!document.hidden) void receive();
+    };
+    window.addEventListener('focus', focused);
+    document.addEventListener('visibilitychange', focused);
     const off = listen(
       'voice-ready',
-      () => void receive().catch(() => {}),
+      () => void receive(),
     ).catch(() => () => {});
     void off.then(() => {
-      if (live) void receive().catch(() => {});
+      if (live) void receive();
     });
     return () => {
       live = false;
+      readPendingGesture.current = () => Promise.resolve();
+      window.removeEventListener('focus', focused);
+      document.removeEventListener('visibilitychange', focused);
       void off.then(f => f());
     };
   }, [close]);
@@ -1479,7 +1642,7 @@ export function ActivitySheet({
     async function receive() {
       const intent = await call('messageReplyIntent');
       if (!live || !intent) return;
-      startNewChat();
+      acceptIncomingContext();
       route('');
       fail('');
       select('ask');
@@ -1624,16 +1787,33 @@ export function ActivitySheet({
     };
     void call('activityAnchor')
       .then(v => {
-        if (live) setAnchor(v);
+        if (live && !presentation.current) setAnchor(v);
       })
       .catch(() => {});
-    const offExpand = listen('activity-expand', () => {
-      select('ask');
-      window.setTimeout(() => field.current?.focus(), 0);
-    }).catch(() => () => {});
-    const offAnchor = listen<Row | null>('activity-anchor', e => {
-      if (live) setAnchor(e.payload);
-    }).catch(() => () => {});
+    type Presentation = {id: number; anchor?: Row | null; cold?: boolean};
+    const present = (request: Presentation | null) => {
+      if (!live || !request || request.id <= presentation.current) return;
+      presentation.current = request.id;
+      // A reused panel must contain the new composer before macOS orders it in.
+      // The shortcut receipt may still be reading the source window.
+      flushSync(() => {
+        if (!request.cold) {
+          startNewChat();
+          awaitingContext.current = true;
+          select('ask');
+        }
+        setAnchor(request.anchor ?? null);
+      });
+      field.current?.focus();
+      void call('activityPresentationReady', {id: request.id}).catch(() => {});
+    };
+    const offExpand = listen<Presentation>('activity-expand', e =>
+      present(e.payload),
+    ).catch(() => () => {});
+    // The first page load can overlap a second invocation before listeners mount.
+    void offExpand.then(() => {
+      if (live) void call('pendingActivityPresentation').then(present).catch(() => {});
+    });
     const offNudge = listen<Row | null>('proactive-nudge', e => {
       if (live) setNudge(e.payload);
     }).catch(() => () => {});
@@ -1646,7 +1826,7 @@ export function ActivitySheet({
         .catch(() => {});
     }).catch(() => () => {});
     const escape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') void call('dismissActivity').catch(() => {});
+      if (e.key === 'Escape') void dismissSheet().catch(() => {});
     };
     window.addEventListener('keydown', escape);
     return () => {
@@ -1654,7 +1834,6 @@ export function ActivitySheet({
       window.removeEventListener('keydown', escape);
       void off.then(f => f());
       void offExpand.then(f => f());
-      void offAnchor.then(f => f());
       void offNudge.then(f => f());
     };
   }, []);
@@ -1702,6 +1881,21 @@ export function ActivitySheet({
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   }, [turns.length, busy, partial]);
   const [copiedTurn, setCopiedTurn] = useState<number | null>(null);
+  async function submitTyped() {
+    const question = field.current?.value ?? text;
+    if (!question.trim() || busy || submittingTyped.current) return;
+    if (close) return ask(question);
+    const previousChat = activeChatId.current;
+    submittingTyped.current = true;
+    try {
+      await Promise.all([readPendingGesture.current(), readPendingSelection.current()]);
+      const fresh = previousChat !== activeChatId.current;
+      if (fresh && !activeGesture.current && !activeSelection.current) return;
+      return ask(question, undefined, fresh ? '' : provider, activeGesture.current, undefined, fresh);
+    } finally {
+      submittingTyped.current = false;
+    }
+  }
   async function ask(
     question = text,
     seenAt?: number,
@@ -1709,12 +1903,14 @@ export function ActivitySheet({
     target = gesture,
     publicQuery?: string,
     fresh = false,
-    anchorId = anchor?.id,
+    anchorId = fresh ? undefined : anchor?.id,
     related?: Row,
   ) {
     const q = question.trim();
     if (!q || (busy && !fresh)) return;
     const n = ++sequence.current;
+    const requestChat = activeChatId.current;
+    const selectedText = activeSelection.current;
     const turn = crypto.randomUUID();
     const at = new Date().toISOString();
     setPreview(null);
@@ -1741,7 +1937,7 @@ export function ActivitySheet({
         return;
       }
       const passage =
-        related || selection || target || publicQuery
+        related || selectedText || target || publicQuery
           ? null
           : await call('activityRecallPreview', {
               text: q,
@@ -1769,10 +1965,11 @@ export function ActivitySheet({
         },
       ).catch(() => () => {});
       const prior = fresh ? undefined : turns.at(-1);
-      if (prior?.workKind) await writes.current;
+      if (prior?.id) await writes.current;
       const r = await call('activityAsk', {
-        selection: target || fresh ? undefined : selection || undefined,
+        selection: target ? undefined : selectedText || undefined,
         gesture: target?.id,
+        onDemand: target?.onDemand === true,
         publicQuery,
         relatedSource: related?.sourceId == null ? undefined : String(related.sourceId),
         relatedWindow: related?.liveWindow,
@@ -1782,7 +1979,7 @@ export function ActivitySheet({
         previewId: passage?.id,
         previewEpoch: passage?.epoch,
         turn,
-        chatId,
+        chatId: requestChat,
         previousTurn: prior?.id,
         previousWorkKind: prior?.workKind,
         sources: prior?.sources.map((e: Row) => e.id) || [],
@@ -1971,7 +2168,10 @@ export function ActivitySheet({
     </label>
   );
   const activeBrain = capture?.brain;
-  const isCloudBrain = activeBrain?.mode === 'cloud';
+  const isCloudBrain = activeBrain?.mode === 'cloud' && !gesture?.onDemand;
+  const profile = nudge && openedProfile?.id === nudge.id && openedProfile?.eventId === nudge.eventId ? openedProfile : null;
+  const firstLaunch = !close && tab === 'ask' && !!capture &&
+    ['model', 'screen', 'point'].includes(capture.companionSetup) && !busy && !turns.length && !text;
   const canReplyToSelection =
     /\b(messages|mail|gmail|outlook|slack)\b/i.test([gesture?.app, anchor?.title, anchor?.label].join(' ')) ||
     /\b(can|could|will|would|did|do|are) you\b[^?]*\?/i.test(selection);
@@ -2024,7 +2224,7 @@ export function ActivitySheet({
       observer.disconnect();
       window.clearTimeout(timer);
     };
-  }, [tab, close, meeting.phase]);
+  }, [tab, close, meeting.phase, firstLaunch]);
   return (
     <main
       ref={sheet}
@@ -2090,7 +2290,7 @@ export function ActivitySheet({
 
         <div className="sheet-tools">
           {isCloudBrain && <button className="brain-pill" data-mode="cloud" onClick={() => select('brain')}>{activeBrain.providerLabel || 'Cloud'}</button>}
-          {!close && <button type="button" className="bar-link" onClick={() => void call('openNotebook').catch(e => fail(String(e)))}>Notebook</button>}
+          {!close && <button type="button" className="bar-link" onClick={() => void call('openNotebook').then(dropOneTimeWindow).catch(e => fail(String(e)))}>Notebook</button>}
         </div>
         {!close && (
           <button
@@ -2099,7 +2299,7 @@ export function ActivitySheet({
             title="Hide (Esc)"
             aria-label="Hide assistant"
             onClick={() =>
-              void call('dismissActivity').catch(e => fail(String(e)))
+              void dismissSheet().catch(e => fail(String(e)))
             }
           >
             ×
@@ -2155,17 +2355,23 @@ export function ActivitySheet({
       )}
       <div className="sheet-content" key={tab}>
         <div className="answer-content">
-          {nudge && !busy && (tab === 'suggestion' || (tab === 'journal' && !source && inspectedTurn === null) || (tab === 'ask' && !turns.length && !text && !selection)) && (
+          {nudge && !firstLaunch && !busy && (tab === 'suggestion' || (tab === 'journal' && !source && inspectedTurn === null) || (tab === 'ask' && !turns.length && !text && !selection)) && (
             <aside className="nudge-banner" aria-label="Proactive suggestion">
-              <span className="nudge-badge">{nudge.badge} · {nudge.app}</span>
-              <p className="nudge-detail">{nudge.detail || nudge.title}</p>
+              <span className="nudge-badge">{nudge.badge} · {nudge.sourceId || nudge.profileId ? cleanTitle(nudge.title, nudge.app) : nudge.app}</span>
+              <p className="nudge-detail">{profile?.text || nudge.detail || nudge.title}</p>
+              {profile?.date && <small>Saved {new Date(profile.date).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'})}</small>}
               <div className="nudge-actions">
-                <button className="bar-link" onClick={async () => {
+                {!profile && <button className="bar-link" onClick={async () => {
                   try {
                     const current = (await call('proactiveStatus')).nudge;
                     if (!current || current.id !== nudge.id || current.eventId !== nudge.eventId) {
                       setNudge(current);
                       notify('That suggestion has expired.');
+                      return;
+                    }
+                    if (current.profileId) {
+                      const saved = await call('proactiveReadMemory', {id: current.id, eventId: current.eventId});
+                      showProfile({...saved, id: current.id, eventId: current.eventId});
                       return;
                     }
                     await call('proactiveDismiss', {id: current.id});
@@ -2175,7 +2381,7 @@ export function ActivitySheet({
                     route('');
                     await ask(current.prompt, undefined, '', null, undefined, true, current.eventId, current);
                   } catch (e) { fail(String(e)); }
-                }}>{nudge.kind === 'reply' ? 'Draft a reply' : nudge.kind === 'help' ? 'Explain this' : 'Show connection'} →</button>
+                }}>{nudge.profileId ? 'Read saved memory' : nudge.kind === 'reply' ? 'Draft a reply' : nudge.kind === 'help' ? 'Explain this' : 'Show connection'} →</button>}
                 <button className="bar-link" onClick={() => void call('proactiveDismiss', {id: nudge.id}).then(() => setNudge(null)).catch(e => fail(String(e)))}>Dismiss</button>
                 {tab === 'journal' && nudge.app && <button className="bar-link" onClick={() =>
                   void call('proactiveConfigure', {muteApp: nudge.app}).then(() => setNudge(null)).catch(e => fail(String(e)))
@@ -2315,10 +2521,19 @@ export function ActivitySheet({
                 }}
               />
             </div>
+          ) : firstLaunch && capture ? (
+            <CompanionSetup settings={capture} finish={(next, destination) => {
+              setCapture(next);
+              if (destination) select(destination);
+              if (next.companionSetup === 'ready' && !destination) {
+                showFirstSummon(Boolean((next.enabled || next.scope === 'on-demand') && next.shortcutReady !== false));
+                window.setTimeout(() => field.current?.focus(), 0);
+              }
+            }} />
           ) : (
             <>
               {capture && !busy && !turns.length && !localModel && capture.brain?.mode !== 'cloud' && (
-                <button className="setup-model" onClick={() => select('brain')}>Choose a model to get started →</button>
+                <button className="setup-model" onClick={() => select('brain')}>Set up local answers →</button>
               )}
               {capture?.modelIssue && !localModel && (
                 <p role="alert">{capture.modelIssue}</p>
@@ -2481,23 +2696,8 @@ export function ActivitySheet({
                         </button>
                       </div>
                     )}
-                    {!!t.webSources?.length && (
-                      <div className="web-sources" aria-label="Web sources">
-                        {t.webSources.slice(0, 3).map((p: Row, idx: number) => (
-                          <button
-                            key={p.url || idx}
-                            type="button"
-                            className="source-chip"
-                            onClick={() =>
-                              void call('visitPublicSource', {
-                                url: p.url,
-                              }).catch(e => fail(String(e)))
-                            }
-                          >
-                            {p.title} ↗
-                          </button>
-                        ))}
-                      </div>
+                    {(!!t.webSources?.length || t.sources?.some((s: Row) => s.role === 'packing')) && (
+                      <ReplySources key={t.id || `${chatId}-${i}`} turn={t} fail={fail} />
                     )}
                     {t.quote && (
                       <figure className="recall-citation">
@@ -2507,7 +2707,20 @@ export function ActivitySheet({
                         </blockquote>
                       </figure>
                     )}
-                    {close
+                    {t.workKind === 'comparison' && (
+                      <details className="margin-footnote">
+                        <summary>What each source supports</summary>
+                        {t.sources.map((source: Row) => (
+                          <div key={source.id}>
+                            <button type="button" className="bar-link" onClick={() => {
+                              inspect(i); open(source.id); select('journal');
+                            }}>{cleanTitle(source.title, source.label)}</button>
+                            <blockquote>{source.quote}</blockquote>
+                          </div>
+                        ))}
+                      </details>
+                    )}
+                    {t.workKind !== 'comparison' && (close
                       ? answerEvidence(t, true)
                       : (t.supportingLine || !!t.sources?.length) && (
                           <details className="margin-footnote">
@@ -2530,8 +2743,14 @@ export function ActivitySheet({
                               }}>Open in Memory</button>
                             )}
                           </details>
-                        )}
-                    {!t.proposedQuery && t.answer && !t.savedMemories?.length && (
+                        ))}
+                    {t.workKind === 'baggage-access' && i === turns.length - 1 && !capture?.sitePermission && (
+                      <button type="button" className="bar-link" disabled={busy}
+                        onClick={() => void call('activityPermission', {kind: 'sites'}).catch(e => fail(String(e)))}>
+                        Allow Accessibility…
+                      </button>
+                    )}
+                    {!t.proposedQuery && t.workKind !== 'baggage-access' && t.answer && !t.savedMemories?.length && (
                       <div className="turn-actions">
                         {!close && !busy && (correcting === i ? (
                           <form className="reply-correction" onSubmit={e => {e.preventDefault();void saveCorrection(i);}}>
@@ -2560,7 +2779,7 @@ export function ActivitySheet({
                               }).catch(e => fail(String(e)));
                           }}
                         >
-                          {copiedTurn === i ? '✓ Copied' : 'Copy'}
+                          {copiedTurn === i ? '✓ Copied' : t.workKind === 'meal-plan' ? 'Copy list' : t.workKind === 'comparison' ? 'Copy revision' : 'Copy'}
                         </button>
                       </div>
                     )}
@@ -2665,12 +2884,12 @@ export function ActivitySheet({
           {error && <p role="alert">{error}</p>}
         </div>
       </div>
-      {tab === 'ask' && (
+      {tab === 'ask' && !firstLaunch && (
         <form
           className="screen-composer"
           onSubmit={e => {
             e.preventDefault();
-            void ask();
+            void submitTyped();
           }}
         >
           {close && providerControl}
@@ -2681,12 +2900,15 @@ export function ActivitySheet({
             <button
               type="button"
               className="point-target"
-              onClick={() => setGesture(null)}
+              onClick={() => {
+                if (gesture.onDemand) void call('discardOnDemandPoint').catch(e => fail(String(e)));
+                setGesture(null);
+              }}
               aria-label="Remove captured screen context"
             >
               {gesture.app
-                ? `${gesture.app}${gesture.hasImage ? ' · Live screen' : ''}`
-                : 'Local memory'}
+                ? `${gesture.app}${gesture.onDemand ? ' · This window' : gesture.hasImage ? ' · Live screen' : ''}`
+                : gesture.onDemand ? 'Window unavailable' : 'Local memory'}
               {gesture.line ? ' · ' + gesture.line : ''} ×
             </button>
           )}
@@ -2718,7 +2940,11 @@ export function ActivitySheet({
             )}
           {!provider && !busy && !turns.length && !gesture && !selection && (
             <small className="hold-hint">
-              Tap ⌥⇧Space to type · Hold to speak
+              {capture?.shortcutReady === false
+                ? 'Open Beside from the menu bar to ask.'
+                : firstSummon
+                  ? 'Press Esc to return to your work. Tap ⌥⇧Space there to ask.'
+                  : 'Tap ⌥⇧Space to type · Hold to speak'}
             </small>
           )}
           <div className="composer-input">
@@ -2740,7 +2966,10 @@ export function ActivitySheet({
                         ? 'Ask a follow-up…'
                         : 'Ask Beside…'
                 }
-                onChange={e => write(e.target.value)}
+                onChange={e => {
+                  inputRevision.current++;
+                  write(e.target.value);
+                }}
                 onKeyDown={e => {
                   if (
                     e.key === 'Enter' &&
@@ -2748,7 +2977,7 @@ export function ActivitySheet({
                     !e.nativeEvent.isComposing
                   ) {
                     e.preventDefault();
-                    void ask();
+                    void submitTyped();
                   }
                 }}
               />

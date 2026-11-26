@@ -1,15 +1,12 @@
-# Using Beside
+# Beside in use
 
-Tap **⌥⇧Space** in the app you’re using, ask a question and press Return. Press **Esc** to go back to your work. You can also hold the shortcut to speak.
+Tap **⌥⇧Space** to ask Beside a question in the app you’re using. Press Return to ask and Esc to close the sheet. Hold the shortcut to speak.
 
-| Recording | What happens on screen |
+| Walkthrough | What happens |
 | --- | --- |
-| [Writing · 34 seconds](https://pranavdulepet.github.io/beside/#writing) | A writer selects the opening of a TextEdit essay about Chandragupta Maurya. They ask what Pataliputra’s wall was made of, read Beside’s answer and sources, and change the sentence in the same document. |
-| [Groceries · 31 seconds](https://pranavdulepet.github.io/beside/#groceries) | A cook has three dinners and a list of pantry staples in Apple Notes. They ask what to buy at Trader Joe’s, copy the seven-item answer and paste it into their shopping note. |
-| [Flight · 11 seconds](https://pranavdulepet.github.io/beside/#flight) | A traveler opens the baggage fees on United’s Newark–Athens itinerary and asks whether to add a second bag. Beside estimates 14.5 kg from the packing list against a 23 kg allowance and recommends skipping the $120 second bag. |
+| [Correction · 27 seconds](https://pranavdulepet.github.io/beside/#learning) | Change how a project update should open. Share a selected brief from Notes in a fresh chat and see Beside lead with the paper-delivery risk and the decision Leila needs to make. |
+| [Groceries · 21 seconds](https://pranavdulepet.github.io/beside/#groceries) | Add two people to Thursday’s dinner, tell Beside there are eight tortillas and two cans of beans at home, and paste the updated shopping list into Notes. |
+| [Print handoff · 13 seconds](https://pranavdulepet.github.io/beside/#email) | Read Jo’s question in Mail and copy the printer’s specifications from a saved handoff note. The proof needs PDF/X-1a, 3 mm of bleed and delivery by Thursday at noon. |
+| [Setup · 25 seconds](https://pranavdulepet.github.io/beside/#setup) | Connect the copy of Inkling already on the Mac, turn on screen memory, and save a preference for printed proofs. |
 
-Each video shows the work app and Beside in one continuous recording at its original pace, including typing and response time. The recorder places those two windows together in the frame. The rest of the desktop is outside the capture. Use the player’s full-screen control to enlarge it.
-
-The baggage figure is an estimate from the items listed. The prices and allowance belong to the fare on screen. The workflow ends with the recommendation, before purchase.
-
-[First-time setup](../README.md#try-beside) · [How Beside finds and uses evidence](architecture.md)
+The recordings show real apps and documents written for these walkthroughs. Each runs from start to finish at its original speed, framed around the work. In Safari’s full-screen video player, pinch to enlarge a passage. [Open the image player](https://pranavdulepet.github.io/beside/?player=images#learning)

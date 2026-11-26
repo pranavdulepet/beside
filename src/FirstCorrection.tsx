@@ -39,10 +39,14 @@ export function FirstCorrection({
   data,
   act,
   reply,
+  finish,
+  returnToNotebook,
 }: {
   data: Row;
   act: Action;
   reply?: Row | null;
+  finish: () => Promise<unknown>;
+  returnToNotebook?: () => void;
 }) {
   const lesson = data.firstCorrection;
   const sealed = lesson?.sealed;
@@ -97,7 +101,7 @@ export function FirstCorrection({
     } else if (!score) {
       await act('verdict', {id: sealed.id, right: true});
     } else {
-      await act('finish');
+      await finish();
     }
   }
   const disabled = learning
@@ -229,11 +233,11 @@ export function FirstCorrection({
             It missed
           </button>
         )}
-        {data.setup && !sealed?.actual && (
+        {returnToNotebook && !sealed?.actual && (
           <button
             type="button"
             disabled={busy}
-            onClick={() => void run(() => act('finish'))}
+            onClick={returnToNotebook}
           >
             Return to my notebook
           </button>

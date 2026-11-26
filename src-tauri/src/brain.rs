@@ -175,7 +175,11 @@ fn cloud_input(s: &Store, input: &Value, provider: &str) -> Res<Value> {
     let mut shared = input.clone();
     if let Some(fields) = shared.as_object_mut() {
         if fields.contains_key("personal_profile") || fields.contains_key("remembered_notes") {
-            let (profile, notes) = activity::personal_memory_bundle(s, true)?;
+            let question = ["request", "question", "message", "user_request"]
+                .iter()
+                .find_map(|key| fields.get(*key).and_then(Value::as_str))
+                .unwrap_or("");
+            let (profile, notes) = activity::personal_memory_bundle(s, question, true)?;
             fields.insert("personal_profile".into(), json!(profile));
             fields.insert("remembered_notes".into(), json!(notes));
         }
@@ -185,6 +189,7 @@ fn cloud_input(s: &Store, input: &Value, provider: &str) -> Res<Value> {
             }
         }
         fields.remove("open_windows_on_this_mac");
+        fields.remove("working_context");
         fields.remove("personal_notes");
         fields.remove("previous_question");
         if let Some(notes) = fields.get_mut("notes").and_then(Value::as_array_mut) {
@@ -506,13 +511,16 @@ mod tests {
         for (id, private) in [("public",false),("secret",true)] {
             s.put("note",&json!({"id":id,"topic":id,"text":id,"validFrom": now(),"private":private})).unwrap();
         }
-        let input=json!({"question":"What time?","personal_profile":[],"remembered_notes":["secret"],
+        let input = json!({"question":"What did I say about public access?","personal_profile":[],"remembered_notes":["secret"],
             "history":[{"sharedWith":"ChatGPT","answer":"prior shared answer"},{"answer":"private answer"}],
             "personal_notes":["secret"]});
         let mut input = input;
-        input["open_windows_on_this_mac"] = json!([{"title":"private window","excerpt":"private draft"}]);
-        let clean=cloud_input(&s,&input,"ChatGPT").unwrap();
+        input["open_windows_on_this_mac"] =
+            json!([{"title":"private window","excerpt":"private draft"}]);
+        input["working_context"] = json!(["private task note"]);
+        let clean = cloud_input(&s, &input, "ChatGPT").unwrap();
         assert!(clean.get("open_windows_on_this_mac").is_none());
+        assert!(clean.get("working_context").is_none());
         assert_eq!(clean["remembered_notes"],json!(["public"]));
         assert_eq!(clean["history"].as_array().unwrap().len(),1);
         assert!(!clean.to_string().contains("secret"));

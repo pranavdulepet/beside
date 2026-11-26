@@ -30,7 +30,7 @@ extern "C" fn receive(raw: *const c_char) {
     }
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        crate::activity_sheet(&app);
+        crate::present_activity_sheet_with_origin(&app, serde_json::Value::Null, true);
         let _ = app.emit_to("activity", "selection-ready", ());
     });
 }

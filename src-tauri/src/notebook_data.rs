@@ -46,7 +46,21 @@ pub fn export(s: &Store, dest: &Path) -> Res<()> {
         }
         for kind in ["chat", "floatingChat", "note", "prediction", "version", "routeCorrection"] {
             zip.start_file(format!("records/{kind}.json"), opts).msg()?;
-            serde_json::to_writer(&mut zip, &s.list(kind)?).msg()?;
+            let records = s.list(kind)?;
+            serde_json::to_writer(&mut zip, &records).msg()?;
+            if kind == "floatingChat" {
+                for chat in records {
+                    if let Some(page) = crate::floating_chats::task_context::markdown(s, &chat)? {
+                        let id = chat["id"].as_str().unwrap_or("");
+                        let name = uuid::Uuid::parse_str(id)
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|_| hash(id));
+                        zip.start_file(format!("working-context/{name}.md"), opts)
+                            .msg()?;
+                        zip.write_all(page.as_bytes()).msg()?;
+                    }
+                }
+            }
         }
         zip.start_file("records/imported-messages.jsonl", opts)
             .msg()?;
