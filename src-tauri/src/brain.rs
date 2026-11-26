@@ -269,7 +269,7 @@ fn infer_local(
             input,
             opts.max_tokens,
             false,
-            false,
+            None,
             sink,
         );
     }

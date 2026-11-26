@@ -9,7 +9,7 @@ import {Scroll} from './Scroll';
 import {Seal} from './Seal';
 import {ThinkingSettings} from './Thinking';
 import {Onboarding} from './Onboarding';
-import {BesideMark} from './Ink';
+import {BesideMark, type Point} from './Ink';
 import {call, type Action, type Row} from './api';
 import './style.css';
 
@@ -26,6 +26,7 @@ function localDay() {
 
 function Workspace() {
   const [data, update] = useState<Row | null>(null);
+  const [openingMark, setOpeningMark] = useState<Point[]>();
   const [tab, setTab] = useState<WorkspaceTab>('Memory');
   const [teaching, teach] = useState(false);
   const [reply, selectReply] = useState<Row | null>(null);
@@ -90,6 +91,7 @@ function Workspace() {
         if (live) fail(String(e));
       }
     }
+    void call('personalMark').then(mark => { if (live) setOpeningMark(mark); }).catch(() => {});
     void refresh().catch(e => { if (live) fail(String(e)); });
     document.addEventListener('visibilitychange', sync);
     window.addEventListener('focus', sync);
@@ -143,7 +145,7 @@ function Workspace() {
     <div className="workspace-shell">
       {!data ? (
         <div className="startup">
-          <BesideMark size={36} />
+          <BesideMark size={40} points={openingMark} animated={!error} />
           {error ? <>
             <h1>Your notebook couldn’t open</h1>
             <p role="alert">{error}</p>

@@ -19,18 +19,20 @@
 
 /* Paper, charcoal and handwritten ink. */
 :root {
-  --paper: #faf7ed;
-  --surface: #fffdf6;
-  --surface-2: #ece8dc;
-  --ink: #292824;
-  --ink-secondary: #514e48;
-  --ink-muted: #67635c;
-  --border: rgba(28, 31, 36, 0.1);
-  --border-strong: rgba(28, 31, 36, 0.18);
-  --seal: #48538f;
-  --seal-hover: #354078;
-  --on-seal: #fffdf6;
-  --seal-soft: rgba(72, 83, 143, 0.09);
+  --paper: #faf8f1;
+  --surface: #fffdf7;
+  --surface-2: #eaece4;
+  --ink: #334443;
+  --ink-secondary: #465958;
+  --ink-muted: #586b69;
+  --border: rgba(51, 68, 67, 0.1);
+  --border-strong: rgba(51, 68, 67, 0.18);
+  --seal: #34656d;
+  --seal-hover: #274f55;
+  --on-seal: #fffdf7;
+  --seal-soft: #faeab1;
+  --selection: #faeab1;
+  --selection-ink: #334443;
   --danger: #a63d40;
   --danger-soft: rgba(166, 61, 64, 0.09);
   --radius-sm: 5px;
@@ -59,18 +61,20 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #202127;
-    --surface: #292a32;
-    --surface-2: #373842;
-    --ink: #f4f0e5;
-    --ink-secondary: #d2cfc6;
-    --ink-muted: #b2afa6;
-    --border: rgba(234, 236, 239, 0.09);
-    --border-strong: rgba(234, 236, 239, 0.16);
-    --seal: #b9c1fa;
-    --seal-hover: #cfd4ff;
-    --on-seal: #202127;
-    --seal-soft: rgba(185, 193, 250, 0.12);
+    --paper: #1c2929;
+    --surface: #253534;
+    --surface-2: #334443;
+    --ink: #faf8f1;
+    --ink-secondary: #d6dfd7;
+    --ink-muted: #b0c2ba;
+    --border: rgba(250, 248, 241, 0.09);
+    --border-strong: rgba(250, 248, 241, 0.16);
+    --seal: #a2cccd;
+    --seal-hover: #c1dcda;
+    --on-seal: #1c2929;
+    --seal-soft: #384c49;
+    --selection: #416064;
+    --selection-ink: #faf8f1;
     --danger: #df8285;
     --danger-soft: rgba(223, 130, 133, 0.12);
   }
@@ -81,6 +85,8 @@
 *::after {
   box-sizing: border-box;
 }
+
+::selection { background: var(--selection); color: var(--selection-ink); }
 
 body {
   margin: 0;
@@ -544,8 +550,8 @@ button.active-chip {
   bottom: 7px;
   padding: 2px 7px;
   border-radius: var(--radius-pill);
-  background: rgba(20, 24, 32, 0.72);
-  color: #f8fafc;
+  background: rgba(28, 41, 41, 0.8);
+  color: #faf8f1;
   font-size: 10.5px;
   opacity: 0;
   transition: opacity 140ms ease;
@@ -626,7 +632,7 @@ button.active-chip {
   align-items: center;
   justify-content: center;
   padding: 14px;
-  background: rgba(15, 18, 24, 0.78);
+  background: rgba(28, 41, 41, 0.78);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   animation: sumi-fade-in 120ms ease-out;
@@ -869,7 +875,7 @@ details[open] > summary {
 .segmented button.active,
 .segmented button[aria-selected='true'],
 .segmented button[aria-current='page'] {
-  background: var(--surface);
+  background: var(--seal-soft);
   color: var(--ink);
   font-weight: 500;
 }
@@ -2085,7 +2091,9 @@ th {
 }
 
 /* The small sheet reads like an annotation beside the active document. */
+.reply-lines { white-space: pre-line; }
 .signature { flex: none; color: var(--seal); }
+.ink-action .signing { color: inherit; }
 .signing path {
   stroke-dasharray: 1;
   animation: sign-in-ink 1.9s ease-in-out infinite;

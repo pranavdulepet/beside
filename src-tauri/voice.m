@@ -55,8 +55,8 @@ void sumi_position_reply(void *pointer) {
         panel.opaque=NO; panel.backgroundColor=NSColor.clearColor; panel.hasShadow=YES; panel.ignoresMouseEvents=YES;
         panel.level=NSStatusWindowLevel; panel.collectionBehavior=NSWindowCollectionBehaviorCanJoinAllSpaces|NSWindowCollectionBehaviorFullScreenAuxiliary;
         NSView *card=panel.contentView; card.wantsLayer=YES;
-        card.layer.backgroundColor=[NSColor colorWithRed:.16 green:.14 blue:.16 alpha:.97].CGColor; card.layer.cornerRadius=15;
-        NSView *dot=[[NSView alloc] initWithFrame:NSMakeRect(12,11,8,8)]; dot.wantsLayer=YES; dot.layer.cornerRadius=4; dot.layer.backgroundColor=[NSColor colorWithRed:.90 green:.91 blue:.61 alpha:1].CGColor; [card addSubview:dot];
+        card.layer.backgroundColor=[NSColor colorWithRed:.11 green:.16 blue:.16 alpha:.97].CGColor; card.layer.cornerRadius=15;
+        NSView *dot=[[NSView alloc] initWithFrame:NSMakeRect(12,11,8,8)]; dot.wantsLayer=YES; dot.layer.cornerRadius=4; dot.layer.backgroundColor=[NSColor colorWithRed:.98 green:.92 blue:.69 alpha:1].CGColor; [card addSubview:dot];
         self.label=[NSTextField labelWithString:@""]; self.label.font=[NSFont fontWithName:@"Geist-Regular" size:13] ?: [NSFont systemFontOfSize:13]; self.label.textColor=NSColor.whiteColor; self.label.lineBreakMode=NSLineBreakByTruncatingHead;
         self.label.frame=NSMakeRect(27,6,79,19); [card addSubview:self.label];
         NSScreen *screen=NSScreen.mainScreen;

@@ -129,7 +129,10 @@ pub fn inkling_text_draft(
     meal_blank: bool,
     sink: &mut dyn FnMut(&str),
 ) -> Res<String> {
-    inkling_text(cfg, instruction, input, 72, true, meal_blank, sink)
+    const MEAL: &str = r#"root ::= intro? "[what I ate]" ending?
+intro ::= ("I had" | "i had" | "had" | "Had" | "I ate" | "i ate" | "just" | "Just") " "
+ending ::= "." | ((" " | ", " | ". ") ("u?" | "you?" | "hbu?" | "wbu?" | "what about you?" | "what about u?" | "how about you?"))"#;
+    inkling_text(cfg, instruction, input, 72, true, meal_blank.then_some(MEAL), sink)
 }
 pub fn inkling_text(
     cfg: &Value,
@@ -137,7 +140,7 @@ pub fn inkling_text(
     input: &Value,
     limit: u32,
     single_line: bool,
-    meal_blank: bool,
+    grammar: Option<&str>,
     sink: &mut dyn FnMut(&str),
 ) -> Res<String> {
     use std::io::{BufRead, BufReader};
@@ -148,13 +151,8 @@ pub fn inkling_text(
         if single_line {
             body["stop"].as_array_mut().unwrap().push(json!("\n"));
         }
-        if meal_blank {
-            // Apply the constraint during decoding, including every streamed token.
-            body["grammar"] = json!(
-                r#"root ::= intro? "[what I ate]" ending?
-intro ::= ("I had" | "i had" | "had" | "Had" | "I ate" | "i ate" | "just" | "Just") " "
-ending ::= "." | ((" " | ", " | ". ") ("u?" | "you?" | "hbu?" | "wbu?" | "what about you?" | "what about u?" | "how about you?"))"#
-            );
+        if let Some(grammar) = grammar {
+            body["grammar"] = json!(grammar);
         }
         let response = http
             .post(&format!("http://127.0.0.1:{port}/completion"))

@@ -7,7 +7,7 @@ import {ExportArrival} from './ExportArrival';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {type Row, type Action, day} from './api';
 import {useGhostInk} from './useGhostInk';
-import {Stroke} from './Ink';
+import {BesideMark, Stroke} from './Ink';
 import {MemoryMark} from './MemoryMark';
 import {SearchResult} from './SearchResult';
 import {Reply} from './Reply';
@@ -588,8 +588,8 @@ export function Desk({
               disabled={busy || readingFile || !text.trim()}
               onClick={() => send()}
             >
-              <Stroke points={data.mark} />
-              {busy ? 'Thinking…' : 'Ask Beside'}
+              {busy ? <>Thinking <BesideMark size={18} points={data.mark} animated /></>
+                : <><Stroke points={data.mark} /> Ask Beside</>}
             </button>
           </div>
         )}

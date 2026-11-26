@@ -4,7 +4,7 @@ import {Think} from './Thinking';
 import {FirstCorrection} from './FirstCorrection';
 import {useState, useEffect} from 'react';
 import {call, type Row, type Action} from './api';
-import {MarkPad, Stroke, Enso} from './Ink';
+import {MarkPad, Stroke, BesideMark} from './Ink';
 export function Sources({
   sources,
   request,
@@ -277,7 +277,7 @@ export function Onboarding({
           </p>
           {running || busy ? (
             <div className="reading" aria-live="polite">
-              <Enso size={83} />
+              <BesideMark size={72} points={data.mark} animated />
               {sentence && (
                 <p className="reading-sentence" key={sentence}>
                   {sentence}

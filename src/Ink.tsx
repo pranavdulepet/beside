@@ -16,7 +16,7 @@ export function BesideMark({size = 25, points, animated = false}: {
     `Q ${xs[i-1]} ${ys[i-1]} ${(xs[i-1]+xs[i])/2} ${(ys[i-1]+ys[i])/2}`).join(' ')
     + ` L ${xs[xs.length-1]} ${ys[ys.length-1]}`;
   return <svg className={animated ? 'signature signing' : 'signature'} width={size}
-    height={animated ? 12 : size} viewBox={`${left-1.4} ${top-1.4} ${width+2.8} ${height+2.8}`}
+    height={animated ? Math.round(size * 0.72) : size} viewBox={`${left-1.4} ${top-1.4} ${width+2.8} ${height+2.8}`}
     aria-hidden="true" focusable="false">
     <path d={d} pathLength="1" fill="none" stroke="currentColor" strokeWidth={animated ? 1.45 : 1.9}
       vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />

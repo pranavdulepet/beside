@@ -468,23 +468,23 @@ void sumi_overlay_highlight(
         NSRect padded = NSInsetRect(local, -7, -6);
         CGFloat radius = MIN(11, MIN(padded.size.width, padded.size.height) * 0.4);
 
-        // Outer soft luminous indigo halo
+        // Outer halo
         CAShapeLayer *halo = [CAShapeLayer layer];
         NSRect haloRect = NSInsetRect(padded, -4, -4);
         halo.path = CGPathCreateWithRoundedRect(haloRect, radius + 3, radius + 3, NULL);
         halo.fillColor = NSColor.clearColor.CGColor;
-        halo.strokeColor = [NSColor colorWithRed:0.28 green:0.33 blue:0.56 alpha:0.35].CGColor;
+        halo.strokeColor = [NSColor colorWithRed:0.204 green:0.396 blue:0.427 alpha:0.35].CGColor;
         halo.lineWidth = 4.0;
         [canvas.layer addSublayer:halo];
         CGPathRelease(halo.path);
 
-        // Crisp indigo-ai focus ring around the target UI element
+        // Focus ring around the target
         CAShapeLayer *ring = [CAShapeLayer layer];
         ring.path = CGPathCreateWithRoundedRect(padded, radius, radius, NULL);
-        ring.fillColor = [NSColor colorWithRed:0.28 green:0.33 blue:0.56 alpha:0.14].CGColor;
-        ring.strokeColor = [NSColor colorWithRed:0.73 green:0.76 blue:0.98 alpha:0.98].CGColor;
+        ring.fillColor = [NSColor colorWithRed:0.204 green:0.396 blue:0.427 alpha:0.14].CGColor;
+        ring.strokeColor = [NSColor colorWithRed:0.64 green:0.81 blue:0.80 alpha:0.98].CGColor;
         ring.lineWidth = 2.5;
-        ring.shadowColor = [NSColor colorWithRed:0.17 green:0.27 blue:0.44 alpha:0.65].CGColor;
+        ring.shadowColor = [NSColor colorWithRed:0.20 green:0.27 blue:0.26 alpha:0.65].CGColor;
         ring.shadowRadius = 10;
         ring.shadowOpacity = 0.85;
         ring.shadowOffset = CGSizeZero;
@@ -533,10 +533,10 @@ void sumi_overlay_highlight(
 
             NSView *pill = [[NSView alloc] initWithFrame:NSMakeRect(px, py, pillW, pillH)];
             pill.wantsLayer = YES;
-            pill.layer.backgroundColor = [NSColor colorWithRed:0.13 green:0.13 blue:0.15 alpha:0.95].CGColor;
+            pill.layer.backgroundColor = [NSColor colorWithRed:0.11 green:0.16 blue:0.16 alpha:0.95].CGColor;
             pill.layer.cornerRadius = 15;
             pill.layer.borderWidth = 1;
-            pill.layer.borderColor = [NSColor colorWithRed:0.73 green:0.76 blue:0.98 alpha:0.45].CGColor;
+            pill.layer.borderColor = [NSColor colorWithRed:0.64 green:0.81 blue:0.80 alpha:0.45].CGColor;
             pill.layer.shadowColor = NSColor.blackColor.CGColor;
             pill.layer.shadowOpacity = 0.4;
             pill.layer.shadowRadius = 12;
@@ -545,7 +545,7 @@ void sumi_overlay_highlight(
             NSView *dot = [[NSView alloc] initWithFrame:NSMakeRect(10, 11, 8, 8)];
             dot.wantsLayer = YES;
             dot.layer.cornerRadius = 4;
-            dot.layer.backgroundColor = [NSColor colorWithRed:0.73 green:0.76 blue:0.98 alpha:1.0].CGColor;
+            dot.layer.backgroundColor = [NSColor colorWithRed:0.64 green:0.81 blue:0.80 alpha:1.0].CGColor;
             [pill addSubview:dot];
 
             text.frame = NSMakeRect(24, 6, pillW - 34, 18);

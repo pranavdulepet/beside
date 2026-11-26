@@ -138,6 +138,7 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
         "activityAddFolder" => crate::activity_documents::configure(s, None),
         "activityRemoveFolder" => crate::activity_documents::configure(s, Some(text(a, "path")?)),
         "activityApps" => crate::activity::apps(),
+        "personalMark" => s.get("mark"),
         "activitySettings" => crate::activity::settings(s),
         "activityConfigure" => crate::activity::configure(s, a),
         "activityPermission" => crate::activity::permission(text(a, "kind")?),

@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 
 static ASK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-    r"(?i)\b(?:do (?:i|we) need|should (?:i|we) (?:buy|add|check)|do (?:i|we) have to (?:buy|add))\b.{0,24}\b(?:extra|another|checked|additional) (?:bag|baggage|luggage)\b").unwrap()
+    r"(?i)\b(?:do (?:i|we) need|should (?:i|we) (?:buy|add|check)|do (?:i|we) have to (?:buy|add))\b.{0,24}\b(?:extra|another|second|checked|additional) (?:checked |carry[- ]on )?(?:bags?|baggage|luggage)\b").unwrap()
 });
 static LIMIT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -85,6 +85,59 @@ fn matrix(body: &str) -> Option<(i32, String, &str)> {
     found
 }
 
+// The header identifies what each value buys. Read the selected itinerary's
+// row as a unit, including its destination. A second itinerary is ambiguous.
+struct CheckedFees<'a> {
+    destination: &'a str,
+    first: &'a str,
+    second: &'a str,
+    limit: i32,
+    line: &'a str,
+}
+static PRICE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?:[$€£][0-9]{1,4}(?:[.,][0-9]{2})?|[0-9]{1,4} (?:USD|EUR|GBP))$").unwrap()
+});
+static CHECKED_LIMIT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(?:[0-9]{1,3} [li]bs?\s*\()?([1-9][0-9]?(?:\.[0-9])?)\s*kgs?\)?$").unwrap()
+});
+fn checked_fees(body: &str) -> Option<CheckedFees<'_>> {
+    let mut lines = body.lines();
+    lines.find(|l| {
+        l.trim()
+            .eq_ignore_ascii_case("flight\tfirst bag\tsecond bag\tweight per bag")
+    })?;
+    let row = lines.next()?;
+    let parse = |line: &str| {
+        line.split('\t').count() == 4
+            && line
+                .split('\t')
+                .nth(1)
+                .is_some_and(|v| PRICE.is_match(v.trim()))
+    };
+    if !parse(row) || lines.any(|l| parse(l) || l.to_ascii_lowercase().contains("weight per bag")) {
+        return None;
+    }
+    let mut cells = row.split('\t').map(str::trim);
+    let route = cells.next()?;
+    let (_, destination) = route
+        .split_once('→')
+        .or_else(|| route.split_once(" -> "))
+        .or_else(|| route.split_once(" to "))?;
+    let first = cells.next()?;
+    let second = cells.next()?;
+    if destination.trim().is_empty() || !PRICE.is_match(second) {
+        return None;
+    }
+    let limit = grams(&CHECKED_LIMIT.captures(cells.next()?)?[1])?;
+    Some(CheckedFees {
+        destination: destination.trim(),
+        first,
+        second,
+        limit,
+        line: row,
+    })
+}
+
 // Mixed fare classes, passengers or units need the user to open a single rule.
 fn allowance(body: &str) -> Option<(i32, String)> {
     if body.lines().any(|l| {
@@ -135,6 +188,7 @@ pub(super) fn booking(title: &str, body: &str) -> bool {
             "cabin bag",
             "hand baggage",
             "baggage allowance",
+            "checked baggage charges",
         ]
         .iter()
         .any(|t| body.contains(t))
@@ -154,7 +208,10 @@ pub(super) fn prepare(
     if !booking(title, body) {
         return Ok(());
     }
-    let booking_context = matrix(body).map(|(_, _, section)| section).unwrap_or(body);
+    let booking_context = checked_fees(body)
+        .map(|f| f.destination)
+        .or_else(|| matrix(body).map(|(_, _, section)| section))
+        .unwrap_or(body);
     let context = format!(" {} ", words(&format!("{title} {booking_context}")));
     let mut q=db.prepare("SELECT id,title,source FROM activity WHERE (title LIKE 'Notes · %' OR title LIKE '% · TextEdit active') AND (title LIKE '%packing list%' OR title LIKE '%packing checklist%') AND stamp>=?1 ORDER BY stamp DESC,rowid DESC LIMIT 120").msg()?;
     let mut rows = q.query([stamp - 30 * DAY]).msg()?;
@@ -352,6 +409,43 @@ pub(super) fn answer(s: &Store, a: &Value, q: &str, epoch: &Value) -> Res<Option
     if let Some((id, title, _, stamp)) = &note {
         sources.push(json!({"id":id,"title":title,"label":"Notes","stamp":stamp}));
     }
+    if let Some(fees) = checked_fees(b["body"].as_str().unwrap_or("")) {
+        let visible_list = note.as_ref().filter(|(id, title, _, _)| {
+            id.starts_with("apple-note:")
+                || ["TextEdit · ", "Notes · ", "Visible text · "]
+                    .iter()
+                    .any(|p| title.starts_with(p))
+        });
+        let packed = visible_list.and_then(|(_, _, body, _)| super::packing::estimate(body));
+        let measured = weight_reply
+            .filter(|_| follow && prior == Some(key))
+            .or_else(|| visible_list.and_then(|(_, _, body, _)| one(body, &WEIGHED).map(|v| v.0)));
+        let high = measured.or_else(|| packed.map(|(_, high)| (high + 499) / 500 * 500));
+        let compares_checked = q.to_lowercase().contains("second")
+            || follow
+            || visible_list.is_some_and(|(_, _, body, _)| {
+                body.lines().any(|l| {
+                    matches!(
+                        l.trim().to_lowercase().as_str(),
+                        "large suitcase" | "checked suitcase"
+                    )
+                })
+            });
+        let (answer,awaiting)=match high {
+            Some(w) if compares_checked && (measured.is_some() || w+500<=fees.limit) && w<=fees.limit=>{
+                let weight=if measured.is_some(){format!("Your packed bag weighs {} kg",kg(w))}else{format!("I’d budget about {} kg for your suitcase and everything listed",kg(w))};
+                (format!("One checked bag should do it. {weight}, under the {} kg limit. Budget {} for the first bag and skip the {} second bag.",kg(fees.limit),fees.first,fees.second),false)
+            }
+            Some(w) if measured.is_some() && compares_checked=>{
+                (format!("Your bag is {} kg over the {} kg limit. Move that weight into another permitted bag or pack lighter. The second checked bag is {}.",kg(w-fees.limit),kg(fees.limit),fees.second),false)
+            }
+            _ if compares_checked=>(format!("Hold off on the {} second bag. You get {} kg per checked bag. What does your packed suitcase weigh?",fees.second,kg(fees.limit)),true),
+            _=>(format!("The first checked bag costs {}. To see whether you can skip it, open the cabin allowance for your fare.",fees.first),false),
+        };
+        return Ok(Some(
+            json!({"answer":answer,"sources":sources,"supportingLine":fees.line.replace('\t'," · "),"baggageAwaitingWeight":awaiting,"epoch":epoch}),
+        ));
+    }
     let Some((limit, line)) = allowance(b["body"].as_str().unwrap_or("")) else {
         return Ok(Some(
             json!({"answer":"I couldn’t verify one carry-on weight limit for this fare. Open the baggage allowance for your ticket.","epoch":epoch,"sources":sources}),
@@ -475,6 +569,57 @@ mod tests {
             "Morocco packing list\nDaypack\n9 laptops\nMy packed bag weighs 5 kg",
         );
         assert!(ask()["answer"].as_str().unwrap().contains("weighs 5 kg"));
+    }
+
+    #[test]
+    fn reads_trip_specific_checked_fees_and_never_uses_them_as_cabin_limits() {
+        let row = "Boston (BOS) → Rome (FCO)\t$75\t$110\t50 lbs (23 kgs)";
+        let table=format!("Calculate checked baggage charges\nFLIGHT\tFIRST BAG\tSECOND BAG\tWEIGHT PER BAG\n{row}\nJanuary 22");
+        let f = checked_fees(&table).unwrap();
+        assert_eq!(
+            (f.destination, f.first, f.second, f.limit),
+            ("Rome (FCO)", "$75", "$110", 23000)
+        );
+        assert!(checked_fees(&format!("{table}\n{row}")).is_none());
+        assert!(checked_fees(&table.replace("50 lbs (23 kgs)", "50 lbs")).is_none());
+        assert!(allowance(&table).is_none());
+        assert!(ASK.is_match("Do I need a second checked bag?"));
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::with_key(temp.path().join("book"), &[8; 32]).unwrap();
+        super::super::init(&store).unwrap();
+        let cfg = json!({"enabled":true,"scope":"displays","generation":"fees"});
+        store.set("activitySettings", &cfg).unwrap();
+        let capture = |title: &str, body: &str| {
+            ingest(
+                &store,
+                &cfg,
+                &json!({"source":"display","title":title,"body":body}),
+                Utc::now().timestamp(),
+            )
+            .unwrap()
+        };
+        capture("Notes · Boston packing list", "Large suitcase\n12 jeans");
+        capture(
+            "Notes · Rome packing list",
+            "Large suitcase\n2 hoodies\n4 T-shirts",
+        );
+        capture("Flight reservation", &table);
+        let point =
+            json!({"source":"display","bookingTitle":"Flight reservation","bookingBody":table});
+        let key = pin(&store, &point, &cfg["generation"]).unwrap().unwrap();
+        let result = answer(
+            &store,
+            &json!({"anchor":key}),
+            "Do I need a second checked bag?",
+            &store.get("activityEpoch").unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(result["answer"]
+            .as_str()
+            .unwrap()
+            .contains("skip the $110 second bag"));
+        assert_eq!(result["sources"][1]["title"], "Notes · Rome packing list");
     }
 
     #[test]

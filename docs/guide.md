@@ -57,9 +57,13 @@ grep -rin 'ferry' desk scroll
 These commands search the readable files. Beside also searches its encrypted screen history and imported passages, which a Markdown search cannot see. Use Memory to correct or retire a dated fact. Beside regenerates its Markdown summary from those records.
 
 
+### From a meal plan to a shopping note
+
+With the meal plan open in Apple Notes, tap **⌥⇧Space** and ask what to buy. If the plan lists ingredients by dish and says what you already have, local Inkling can suggest quantities for the remaining ingredients. Choose **Copy**, then press **⌘V** in your shopping note. Quantities are suggestions and do not depend on live store inventory.
+
 ### While booking a flight
 
-Beside prepares pointers to the observed booking and a packing list whose title matches the trip. These pointers live in the encrypted notebook. When you ask about an extra bag, Beside checks the original sources and compares kilograms locally. A measured packed weight takes priority. For itemized lists, Beside counts familiar items and the container using local weight ranges. If the list leaves a material uncertainty or the range falls near the limit, it asks for the packed weight. A fare table must show the same cabin limit across its visible fare columns. A changed fare can require a new allowance. The originals stay where you put them.
+Beside prepares pointers to the observed booking and a packing list whose title matches the trip. These pointers live in the encrypted notebook. When you ask about an extra bag, Beside checks the original sources and compares kilograms locally. A measured packed weight takes priority. For itemized lists, Beside counts familiar items and the container using local weight ranges. If the list leaves a material uncertainty or the range falls near the limit, it asks for the packed weight. A fare table must show the same cabin limit across its visible fare columns. On a checkout that lists separate checked-bag fees, Beside reads the destination, the price of each bag and the weight per bag from the same itinerary row. A changed fare can require a new allowance. The originals stay where you put them.
 
 ## Models, web search and sharing
 

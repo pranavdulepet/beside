@@ -1194,6 +1194,16 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
                         @"windowFrame":@{@"x":@(round(frame.origin.x)), @"y":@(round(frame.origin.y)), @"w":@(round(frame.size.width)), @"h":@(round(frame.size.height))}
                     };
                     NSString *title=w.title ?: @"";
+                    if ([window[@"bundle"] isEqual:@"com.apple.Notes"]) {
+                        // Read the editor column from the same frame as the pointer.
+                        // The small pointer crop can omit the end of a list or plan.
+                        NSDictionary *note=recognize(image,source,title,NO,YES);
+                        if ([note[@"body"] length]) {
+                            NSMutableDictionary *withNote=[result mutableCopy];
+                            withNote[@"document"]=note[@"body"];
+                            result=withNote;
+                        }
+                    }
                     if (fareWindow(title)) {
                         NSDictionary *page=recognize(image,source,title,NO,NO);
                         if (page[@"body"]) {

@@ -4,8 +4,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-PAPER = "#F6F3EB"
-INK = "#48538F"
+PAPER = "#FAF8F1"
+INK = "#34656D"
 ICONS = Path("src-tauri/icons")
 
 

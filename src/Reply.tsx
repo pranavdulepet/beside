@@ -218,7 +218,7 @@ export function Reply({
               );
             if (/^#{1,6} /.test(paragraph) && lines.length === 1)
               return <h3 key={key}>{inline(paragraph.replace(/^#+ /, ''))}</h3>;
-            return <p key={key}>{inline(paragraph)}</p>;
+            return <p key={key} className={lines.length > 1 ? 'reply-lines' : undefined}>{inline(paragraph)}</p>;
           });
       })}
     </div>
