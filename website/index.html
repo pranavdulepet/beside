@@ -120,14 +120,15 @@
         [role="tab"] { font-size: 14px; padding-inline: 7px; }
       }
       @media (max-width: 360px) {
-        [role="tab"] { padding-inline: 3px; }
+        .picker { position: relative; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 6px); gap: 0; margin-inline: 0; }
+        [role="tab"] { min-width: 40px; padding-inline: 3px; font-size: 13px; }
       }
       :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
       figure { margin: 0; }
       noscript a { display: inline; padding: 0; font: inherit; }
       [hidden] { display: none !important; }
       .player { position: relative; }
-      video, .cover img, .direct-recording { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 10; object-fit: contain; border-radius: 10px; }
+      video, .cover img, .direct-recording { display: block; width: 100%; height: auto; aspect-ratio: auto var(--film-ratio, 16 / 10); object-fit: contain; border-radius: 10px; }
       video { background: #263433; }
       .cover img { height: auto; }
       .cover {
@@ -192,6 +193,7 @@
           <button id="tab-groceries" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="Two more people are coming. Buy 8 tortillas, skip the beans, and paste the list into Notes.">Groceries</button>
           <button id="tab-email" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="While reading an email in Mail, copy the printer’s PDF settings and deadline from a saved note.">Print handoff</button>
           <button id="tab-setup" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="Connect local Inkling, turn on screen memory, and save a first preference.">Setup</button>
+          <button id="tab-flight" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-file="baggage" data-ratio="90 / 49" data-take="9" data-caption="At Ryanair checkout, Beside checks the Athens packing list and forecast before recommending you skip the £41.49 extra bag.">Flight</button>
         </div>
         <figure id="demo-panel" role="tabpanel" aria-labelledby="tab-learning">
           <div class="player">
@@ -224,7 +226,7 @@
           <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="https://github.com/pranavdulepet/beside/raw/refs/heads/main/website/media/learning.mp4" download>Download the MP4</a></p>
           <figcaption id="caption">Change a preference, then watch Beside use it in the next project update.</figcaption>
           <noscript><p>Open a recording in your media player.</p><p>
-            <a href="media/learning.mp4">Correction</a> · <a href="media/groceries.mp4">Groceries</a> · <a href="media/email.mp4">Print handoff</a> · <a href="media/setup.mp4">Setup</a>
+            <a href="media/learning.mp4">Correction</a> · <a href="media/groceries.mp4">Groceries</a> · <a href="media/email.mp4">Print handoff</a> · <a href="media/setup.mp4">Setup</a> · <a href="media/baggage.mp4">Flight</a>
           </p></noscript>
         </figure>
       </section>
@@ -247,7 +249,8 @@
       function preparePlayer(tab, file) {
         closePlayer?.();
         const base = 'media/' + file;
-        const media = extension => base + '.' + extension + '?take=8';
+        const media = extension => base + '.' + extension + '?take=' + (tab.dataset.take || '8');
+        panel.style.setProperty('--film-ratio', tab.dataset.ratio || '16 / 10');
         const animationUrl = media('gif');
         const label = tab.textContent + ' walkthrough';
         const controller = new AbortController();

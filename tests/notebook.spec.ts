@@ -505,6 +505,7 @@ test.describe('website walkthroughs', () => {
     ['Groceries', 'groceries'],
     ['Print handoff', 'email'],
     ['Setup', 'setup'],
+    ['Flight', 'baggage'],
   ];
   async function choose(page: import('@playwright/test').Page, title: string) {
     const tab = page.getByRole('tab', {name: title, exact: true});
@@ -528,13 +529,13 @@ test.describe('website walkthroughs', () => {
     const first = page.getByRole('tab', {name: 'Correction'});
     await first.focus();
     await page.keyboard.press('End');
-    await expect(page.getByRole('tab', {name: 'Setup'})).toBeFocused();
+    await expect(page.getByRole('tab', {name: 'Flight'})).toBeFocused();
     await page.keyboard.press('ArrowRight');
     await expect(first).toBeFocused();
     await page.keyboard.press('ArrowLeft');
-    await expect(page).toHaveURL(/#setup$/);
+    await expect(page).toHaveURL(/#flight$/);
     await page.reload();
-    await expect(page.getByRole('button', {name: 'Play Setup walkthrough'})).toBeVisible();
+    await expect(page.getByRole('button', {name: 'Play Flight walkthrough'})).toBeVisible();
   });
 
   test('desktop recordings play, seek and reopen the selected tab', async ({
@@ -597,7 +598,7 @@ test.describe('website walkthroughs', () => {
     await page.reload();
     await expect(
       page.getByRole('button', {
-        name: 'Play Setup walkthrough',
+        name: 'Play Flight walkthrough',
       }),
     ).toBeVisible();
   });
@@ -626,7 +627,7 @@ test.describe('website walkthroughs', () => {
 
   test.describe('with JavaScript disabled', () => {
     test.use({javaScriptEnabled: false});
-    test('all four recordings open directly', async ({page}) => {
+    test('every recording opens directly', async ({page}) => {
       await page.goto('/website/index.html');
       await expect(page.getByRole('tab')).toHaveCount(0);
       for (const [name, file] of demos) {
@@ -707,7 +708,7 @@ test.describe('website walkthroughs', () => {
       await page.reload();
       await expect(
         page.getByRole('button', {
-          name: 'Play Setup walkthrough',
+          name: 'Play Flight walkthrough',
         }),
       ).toBeVisible();
     });
