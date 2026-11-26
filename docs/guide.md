@@ -24,6 +24,10 @@ When suggestions are enabled and observation is running, Beside can match a visi
 
 Web lookup is available automatically. A standalone public question about current information can go straight to search. Screen-identification questions use local evidence. If Beside needs a public topic or location, it asks for that detail.
 
+### At an airline’s bag selector
+
+Point at the checked bag you’re considering, press **⌥⇧Space**, and ask “Should I add a bag?” Beside uses the fare on screen and looks for a saved packing note for the same destination and date. The answer names the note, labels the weight estimate and links the forecast for the arrival airport. You can open either source in the sheet. If the checkout leaves out a detail that matters, Beside asks you for it. You choose the bag on the airline’s page.
+
 ## Choose what Beside remembers
 
 Open **What Beside knows → Sources**. Observation starts when you select **Start** and can be paused from the sheet or the menu bar.

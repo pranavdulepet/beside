@@ -41,6 +41,29 @@ static QUANTITY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(?:(\d{1,2})(?:\s*[x×]\s*|\s+))?(?:(pairs? of)\s+)?(.+)$").unwrap()
 });
 
+pub(super) fn looks_like_inventory(body: &str) -> bool {
+    let mut container = false;
+    let mut articles = 0;
+    for raw in body.lines().take(150) {
+        let line = raw
+            .trim()
+            .trim_start_matches(['-', '*', '•', '☐', '☑'])
+            .trim()
+            .to_lowercase();
+        if let Some(item) = QUANTITY
+            .captures(&line)
+            .and_then(|c| ITEMS.iter().find(|item| item.name.is_match(&c[3])))
+        {
+            if item.container {
+                container = true;
+            } else {
+                articles += 1;
+            }
+        }
+    }
+    container && articles > 0 || articles >= 3
+}
+
 pub(super) fn estimate(body: &str) -> Option<(i32, i32)> {
     let (mut low, mut high, mut bags, mut articles) = (0, 0, 0, 0);
     for (i, line) in body.trim().lines().enumerate() {

@@ -507,7 +507,7 @@ pub(crate) fn ingest(s: &Store, captured: &Value, row: &Value, stamp: i64) -> Re
         };
         baggage::prepare(&tx, &current, &title, &body, stamp, &c)?;
     } else if wrote == 1 && (title.starts_with("Notes · ") || title.ends_with(" · TextEdit active"))
-        && title.to_lowercase().contains("packing") {
+        && (title.to_lowercase().contains("packing") || packing::looks_like_inventory(&body)) {
         baggage::refresh_recent(&tx,&c,stamp)?;
     }
     if let Some(image) = preview.filter(|_| wrote == 1) {

@@ -130,7 +130,12 @@ pub(super) fn attach(reply: &mut Value, trip: &Value) {
     else {
         return;
     };
-    let Some(url) = endpoint(code) else { return };
+    let Some(url) = endpoint(code) else {
+        if let Some(answer) = reply["answer"].as_str() {
+            reply["answer"] = json!(format!("{answer}\n\nI couldn’t locate forecast coordinates for the arrival airport. No forecast was used."));
+        }
+        return;
+    };
     let today = Utc::now().date_naive();
     let in_range = day >= today - Days::days(1) && day < today + Days::days(16);
     let forecast = if in_range {
@@ -180,7 +185,19 @@ mod tests {
         let url = endpoint("ATH").unwrap();
         assert!(url.as_str().contains("latitude=37.94"));
         assert!(!url.as_str().contains("ATH"));
+        let porto = endpoint("OPO").unwrap();
+        let coords: std::collections::HashMap<_, _> = porto.query_pairs().collect();
+        assert_eq!(coords["latitude"], "41.25");
+        assert_eq!(coords["longitude"], "-8.68");
+        assert!(!porto.as_str().contains("OPO"));
         assert!(endpoint("my packing list").is_none());
+        let mut unknown = json!({"answer":"Skip the extra bag."});
+        attach(&mut unknown, &json!({"airport":"???","date":"2026-12-06"}));
+        assert!(unknown["webSources"].is_null());
+        assert!(unknown["answer"]
+            .as_str()
+            .unwrap()
+            .contains("No forecast was used."));
         let day = NaiveDate::from_ymd_opt(2026, 12, 2).unwrap();
         let mut source = json!({"daily_units":{"temperature_2m_min":"°C","temperature_2m_max":"°C","precipitation_probability_max":"%"},
             "daily":{"time":["2026-12-01","2026-12-02"],"temperature_2m_min":[1,3],"temperature_2m_max":[2,9],"precipitation_probability_max":[80,7]}});

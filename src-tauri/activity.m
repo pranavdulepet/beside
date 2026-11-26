@@ -382,6 +382,110 @@ static NSString *frontBagOffer(NSRunningApplication *app, NSString *title, CGWin
     return currentBagOffer(page,focused,viewport,app.processIdentifier,wid);
 }
 
+// Read the public itinerary from this top-level HTTPS page and the offer only
+// from the control under the pointer. Never cross into another offer or iframe.
+static BOOL bagTextMatches(NSString *line, NSString *pattern) {
+    return line.length && line.length<=165 && ![line containsString:@"@"] &&
+        [line rangeOfString:pattern options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location!=NSNotFound;
+}
+static BOOL bagAction(id node, NSString **word, NSNumber **quantity) {
+    AXUIElementRef el=(__bridge AXUIElementRef)node;
+    NSString *role=clean(attribute(el,kAXRoleAttribute));
+    BOOL stepper=[role isEqual:@"AXIncrementor"];
+    if (!stepper && ![role isEqual:@"AXButton"] && ![role isEqual:@"AXIncrementArrow"]) return NO;
+    NSString *label=clean(attribute(el,kAXTitleAttribute));
+    if (!label.length) label=clean(attribute(el,kAXDescriptionAttribute));
+    if (!bagTextMatches(label,@"^(?:\\+|add|increase|increase quantity|(?:add|increase|select) (?:a |an |one |another |extra |additional )?(?:(?:[1-9][0-9]?(?:\\.[0-9])?\\s*(?:kg|lb)s? )?(?:check[- ]in|checked|hold) )?(?:bag(?:gage)?|luggage)s?(?: quantity)?|(?:[1-9][0-9]?\\s*(?:kg|lb)s? )?(?:check[- ]in|checked|hold) bag(?:gage)?(?: quantity)?)$")) return NO;
+    if(word)*word=label;
+    if(stepper && quantity) {
+        id n=attribute(el,kAXValueAttribute);
+        NSString *v=[n isKindOfClass:NSNumber.class]?[n stringValue]:clean(n);
+        if(bagTextMatches(v,@"^[0-9]$"))*quantity=@(v.integerValue);
+    }
+    return YES;
+}
+static void publicBagFields(id node, CGRect viewport, BOOL itinerary, NSSet *pointed, NSMutableOrderedSet *fields,
+                            BOOL *foreign, int depth, int *budget) {
+    if (--*budget<0 || depth>38 || fields.count>=(itinerary?48:32)) { *foreign=YES; return; }
+    AXUIElementRef el=(__bridge AXUIElementRef)node;
+    NSString *role=clean(attribute(el,kAXRoleAttribute));
+    if ((depth && [role isEqual:@"AXWebArea"])||[role containsString:@"TextField"]||[role isEqual:@"AXTextArea"]||[role isEqual:@"AXComboBox"]||[role isEqual:@"AXLink"]||[role isEqual:@"AXColumn"]) return;
+    CGRect rect=bounds(el);
+    if (!CGRectIsEmpty(rect)&&!CGRectIntersectsRect(rect,viewport)) return;
+    if (!itinerary && ![pointed containsObject:node] && bagAction(node,NULL,NULL)) { *foreign=YES; return; }
+    if ([role isEqual:@"AXStaticText"]||[role isEqual:@"AXHeading"]) {
+        NSString *v=clean(attribute(el,[role isEqual:@"AXStaticText"]?kAXValueAttribute:kAXTitleAttribute));
+        if (!v.length) v=clean(attribute(el,kAXDescriptionAttribute));
+        if (!CGRectIsEmpty(rect)) {
+            for (NSString *raw in [v componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+                NSString *line=[raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+                NSString *scope=@"^(?:(?:departure(?: airport| date)?|departing|outbound(?: flight)?|from|origin|to|arrival airport|destination|return date|return flight|travel date):.{1,115}|(?:passengers?|travell?ers?):\\s*[0-9]+(?: (?:adults?|passengers?|travell?ers?))?|(?:one[- ]way(?: flight| journey)?|round[- ]trip|multi[- ]city)|[0-9]+ (?:adults?|passengers?|travell?ers?|children|infants?)|.{1,60}\\([A-Z]{3}\\)\\s*(?:→|->| to | – | — | - )\\s*.{1,60}\\([A-Z]{3}\\))$";
+                NSString *offer=@"(?:\\b(?:check[- ]in|checked|hold|cabin|personal item|carry[- ]on|overweight|oversize|bags?|allowance|included|selected|quantity|fare|price|total|discount)\\b|[£€$]|\\b(?:USD|EUR|GBP|CAD|AUD|NZD|CHF|DKK|NOK|SEK|kg|lb)s?\\b)";
+                if (bagTextMatches(line,itinerary?scope:offer)) [fields addObject:line];
+            }
+        }
+        if ([role isEqual:@"AXStaticText"]) return;
+    }
+    for (id child in attribute(el,kAXChildrenAttribute)) {
+        if (*foreign) return;
+        publicBagFields(child,viewport,itinerary,pointed,fields,foreign,depth+1,budget);
+    }
+}
+static NSDictionary *checkoutAtPointer(NSRunningApplication *app, CGWindowID wid, CGPoint point) {
+    if (!wid||!AXIsProcessTrusted()||!availableSession()||!stillFront(app.processIdentifier)||frontWindow(app.processIdentifier)!=wid) return nil;
+    id owner=CFBridgingRelease(AXUIElementCreateApplication(app.processIdentifier));
+    AXUIElementSetMessagingTimeout((__bridge AXUIElementRef)owner,.22);
+    AXUIElementRef element=NULL;
+    if (AXUIElementCopyElementAtPosition((__bridge AXUIElementRef)owner,point.x,point.y,&element)!=kAXErrorSuccess||!element) return nil;
+    id hit=CFBridgingRelease(element), page=nil;
+    NSMutableArray *path=[NSMutableArray array];
+    NSString *control=nil;
+    NSNumber *quantity=nil;
+    for (id current=hit;current && path.count<34;current=attribute((__bridge AXUIElementRef)current,kAXParentAttribute)) {
+        if ([path containsObject:current]) return nil;
+        if ([clean(attribute((__bridge AXUIElementRef)current,kAXRoleAttribute)) isEqual:@"AXWebArea"]) {page=current;break;}
+        if (path.count<5) {
+            NSString *label=nil;
+            if (bagAction(current,&label,&quantity) && (!control||[label length]>control.length)) {
+                if (![attribute((__bridge AXUIElementRef)current,kAXEnabledAttribute) boolValue]) return nil;
+                control=label;
+            }
+        }
+        [path addObject:current];
+        if (path.count==5&&!control) return nil;
+    }
+    if (!page||!control) return nil;
+    NSString *host=hostOf(page);
+    if (!host.length || [host rangeOfString:@"^[a-z0-9.-]+\\.[a-z]{2,}$" options:NSRegularExpressionSearch].location==NSNotFound) return nil;
+    id before=attribute((__bridge AXUIElementRef)page,kAXURLAttribute);
+    NSURL *url=[before isKindOfClass:NSString.class] ? [NSURL URLWithString:before] : before;
+    if (![url isKindOfClass:NSURL.class] || url.user.length || url.password.length || url.port ||
+        ([host isEqual:@"www.ryanair.com"] && [url.path hasSuffix:@"/trip/flights/bags"])) return nil;
+    id focused=attribute((__bridge AXUIElementRef)owner,kAXFocusedWindowAttribute);
+    int check=220;
+    if (!focused||![webArea(focused,0,&check) isEqual:page]) return nil;
+    CGRect viewport=CGRectIntersection(bounds((__bridge AXUIElementRef)focused),bounds((__bridge AXUIElementRef)page));
+    if (!CGRectContainsPoint(viewport,point)) return nil;
+    NSSet *pointed=[NSSet setWithArray:path];NSMutableArray *groups=[NSMutableArray array];
+    for (id n in path) {
+        if (groups.count>=6) break;
+        int budget=75;BOOL foreign=NO;NSMutableOrderedSet *parts=[NSMutableOrderedSet orderedSet];
+        publicBagFields(n,viewport,NO,pointed,parts,&foreign,0,&budget);
+        if (foreign) break;
+        if (parts.count&&![groups containsObject:parts.array]) [groups addObject:parts.array];
+    }
+    BOOL hasBag=bagTextMatches(control,@"\\b(?:checked|check[- ]in|hold) bag");
+    for(NSArray *group in groups)for(NSString *line in group)if(bagTextMatches(line,@"\\b(?:checked|check[- ]in|hold) bag"))hasBag=YES;
+    if (!hasBag) return nil;
+    int budget=650;BOOL incomplete=NO;NSMutableOrderedSet *trip=[NSMutableOrderedSet orderedSet];
+    publicBagFields(page,viewport,YES,pointed,trip,&incomplete,0,&budget);
+    check=220;
+    if(!availableSession()||!stillFront(app.processIdentifier)||frontWindow(app.processIdentifier)!=wid||
+       ![webArea(focused,0,&check) isEqual:page] ||
+       ![before isEqual:attribute((__bridge AXUIElementRef)page,kAXURLAttribute)])return nil;
+    return @{@"origin":[@"https://" stringByAppendingString:host],@"groups":groups,@"itinerary":incomplete?@[]:trip.array,@"control":control,@"quantity":quantity?:NSNull.null};
+}
+
 // Vision returns observations in reading blocks. On a fare table, preserve
 // horizontal alignment so a checked-bag value cannot slide into the cabin row.
 static NSArray *fareRows(NSArray<VNRecognizedTextObservation *> *observations) {
@@ -1392,14 +1496,18 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
         NSString *offer=currentBagOffer(page,focused,viewport,pid,wid);
         if (offer && [host isEqual:hostOf(page)])
             return @{@"source":source,@"app":window[@"app"],@"pageTitle":title,@"line":line,@"bookingTitle":@"Check-in bags · Ryanair",@"bookingBody":offer};
+        NSDictionary *generic=checkoutAtPointer([NSRunningApplication runningApplicationWithProcessIdentifier:pid],wid,point);
+        if (generic && [host isEqual:hostOf(page)]) return @{@"source":source,@"app":window[@"app"],@"pageTitle":title?:@"",@"line":line?:@"",@"bookingTitle":[@"Checked bags · " stringByAppendingString:host],@"checkoutEvidence":generic};
         return line.length && line.length<1800 ? @{@"source":source,@"app":window[@"app"],@"pageTitle":title ?: @"",@"line":line} : nil;
     }
     if (!displays && ![settings[@"sources"] containsObject:source]) return nil;
     if (!availableSession() || !screenAccess(YES)) return nil;
     NSString *checkout=nil;
+    NSDictionary *genericCheckout=nil;
     if (browser(window[@"bundle"])) {
         NSRunningApplication *app=[NSRunningApplication runningApplicationWithProcessIdentifier:pid];
         checkout=frontBagOffer(app,clean(window[@"title"]),wid,&point);
+        if (!checkout) genericCheckout=checkoutAtPointer(app,wid,point);
     }
     NSString *selection = selectedPassage(window, point);
     dispatch_semaphore_t done=dispatch_semaphore_create(0);
@@ -1501,6 +1609,12 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
                         NSMutableDictionary *withOffer=[result mutableCopy];
                         withOffer[@"bookingTitle"]=@"Check-in bags · Ryanair";
                         withOffer[@"bookingBody"]=checkout;
+                        result=withOffer;
+                    } else if (genericCheckout && [genericCheckout isEqual:checkoutAtPointer(
+                        [NSRunningApplication runningApplicationWithProcessIdentifier:pid],wid,point)]) {
+                        NSMutableDictionary *withOffer=[result mutableCopy];
+                        withOffer[@"bookingTitle"]=[@"Checked bags · " stringByAppendingString:[NSURL URLWithString:genericCheckout[@"origin"]].host];
+                        withOffer[@"checkoutEvidence"]=genericCheckout;
                         result=withOffer;
                     } else if (fareWindow(title)) {
                         BOOL airline = browser(window[@"bundle"]) &&
