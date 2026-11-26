@@ -164,8 +164,8 @@
         </div>
         <figure id="demo-panel" role="tabpanel" aria-labelledby="writing">
           <div class="player">
-            <video controls playsinline muted preload="none" poster="media/writing.png?cut=4" aria-describedby="caption" aria-label="Writing walkthrough">
-              <track kind="captions" srclang="en" label="English" src="media/writing.vtt?cut=4" />
+            <video controls playsinline muted preload="none" poster="media/writing.png?cut=5" aria-describedby="caption" aria-label="Writing walkthrough">
+              <track kind="captions" srclang="en" label="English" src="media/writing.vtt?cut=5" />
             </video>
             <div class="film" hidden>
               <div class="film-screen">
@@ -186,13 +186,13 @@
             </div>
             <img class="direct-recording" alt="Writing walkthrough" hidden />
             <button type="button" class="cover" aria-label="Play Writing walkthrough" hidden>
-              <img src="media/writing.png?cut=4" width="1440" height="720" alt="" />
+              <img src="media/writing.png?cut=5" width="1440" height="720" alt="" />
               <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 3.6a1 1 0 0 1 1.5-.86l14 8.4a1 1 0 0 1 0 1.72l-14 8.4A1 1 0 0 1 6 20.4z"/></svg>
             </button>
           </div>
-          <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="media/writing.gif?cut=4">Open the animation</a></p>
+          <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="media/writing.gif?cut=5">Open the animation</a></p>
           <figcaption id="caption">Trace a claim in a TextEdit essay to a reading note and name the witness.</figcaption>
-          <noscript><p><a href="media/writing.gif?cut=4">Watch Writing</a> <a href="media/groceries.gif?cut=4">Watch Groceries</a> <a href="media/baggage.gif?cut=4">Watch Flight</a></p></noscript>
+          <noscript><p><a href="media/writing.gif?cut=5">Watch Writing</a> <a href="media/groceries.gif?cut=5">Watch Groceries</a> <a href="media/baggage.gif?cut=5">Watch Flight</a></p></noscript>
         </figure>
       </section>
     </main>
@@ -218,7 +218,7 @@
       function preparePlayer(tab, file) {
         closePlayer?.();
         const base = 'media/' + file;
-        const media = extension => base + '.' + extension + '?cut=4';
+        const media = extension => base + '.' + extension + '?cut=5';
         const animationUrl = media('gif');
         const label = tab.textContent + ' walkthrough';
         const controller = new AbortController();
@@ -254,7 +254,7 @@
           cover.setAttribute('aria-busy', 'true');
           try {
             const [module, response] = await Promise.all([
-              import('./film.js?cut=4'), fetch(animationUrl, {signal}),
+              import('./film.js?cut=5'), fetch(animationUrl, {signal}),
             ]);
             if (!response.ok) throw new Error('Recording unavailable');
             const bytes = await response.arrayBuffer();
