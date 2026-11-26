@@ -546,22 +546,112 @@ test('a requested export arrives after reopening and waits for consent', async (
   }
 });
 
+test.describe('website walkthroughs', () => {
+  test.use({hasTouch: true, viewport: {width: 393, height: 852}});
+
+  test('tap each recording, play and seek, then reopen the selected tab', async ({
+    page,
+  }) => {
+    await page.goto('/website/index.html');
+    const player = page.locator('video');
+    for (const [title, file] of [
+      ['Writing', 'writing'],
+      ['Groceries', 'groceries'],
+      ['Flight', 'baggage'],
+    ]) {
+      const tab = page.getByRole('tab', {name: title});
+      await tab.tap();
+      await expect(tab).toHaveAttribute('aria-selected', 'true');
+      await expect(player.locator('track')).toHaveAttribute(
+        'src',
+        `media/${file}.vtt`,
+      );
+      await page.getByRole('button', {name: `Play ${title} walkthrough`}).tap();
+      await expect
+        .poll(() =>
+          player.evaluate(
+            (v: HTMLVideoElement, slug: string) =>
+              new URL(v.currentSrc).pathname.endsWith('/' + slug + '.mp4') &&
+              !v.paused &&
+              !v.error &&
+              v.currentTime > 0.15 &&
+              v.getVideoPlaybackQuality().totalVideoFrames > 1,
+            file,
+          ),
+        )
+        .toBe(true);
+      const frames = await player.evaluate((v: HTMLVideoElement) => {
+        v.currentTime = v.duration / 2;
+        return v.getVideoPlaybackQuality().totalVideoFrames;
+      });
+      await expect
+        .poll(() =>
+          player.evaluate((v: HTMLVideoElement) =>
+            !v.seeking && v.currentTime > v.duration / 2
+              ? v.getVideoPlaybackQuality().totalVideoFrames
+              : 0,
+          ),
+        )
+        .toBeGreaterThan(frames);
+    }
+    await page.reload();
+    await expect(
+      page.getByRole('button', {name: 'Play Flight walkthrough'}),
+    ).toBeVisible();
+    await page.getByRole('tab', {name: 'Flight'}).focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(
+      page.getByRole('button', {name: 'Play Writing walkthrough'}),
+    ).toBeVisible();
+  });
+
+  test('recover from a failed stream and offer a download if the whole file also fails', async ({
+    page,
+  }) => {
+    const pattern = '**/media/*.mp4*';
+    await page.route(pattern, route =>
+      route.request().resourceType() === 'media'
+        ? route.abort()
+        : route.continue(),
+    );
+    await page.goto('/website/index.html#groceries');
+    await page.getByRole('button', {name: 'Play Groceries walkthrough'}).tap();
+    const player = page.locator('video');
+    await expect
+      .poll(() =>
+        player.evaluate(
+          (v: HTMLVideoElement) =>
+            v.currentSrc.startsWith('blob:') &&
+            !v.error &&
+            v.currentTime > 0.15,
+        ),
+      )
+      .toBe(true);
+    await page.unroute(pattern);
+    await page.route(pattern, route => route.abort());
+    await page.getByRole('tab', {name: 'Flight'}).tap();
+    await page.getByRole('button', {name: 'Play Flight walkthrough'}).tap();
+    const download = page.getByRole('link', {name: 'Download the recording'});
+    await expect(download).toBeVisible();
+    await expect(download).toHaveAttribute('href', /media\/baggage\.mp4/);
+    await page.unroute(pattern);
+    await page.getByRole('button', {name: 'Play Flight walkthrough'}).tap();
+    await expect
+      .poll(() =>
+        player.evaluate(
+          (v: HTMLVideoElement) => !v.error && v.currentTime > 0.15,
+        ),
+      )
+      .toBe(true);
+    await expect(download).toBeHidden();
+  });
+});
+
 test('paper, brush and downloadable local Mac archive', async ({
   page,
 }, info) => {
   await page.goto('/website/index.html');
   await expect(page.getByRole('heading', {name: 'Beside'})).toBeVisible();
-  const player = page.locator('video');
-  const gallery = page.getByRole('tablist', {name: 'Choose a walkthrough'});
-  await expect(gallery.getByRole('tab', {selected: true})).toHaveText('Writing');
-  await gallery.getByRole('tab', {name: 'Groceries'}).click();
-  await expect(player).toHaveAttribute('src', 'media/groceries.mp4');
-  await page.keyboard.press('ArrowRight');
-  await expect(player).toHaveAttribute('src', 'media/baggage.mp4');
-  await page.reload();
-  await expect(gallery.getByRole('tab', {selected: true})).toHaveText('Flight');
-  await gallery.getByRole('tab', {name: 'Writing'}).click();
-  await expect(player).toHaveAttribute('src', 'media/writing.mp4');
   await page.mouse.move(80, 80);
   await page.mouse.down();
   await page.mouse.move(165, 105, {steps: 12});
