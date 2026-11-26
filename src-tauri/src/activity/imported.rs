@@ -34,6 +34,7 @@ pub(super) fn replace(s: &Store, kind: &str, notes: &[[String; 3]], epoch: &Valu
     if &s.get("activityEpoch")? != epoch {
         return Err("The notebook changed during the import. Try the import again.".into());
     }
+    let cfg = config(s)?;
     let mut db = s.db.lock().unwrap();
     let tx = db.transaction().msg()?;
     tx.execute("DELETE FROM imported_passages WHERE kind=?", [kind])
@@ -55,6 +56,7 @@ pub(super) fn replace(s: &Store, kind: &str, notes: &[[String; 3]], epoch: &Valu
             }
         }
     }
+    if kind=="note" {super::baggage::refresh_recent(&tx,&cfg,Utc::now().timestamp())?;}
     tx.execute(
         "INSERT OR REPLACE INTO kv VALUES ('activityEpoch',?)",
         [json!(id()).to_string()],

@@ -1,5 +1,6 @@
 pub mod imported;
 pub mod mail_archive;
+pub(crate) mod baggage;
 mod connections;
 mod lists;
 mod shortfall;
@@ -432,7 +433,7 @@ pub(crate) fn ingest(s: &Store, captured: &Value, row: &Value, stamp: i64) -> Re
     let mut db = s.db.lock().unwrap();
     let tx = db.transaction().msg()?;
     let key = id();
-    let wrote=tx.execute("INSERT INTO activity SELECT ?1,?2,?3,?4,?5,?6 WHERE (SELECT json_extract(v,'$.generation') FROM kv WHERE k='activitySettings')=?7 AND NOT EXISTS(SELECT 1 FROM activity WHERE source=?2 AND digest=?6 AND stamp>=?5-1800)",params![key,source,title,body,stamp,digest,c["generation"].as_str()]).msg()?;
+    let wrote=tx.execute("INSERT INTO activity SELECT ?1,?2,?3,?4,?5,?6 WHERE (SELECT json_extract(v,'$.generation') FROM kv WHERE k='activitySettings')=?7 AND COALESCE((SELECT digest FROM activity WHERE source=?2 AND title=?3 AND stamp>=?5-1800 ORDER BY stamp DESC,rowid DESC LIMIT 1),'')!=?6",params![key,source,title,body,stamp,digest,c["generation"].as_str()]).msg()?;
     if wrote == 1 {
         let excerpt = body.chars().take(500).collect::<String>();
         tx.execute(
@@ -440,6 +441,15 @@ pub(crate) fn ingest(s: &Store, captured: &Value, row: &Value, stamp: i64) -> Re
             params![key, crate::local::embedding(&format!("{title}. {excerpt}"))],
         )
         .msg()?;
+    }
+    if baggage::booking(&title, &body) {
+        let current = if wrote == 1 {key.clone()} else {
+            tx.query_row("SELECT id FROM activity WHERE source=? AND title=? AND digest=? ORDER BY stamp DESC,rowid DESC LIMIT 1", params![source,title,digest], |r|r.get(0)).msg()?
+        };
+        baggage::prepare(&tx, &current, &title, &body, stamp, &c)?;
+    } else if wrote == 1 && (title.starts_with("Notes · ") || title.ends_with(" · TextEdit active"))
+        && title.to_lowercase().contains("packing") {
+        baggage::refresh_recent(&tx,&c,stamp)?;
     }
     if let Some(image) = preview.filter(|_| wrote == 1) {
         tx.execute(
@@ -1366,6 +1376,7 @@ pub fn ask_with_phases(
         return Err("Ask a question under 3,000 characters.".into());
     }
     let epoch = s.get("activityEpoch")?;
+    if let Some(answer) = baggage::answer(s, a, question, &epoch)? { return Ok(answer); }
     let turn_id = a["turn"].as_str().unwrap_or("turn");
     if let Some(id) = a["relatedSource"].as_str() {
         let cfg = config(s)?;

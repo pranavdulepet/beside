@@ -154,6 +154,7 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
         "meetingNotes" => crate::meetings::notes(s),
         "activityVision" => crate::weights::vision(s),
         "activityAsk" => crate::activity::ask(s, a),
+        "activitySource" if a["id"].as_str().is_some_and(|v| v.starts_with("apple-note:")) => crate::activity::imported::source(s,text(a,"id")?),
         "activitySource" => crate::activity::source(s, text(a, "id")?),
         "activityCorrect" => crate::activity::correct(s, a),
         "activityForget" => crate::activity::forget(s, a),

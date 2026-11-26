@@ -1,15 +1,12 @@
-# Would I make the last ferry?
+# Do I need an extra bag?
 
-[Watch the walkthrough (MP4)](https://github.com/pranavdulepet/beside/releases/download/mac-1.4.3/beside-first-question.mp4)
+[Watch the Mac walkthrough](https://pranavdulepet.github.io/beside/#demo)
 
-Earlier, you read an email from the ferry operator. Now you’re booking a Friday train to Bayport Pier. The ticket page gives the arrival time, **7:40 PM**. The ferry schedule is back in your inbox.
+1. With screen memory on, open your trip’s packing list in Notes or a named TextEdit document. You can also use a list already imported from Apple Notes.
+2. Open the booking with its carry-on allowance visible. Beside can prepare a reference to a list named for the trip, such as **Japan packing list**, when the booking identifies the same trip.
+3. Point at the booking, tap **Option–Shift–Space**, and ask **“Do I need an extra bag?”** If your list has no verified packed weight, Beside asks for the scale reading. Reply with a weight such as **8.4 kg**. On a 7 kg fare, that is **1.4 kg over**.
+4. Expand the source beneath the answer to read the allowance. Press **Esc** to return to the booking.
 
-1. Point at the train and summon Beside with **Option–Shift–Space**.
-2. Ask **“Does this train connect with the last ferry?”** Beside checks the arrival against the earlier email. The last ferry leaves at **7:15 PM**, before the train arrives.
-3. Click **Mail · Friday crossing** under the answer. Read the operator’s exact line and keep looking for an earlier train.
+The recording uses the installed Mac app, a fictional Japan reservation and a local text file. This check compares an explicit kilogram carry-on limit and measured weight. Buying baggage also depends on the ticket’s other allowances and options.
 
-![The train ticket beside Beside’s answer and the email line it used.](media/ferry-connection.png)
-
-To try this yourself, turn on **All displays** before opening the email. Beside can then recall the passage after you switch to the ticket page. [First-time setup](../README.md#try-beside)
-
-The recording uses fictional travel details, Beside’s floating interface, an isolated notebook and local Inkling. A browser test supplies the passage under the pointer in place of native macOS capture. The video trims the model wait.
+[First-time setup](../README.md#try-beside)

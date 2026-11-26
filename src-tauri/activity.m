@@ -1031,7 +1031,8 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
         NSString *line=clean(attribute((__bridge AXUIElementRef)el,kAXTitleAttribute));
         if (!line.length) line=clean(attribute((__bridge AXUIElementRef)el,kAXValueAttribute));
         if (!line.length) line=clean(attribute((__bridge AXUIElementRef)el,kAXDescriptionAttribute));
-        return line.length && line.length<1800 ? @{@"source":source,@"app":window[@"app"],@"line":line} : nil;
+        NSString *title=clean(attribute((__bridge AXUIElementRef)page,kAXTitleAttribute));
+        return line.length && line.length<1800 ? @{@"source":source,@"app":window[@"app"],@"pageTitle":title ?: @"",@"line":line} : nil;
     }
     if (!displays && ![settings[@"sources"] containsObject:source]) return nil;
     if (!availableSession() || !screenAccess(YES)) return nil;
@@ -1113,6 +1114,17 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
                         @"cursor":@{@"x_pct":@(xPct), @"y_pct":@(yPct)},
                         @"windowFrame":@{@"x":@(round(frame.origin.x)), @"y":@(round(frame.origin.y)), @"w":@(round(frame.size.width)), @"h":@(round(frame.size.height))}
                     };
+                    NSString *title=w.title ?: @"";
+                    if ([title rangeOfString:@"booking|reservation|flight confirmation|flight itinerary|manage trip|check-in"
+                                    options:NSRegularExpressionSearch|NSCaseInsensitiveSearch].location != NSNotFound) {
+                        NSDictionary *page=recognize(image,source,title,NO,NO);
+                        if (page[@"body"]) {
+                            NSMutableDictionary *withPage=[result mutableCopy];
+                            withPage[@"bookingTitle"]=title;
+                            withPage[@"bookingBody"]=page[@"body"];
+                            result=withPage;
+                        }
+                    }
                     if ([window[@"bundle"] isEqual:@"com.apple.MobileSMS"] && line.length) {
                         // Sender lanes and the pointed words come from the same saved frame.
                         NSArray *rows = visibleMessageTurns(image,frame.size)[@"turns"];

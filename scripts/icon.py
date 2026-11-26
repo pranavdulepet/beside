@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-BUTTER = "#F5E5A6"
+PAPER = "#F6F3EB"
 INK = "#48538F"
 ICONS = Path("src-tauri/icons")
 
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     mark.resize((256,256), Image.Resampling.LANCZOS).save("public/materials/beside.png")
     signature(512, "black").resize((36,36), Image.Resampling.LANCZOS).save(ICONS/"tray.png")
     tile = Image.new("RGBA", (1024,1024))
-    ImageDraw.Draw(tile).rounded_rectangle((48,48,976,976), radius=204, fill=BUTTER)
+    ImageDraw.Draw(tile).rounded_rectangle((48,48,976,976), radius=204, fill=PAPER)
     tile.alpha_composite(mark.resize((748,748), Image.Resampling.LANCZOS), (138,138))
     tile.save(ICONS/"icon.png")
     tile.save(ICONS/"icon.icns", format="ICNS")

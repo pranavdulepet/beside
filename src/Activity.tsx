@@ -155,6 +155,11 @@ function Evidence({
   }, [id]);
   const heading = cleanTitle(row?.title, row?.label);
   const lines = cleanScreenText(row?.body, heading);
+  if (row?.kind === 'note') return <article className="evidence-card">
+    <strong>{row.title}</strong>
+    <p className="evidence-raw-body">{row.body}</p>
+    {onClose && <button className="bar-link" onClick={onClose}>Close source</button>}
+  </article>;
   const summaryLines = lines.slice(0, 4);
   return (
     <div className="evidence-card">
@@ -1251,6 +1256,7 @@ function compactTurnsForStorage(turns: Row[]): Row[] {
     quote: t.quote,
     quoteTitle: t.quoteTitle,
     supportingLine: t.supportingLine,
+    baggageAwaitingWeight: t.baggageAwaitingWeight,
     pointApp: t.pointApp,
     pointLine: t.pointLine,
     epoch: t.epoch,
@@ -1775,6 +1781,7 @@ export function ActivitySheet({
         files: prior?.files?.map((f: Row) => f.path) || [],
         previous: prior?.question,
         awaitingSearchCity: prior?.awaitingSearchCity === true,
+        baggageAwaitingWeight: prior?.baggageAwaitingWeight === true,
         clarifyConnection: prior?.clarifyConnection === true,
         allowGeneral: true,
         history: (fresh ? [] : turns.filter(t => !t.proposedQuery))
@@ -2494,7 +2501,7 @@ export function ActivitySheet({
                       : t.supportingLine && (
                           <details className="margin-footnote">
                             <summary role="button">
-                              {t.sources?.[0]?.title?.replace(/^Screen \d+ · (.+) active$/, '$1') ||
+                              {t.sources?.[0]?.title && cleanTitle(t.sources[0].title).replace(/( · [^·]+)\1$/, '$1') ||
                                 t.files?.[0]?.name || 'Supporting passage'}
                             </summary>
                             <blockquote>{t.supportingLine}</blockquote>

@@ -53,7 +53,7 @@ extern "C" fn receive(raw: *const c_char) {
     let Some(app) = APP.get().cloned() else {
         return;
     };
-    let Ok(payload) = serde_json::from_slice::<Value>(unsafe { CStr::from_ptr(raw) }.to_bytes())
+    let Ok(mut payload) = serde_json::from_slice::<Value>(unsafe { CStr::from_ptr(raw) }.to_bytes())
     else {
         return;
     };
@@ -74,6 +74,11 @@ extern "C" fn receive(raw: *const c_char) {
             }
             return;
         }
+        let mut anchor = Value::Null;
+        if let Ok(Some(id)) = activity::baggage::pin(&s, &payload["point"], &payload["generation"]) {
+            anchor = json!({"id":id, "title":payload["point"]["bookingTitle"], "label":payload["point"]["app"]});
+            payload["point"]["bookingId"] = json!(id);
+        }
         if let Ok(mut slot) = LAST.lock() {
             *slot = Some(Gesture {
                 id: id(),
@@ -82,7 +87,12 @@ extern "C" fn receive(raw: *const c_char) {
                 time: Instant::now(),
             });
         }
-        crate::present_activity_sheet(&app, Value::Null);
+        // Deliver the destination before focusing an already-mounted composer.
+        // A newly mounted sheet also checks the pending intent on startup.
+        if app.get_webview_window("activity").is_some() {
+            let _ = app.emit_to("activity", "voice-ready", ());
+        }
+        crate::present_activity_sheet(&app, anchor);
         if let Some(w) = app.get_webview_window("activity") {
             let inner = w.clone();
             let _ = w.run_on_main_thread(move || {

@@ -64,3 +64,8 @@ END;
 CREATE VIRTUAL TABLE IF NOT EXISTS imported_passages USING fts5(
     id UNINDEXED, title, body, kind UNINDEXED, tokenize='porter unicode61'
 );
+
+CREATE TABLE IF NOT EXISTS prepared_baggage (
+    booking TEXT PRIMARY KEY REFERENCES activity(id) ON DELETE CASCADE,
+    note TEXT
+);

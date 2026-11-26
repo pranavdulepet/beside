@@ -27,8 +27,9 @@ jobs:
       - name: Assemble the public site
         run: |
           mkdir -p site/licenses
-          cp website/index.html public/fonts/Geist.ttf public/materials/{paper,beside}.png LICENSE site/
-          cp licenses/{Paper-and-ink,Geist}.txt site/licenses/
+          cp website/index.html public/fonts/{Geist,Newsreader}.ttf public/materials/{paper,beside}.png LICENSE site/
+          cp -R website/media site/media
+          cp licenses/{Paper-and-ink,Geist,Newsreader}.txt site/licenses/
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: site

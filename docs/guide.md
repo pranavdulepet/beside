@@ -56,6 +56,11 @@ grep -rin 'ferry' desk scroll
 
 These commands search the readable files. Beside also searches its encrypted screen history and imported passages, which a Markdown search cannot see. Use Memory to correct or retire a dated fact. Beside regenerates its Markdown summary from those records.
 
+
+### While booking a flight
+
+Beside prepares pointers to the observed booking and a packing list whose title matches the trip. These pointers live in the encrypted notebook. When you ask about an extra bag, Beside checks the original sources and compares kilograms locally. If the packed weight is missing, it asks you to weigh the bag. A changed fare can require a new allowance. The originals stay where you put them.
+
 ## Models, web search and sharing
 
 The floating assistant defaults to a local model. If you explicitly enable cloud context sharing, the selected provider can receive permitted screen text, images, file excerpts and saved passages. Private memories and local-only corrections are excluded. Model downloads are separate from the app. The model picker checks available memory and disk space, and verifies a bundled download’s digest. If you already run Ollama or LM Studio, open local model setup and select an available model.
