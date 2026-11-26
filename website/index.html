@@ -119,6 +119,9 @@
       @media (max-width: 420px) {
         [role="tab"] { font-size: 14px; padding-inline: 7px; }
       }
+      @media (max-width: 360px) {
+        [role="tab"] { padding-inline: 3px; }
+      }
       :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
       figure { margin: 0; }
       noscript a { display: inline; padding: 0; font: inherit; }
@@ -185,12 +188,12 @@
       <small>Apple silicon · macOS 14+ · <a href="https://github.com/pranavdulepet/beside#try-beside">Install guide</a></small>
       <section id="demo" aria-label="Beside on a Mac">
         <div class="picker" role="tablist" aria-label="Choose a walkthrough">
-          <button id="learning" role="tab" aria-controls="demo-panel" aria-selected="true" data-caption="Change a preference, then watch Beside use it in the next project update.">Correction</button>
-          <button id="groceries" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="Two more people are coming. Buy 8 tortillas, skip the beans, and paste the list into Notes.">Groceries</button>
-          <button id="email" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="While reading an email in Mail, copy the printer’s PDF settings and deadline from a saved note.">Print handoff</button>
-          <button id="setup" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="Connect local Inkling, turn on screen memory, and save a first preference.">Setup</button>
+          <button id="tab-learning" role="tab" aria-controls="demo-panel" aria-selected="true" data-caption="Change a preference, then watch Beside use it in the next project update.">Correction</button>
+          <button id="tab-groceries" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="Two more people are coming. Buy 8 tortillas, skip the beans, and paste the list into Notes.">Groceries</button>
+          <button id="tab-email" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="While reading an email in Mail, copy the printer’s PDF settings and deadline from a saved note.">Print handoff</button>
+          <button id="tab-setup" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="Connect local Inkling, turn on screen memory, and save a first preference.">Setup</button>
         </div>
-        <figure id="demo-panel" role="tabpanel" aria-labelledby="learning">
+        <figure id="demo-panel" role="tabpanel" aria-labelledby="tab-learning">
           <div class="player">
             <video controls playsinline muted preload="none" poster="media/learning.png?take=8" aria-describedby="caption" aria-label="Correction walkthrough">
               <track kind="captions" srclang="en" label="English" src="media/learning.vtt?take=8" />
@@ -361,21 +364,21 @@
           direct.hidden = true;
         };
       }
-      function selectDemo(id, updateAddress) {
-        const tab = tabs.find(item => item.id === id) || tabs[0];
+      function selectDemo(tab, updateAddress) {
+        const id = tab.id.slice(4);
         if (closePlayer && tab.getAttribute('aria-selected') === 'true') return;
         for (const item of tabs) {
           item.setAttribute('aria-selected', String(item === tab));
           item.tabIndex = item === tab ? 0 : -1;
         }
-        const file = tab.dataset.file || tab.id;
+        const file = tab.dataset.file || id;
         preparePlayer(tab, file);
         panel.setAttribute('aria-labelledby', tab.id);
         caption.textContent = tab.dataset.caption;
-        if (updateAddress) history.replaceState(null, '', '#' + tab.id);
+        if (updateAddress) history.replaceState(null, '', '#' + id);
       }
       for (const [index, tab] of tabs.entries()) {
-        tab.onclick = () => selectDemo(tab.id, true);
+        tab.onclick = () => selectDemo(tab, true);
         tab.onkeydown = event => {
           const next = {ArrowLeft: (index + tabs.length - 1) % tabs.length,
             ArrowRight: (index + 1) % tabs.length, Home: 0, End: tabs.length - 1}[event.key];
@@ -384,10 +387,10 @@
           const choice = tabs[next];
           choice.focus({preventScroll: true});
           choice.scrollIntoView({block: 'nearest', inline: 'nearest'});
-          selectDemo(choice.id, true);
+          selectDemo(choice, true);
         };
       }
-      const readAddress = () => selectDemo(location.hash.slice(1), false);
+      const readAddress = () => selectDemo(tabs.find(tab => tab.id === 'tab-' + location.hash.slice(1)) || tabs[0], false);
       addEventListener('hashchange', readAddress);
       readAddress();
       const canvas = document.querySelector('canvas');
