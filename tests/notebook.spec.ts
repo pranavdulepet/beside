@@ -501,7 +501,7 @@ test('a requested export arrives after reopening and waits for consent', async (
 
 test.describe('website walkthroughs', () => {
   const demos = [
-    ['Correction', 'learning'],
+    ['Writing', 'writing'],
     ['Groceries', 'groceries'],
     ['Flight', 'baggage'],
   ];
@@ -524,7 +524,7 @@ test.describe('website walkthroughs', () => {
     expect(Math.min(...rects.map(rect => rect.height))).toBeGreaterThanOrEqual(44);
     expect(Math.min(...rects.map(rect => rect.left))).toBeGreaterThanOrEqual(0);
     expect(Math.max(...rects.map(rect => rect.right))).toBeLessThanOrEqual(320);
-    const first = page.getByRole('tab', {name: 'Correction'});
+    const first = page.getByRole('tab', {name: 'Writing'});
     await first.focus();
     await page.keyboard.press('End');
     await expect(page.getByRole('tab', {name: 'Flight'})).toBeFocused();
@@ -725,7 +725,7 @@ test.describe('website walkthroughs', () => {
         'href',
         'https://github.com/pranavdulepet/beside/raw/refs/heads/main/website/media/baggage.mp4',
       );
-      await choose(page, 'Correction');
+      await choose(page, 'Writing');
       await expect(backup).toBeHidden();
     });
 
@@ -754,7 +754,7 @@ test.describe('website walkthroughs', () => {
       expect(
         await animation.evaluate((img: HTMLImageElement) => img.naturalWidth),
       ).toBe(1024);
-      await page.getByRole('tab', {name: 'Correction'}).tap();
+      await page.getByRole('tab', {name: 'Writing'}).tap();
       await expect(animation).toBeHidden();
     });
   });

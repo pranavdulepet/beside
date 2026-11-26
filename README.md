@@ -14,9 +14,9 @@ Beside is a floating assistant for your Mac. Point at what you’re working on a
 
 ## See it in use
 
-[![Beside using a saved writing preference in Apple Notes](website/media/learning.png)](https://pranavdulepet.github.io/beside/#learning)
+[![A sentence selected in the TextEdit essay “Who counted the gates?”](website/media/writing.png)](https://pranavdulepet.github.io/beside/#writing)
 
-- Ask Beside to open project updates with the risk. In a fresh chat, see how it starts a different brief. [A correction that sticks](https://pranavdulepet.github.io/beside/#learning)
+- An essay credits archaeologists with finding 64 gates. Ask Beside to check the research notes, inspect the two passages, and revise the sentence in TextEdit. [Writing](https://pranavdulepet.github.io/beside/#writing)
 - Add two dinner guests, check what’s in the pantry, and paste the revised Trader Joe’s list into Notes. [Groceries](https://pranavdulepet.github.io/beside/#groceries)
 - At an airline’s checked-bag selector, ask “Should I add a bag?” See how Beside finds the packing note for the right trip, checks the arrival forecast and explains whether the extra fee is worth paying. [Flight](https://pranavdulepet.github.io/beside/#flight)
 

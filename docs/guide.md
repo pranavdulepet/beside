@@ -78,9 +78,9 @@ When dinners have quantities and a head count, Beside can handle changes in the 
 
 You can also ask “Make a shopping list from my meal plan” in another app. Beside looks for a saved, itemized plan. If two fit, it asks which one you mean.
 
-### Check a print handoff in Mail
+### Check a claim while you write
 
-While reading the printer’s email, point at the request, tap **⌥⇧Space** and ask “What did the printer ask for again? Check my notes.” Beside can find the saved production note and give you its wording, including the file format, bleed and deadline. Click the source to read the passage or use **Copy** to take the wording into your reply. You decide what to send.
+In TextEdit, select a sentence and choose **TextEdit → Services → Ask Beside about selection**. Ask “Do my notes actually support this?” When a reply draws on more than one note, open **What each source supports** to check the passages. Use **Copy** to paste the revision into your draft. [Try it with the Chandragupta Maurya essay](walkthroughs.md)
 
 ### Carry a correction into your next draft
 

@@ -182,18 +182,18 @@
       <small>Apple silicon · macOS 14+ · <a href="https://github.com/pranavdulepet/beside#try-beside">Install guide</a></small>
       <section id="demo" aria-label="Beside on a Mac">
         <div class="picker" role="tablist" aria-label="Choose a walkthrough">
-          <button id="tab-learning" role="tab" aria-controls="demo-panel" aria-selected="true" data-caption="Change a preference, then watch Beside use it in the next project update.">Correction</button>
-          <button id="tab-groceries" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-caption="Two more people are coming. Buy 8 tortillas, skip the beans, and paste the list into Notes.">Groceries</button>
+          <button id="tab-writing" role="tab" aria-controls="demo-panel" aria-selected="true" data-take="10" data-caption="Who counted the 64 gates? Check two sources while writing about Chandragupta Maurya.">Writing</button>
+          <button id="tab-groceries" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-take="8" data-caption="Two more people are coming. Buy 8 tortillas, skip the beans, and paste the list into Notes.">Groceries</button>
           <button id="tab-flight" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-file="baggage" data-ratio="90 / 49" data-take="9" data-caption="At Ryanair checkout, Beside checks the Athens packing list and forecast before recommending you skip the £41.49 extra bag.">Flight</button>
         </div>
-        <figure id="demo-panel" role="tabpanel" aria-labelledby="tab-learning">
+        <figure id="demo-panel" role="tabpanel" aria-labelledby="tab-writing">
           <div class="player">
-            <video controls playsinline muted preload="none" poster="media/learning.png?take=8" aria-describedby="caption" aria-label="Correction walkthrough">
-              <track kind="captions" srclang="en" label="English" src="media/learning.vtt?take=8" />
+            <video controls playsinline muted preload="none" poster="media/writing.png?take=10" aria-describedby="caption" aria-label="Writing walkthrough">
+              <track kind="captions" srclang="en" label="English" src="media/writing.vtt?take=10" />
             </video>
             <div class="film" hidden>
               <div class="film-screen">
-                <canvas width="1024" height="640" role="img" aria-label="Correction walkthrough"></canvas>
+                <canvas width="1024" height="640" role="img" aria-label="Writing walkthrough"></canvas>
                 <p class="film-cue" hidden></p>
               </div>
               <div class="transport" role="group" aria-label="Recording controls">
@@ -208,16 +208,16 @@
                 </button>
               </div>
             </div>
-            <img class="direct-recording" alt="Correction walkthrough" tabindex="-1" hidden />
-            <button type="button" class="cover" aria-label="Play Correction walkthrough" hidden>
-              <img src="media/learning.png?take=8" width="1536" height="960" alt="" />
+            <img class="direct-recording" alt="Writing walkthrough" tabindex="-1" hidden />
+            <button type="button" class="cover" aria-label="Play Writing walkthrough" hidden>
+              <img src="media/writing.png?take=10" width="1536" height="960" alt="" />
               <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 3.6a1 1 0 0 1 1.5-.86l14 8.4a1 1 0 0 1 0 1.72l-14 8.4A1 1 0 0 1 6 20.4z"/></svg>
             </button>
           </div>
-          <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="https://github.com/pranavdulepet/beside/raw/refs/heads/main/website/media/learning.mp4" download>Download the MP4</a></p>
-          <figcaption id="caption">Change a preference, then watch Beside use it in the next project update.</figcaption>
+          <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="https://github.com/pranavdulepet/beside/raw/refs/heads/main/website/media/writing.mp4" download>Download the MP4</a></p>
+          <figcaption id="caption">Who counted the 64 gates? Check two sources while writing about Chandragupta Maurya.</figcaption>
           <noscript><p>Open a recording in your media player.</p><p>
-            <a href="media/learning.mp4">Correction</a> · <a href="media/groceries.mp4">Groceries</a> · <a href="media/baggage.mp4">Flight</a>
+            <a href="media/writing.mp4">Writing</a> · <a href="media/groceries.mp4">Groceries</a> · <a href="media/baggage.mp4">Flight</a>
           </p></noscript>
         </figure>
       </section>
@@ -240,7 +240,7 @@
       function preparePlayer(tab, file) {
         closePlayer?.();
         const base = 'media/' + file;
-        const media = extension => base + '.' + extension + '?take=' + (tab.dataset.take || '8');
+        const media = extension => base + '.' + extension + '?take=' + tab.dataset.take;
         panel.style.setProperty('--film-ratio', tab.dataset.ratio || '16 / 10');
         const animationUrl = media('gif');
         const label = tab.textContent + ' walkthrough';
