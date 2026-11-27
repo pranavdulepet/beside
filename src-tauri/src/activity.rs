@@ -1616,12 +1616,26 @@ pub fn ask_with_phases(
         return Err("Ask a question under 3,000 characters.".into());
     }
     let epoch = s.get("activityEpoch")?;
-    if a["forceWeb"] == true {
+    let public_topic = if a["forceWeb"] == true {
         if !crate::web_search::public_typed_lookup(question) {
             return Ok(json!({"answer":"What public topic should I search for?","awaitingSearchTopic":true,"manualWebClarification":true,"sources":[],"notes":[],"epoch":epoch}));
         }
+        Some(question.to_owned())
+    } else if a["awaitingSearchTopic"] == true && a["publicQuery"].is_null()
+        && (a["selection"].is_null() || a["manualWebClarification"] == true)
+    {
+        let previous = if a["manualWebClarification"] == true {
+            "look it up"
+        } else {
+            a["previous"].as_str().unwrap_or("")
+        };
+        crate::web_search::clarified_topic(previous, question)
+    } else {
+        None
+    };
+    if let Some(topic) = public_topic {
         phase("web");
-        return guide_answer(s,&json!({"publicQuery":question, "sourcesOnly":true}),question,&epoch,sink,phase);
+        return guide_answer(s, &json!({"publicQuery":topic,"sourcesOnly":true}), &topic, &epoch, sink, phase);
     }
 
     if let Some(answer) = crate::point::ask_on_demand(s, a, question, &epoch, sink, phase)? {
@@ -1738,15 +1752,13 @@ pub fn ask_with_phases(
             json!({"answer":answer,"quote":line,"quoteTitle":row["title"],"epoch":epoch,"brain":brain,"sources":if live || imported {json!([])} else {json!([{"id":id,"title":row["title"],"label":row["label"],"stamp":row["stamp"]}])}}),
         );
     }
-    let force_web = a["forceWeb"] == true;
-    if !force_web && a["publicQuery"].is_null() && a["selection"].is_null() {
+    if a["publicQuery"].is_null() && a["selection"].is_null() {
         if let Some(answer) = menu_from_note(s, a, question, &epoch)? {
             return Ok(answer);
         }
     }
     // Fast-path casual greetings / small talk: never search screen history or files for "hello".
-    if !force_web
-        && a["gesture"].is_null()
+    if a["gesture"].is_null()
         && a["selection"].is_null()
         && a["publicQuery"].is_null()
         && is_small_talk(question)
@@ -1800,7 +1812,7 @@ pub fn ask_with_phases(
     }
     // Only the person's own message can change a standing preference.
     let (saved_memories, explicit_remember_only) =
-        if !force_web && a["publicQuery"].is_null() && a["selection"].is_null() {
+        if a["publicQuery"].is_null() && a["selection"].is_null() {
             match crate::memory::changed_preference(s, a, question, &epoch)? {
                 Some(note) => (vec![note], true),
                 None => crate::memory::remember_from_chat(s, question, &a["turn"].as_str().map(str::to_owned).unwrap_or_else(id), a["chatId"].as_str())?,
@@ -1827,7 +1839,7 @@ pub fn ask_with_phases(
         }
         return Ok(result);
     }
-    if !force_web && a["selection"].is_null() && a["publicQuery"].is_null() {
+    if a["selection"].is_null() && a["publicQuery"].is_null() {
         if let Some(note) = crate::memory::recalled_preference(s, question)? {
             let quote = note["text"].as_str().unwrap_or("");
             let answer = crate::memory::describe_preference(&note);
@@ -1835,39 +1847,30 @@ pub fn ask_with_phases(
             return Ok(json!({"answer":answer,"sources":[],"notes":[],"quote":quote,"quoteTitle":"Your words","workKind":"preference","preferenceId":note["id"],"epoch":epoch}));
         }
     }
-    if !force_web && a["allowGeneral"] == true && a["publicQuery"].is_null() && a["selection"].is_null() {
+    if a["allowGeneral"] == true && a["publicQuery"].is_null() && a["selection"].is_null() {
         if let Some(reply) = shortfall::from_saved_recipe(s, a, question, &epoch)? {
             return Ok(reply);
         }
     }
-    if !force_web && a["allowGeneral"] == true && a["publicQuery"].is_null()
+    if a["allowGeneral"] == true && a["publicQuery"].is_null()
         && connections::requested(question, a)
     {
         phase("memory");
         return connections::answer(s, a, question, &epoch);
-    }
-    if a["awaitingSearchTopic"] == true && a["publicQuery"].is_null() && a["selection"].is_null() {
-        let previous=if a["manualWebClarification"]==true {"look it up"} else {a["previous"].as_str().unwrap_or("")};
-        if let Some(topic)=crate::web_search::clarified_topic(previous,question) {
-            // A typed clarification supplies the terms. Keep the previous screen and chat out of the lookup.
-            phase("web");
-            return guide_answer(s, &json!({"publicQuery":topic,"sourcesOnly":true}), &topic, &epoch, sink, phase);
-        }
     }
     if a["awaitingSearchCity"] == true && crate::web_search::city(question).is_some() {
         if let Some(previous) = a["previous"].as_str().filter(|q| crate::web_search::outing(q, &Value::Null)) {
             return guide_answer(s, a, &format!("{previous} in {question}"), &epoch, sink, phase);
         }
     }
-    if force_web || shopping::asks_for_plan(question)
+    if shopping::asks_for_plan(question)
         || (a["gesture"].is_string() && recall_time(a, question).is_none())
         || a["publicQuery"].is_string()
         || (a["allowGeneral"] == true
             && !a["selection"].is_string()
             && crate::web_search::floating_lookup(question))
     {
-        if force_web
-            || a["publicQuery"].is_string()
+        if a["publicQuery"].is_string()
             || crate::web_search::dictated_query(question).is_some()
             || crate::web_search::floating_lookup(question)
         {
@@ -2910,9 +2913,8 @@ fn guide_answer(
         .as_str()
         .map(str::trim)
         .or(standalone)
-        .or_else(|| (a["forceWeb"] == true).then_some(q))
         .map(str::to_owned);
-    let lookup = web_search::floating_lookup(q) || a["forceWeb"] == true;
+    let lookup = web_search::floating_lookup(q);
     let mut output =
         json!({"sources":[],"notes":[],"epoch":epoch,"pointLine":line,"pointApp":point["app"]});
     let generation = config(s)?["generation"].clone();

@@ -172,27 +172,54 @@ test('reading only on summon survives a restart and never starts the observer', 
   } finally { await closeNotebook(book); }
 });
 
-test('Web in the composer keeps private references local and accepts a bare public topic', async ({page}) => {
-  const book=await fixtureNotebook();
+test('Web in the composer isolates public topics and lets a new private request stay local', async ({page}) => {
+  const book = await fixtureNotebook();
   try {
-    await book.rpc('companionSetup',{step:'ready'});
-    let last:Row={};
-    await openCompanion(page,async(op,args)=>{
-      if(nativeWindow.has(op))return null;
-      if(op==='activityAsk')last=args;
-      return book.rpc(op,args);
+    await book.rpc('companionSetup', {step: 'ready'});
+    let last: Row = {};
+    let result: Row = {};
+    let previews = 0;
+    await openCompanion(page, async (op, args) => {
+      if (nativeWindow.has(op)) return null;
+      if (op === 'activityRecallPreview') previews++;
+      if (op !== 'activityAsk') return book.rpc(op, args);
+      last = args;
+      // A floating sheet may still have a pointed window when the user clarifies a public topic.
+      const request = args.text === 'HTTP/3 status'
+        ? {...args, gesture: 'expired', onDemand: true, selection: 'private screen text'}
+        : args;
+      result = await book.rpc(op, request);
+      return result;
     });
-    const field=page.getByRole('textbox',{name:/Your question|Follow up/});
-    await expect(page.getByRole('button',{name:'Search public web'})).toHaveCount(0);
-    await field.fill('Find this in my email');
-    await page.getByRole('button',{name:'Search public web'}).click();
-    await field.press('Enter');
-    await expect(page.locator('.activity-turn .reply').last()).toContainText('What public topic');
-    expect(last.forceWeb).toBe(true);
-    expect(last.publicQuery).toBeUndefined();
+    const field = page.getByRole('textbox', {name: /Your question|Follow up/});
+    const search = page.getByRole('button', {name: 'Search public web'});
+    await expect(search).toHaveCount(0);
+    async function privateLookup() {
+      await field.fill('Find this in my email');
+      await search.click();
+      await field.press('Enter');
+      await expect(page.locator('.activity-turn .reply').last()).toContainText('What public topic');
+      expect(last.forceWeb).toBe(true);
+      expect(last.publicQuery).toBeUndefined();
+    }
+    await privateLookup();
     await field.fill('Remember that I prefer short recipes.');
     await field.press('Enter');
     await expect(page.locator('.activity-turn .reply').last()).toContainText(/remember|saved|short recipes/i);
     expect(last.forceWeb).toBe(false);
-  } finally {await closeNotebook(book);}
+    if (process.env.BESIDE_LIVE_SEARCH === '1') {
+      await privateLookup();
+      const before = previews;
+      await field.fill('HTTP/3 status');
+      await field.press('Enter');
+      await expect.poll(() => result.publicQuery, {timeout: 90000}).toBe('HTTP/3 status');
+      expect(result.sources).toEqual([]);
+      expect(result.notes).toEqual([]);
+      expect(result.pointLine).toBe('');
+      expect(result.webSources.length).toBeGreaterThan(0);
+      expect(previews).toBe(before);
+    }
+  } finally {
+    await closeNotebook(book);
+  }
 });

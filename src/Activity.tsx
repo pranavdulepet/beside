@@ -1940,11 +1940,12 @@ export function ActivitySheet({
     if (!q || (busy && !fresh)) return;
     const n = ++sequence.current;
     const requestChat = activeChatId.current;
+    const prior = fresh ? undefined : turns.at(-1);
     const selectedText = forceWeb ? '' : activeSelection.current;
     const turn = crypto.randomUUID();
     const at = new Date().toISOString();
     setPreview(null);
-    setPhase(publicQuery ? 'web' : target ? 'capturing' : 'thinking');
+    setPhase(forceWeb || publicQuery ? 'web' : target ? 'capturing' : 'thinking');
     let off: (() => void) | undefined;
     stream('');
     notify('');
@@ -1967,7 +1968,7 @@ export function ActivitySheet({
         return;
       }
       const passage =
-        forceWeb || related || selectedText || target || publicQuery
+        forceWeb || prior?.awaitingSearchTopic || related || selectedText || target || publicQuery
           ? null
           : await call('activityRecallPreview', {
               text: q,
@@ -1994,7 +1995,6 @@ export function ActivitySheet({
           }
         },
       ).catch(() => () => {});
-      const prior = fresh ? undefined : turns.at(-1);
       if (prior?.id) await writes.current;
       const r = await call('activityAsk', {
         forceWeb,
