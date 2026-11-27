@@ -74,6 +74,7 @@ pub fn start(s: Arc<Store>) {
             if !local::idle() {
                 continue;
             }
+            let _ = crate::activity::vectors::backfill(&s, 24);
             if elapsed(&s.get("lastContextIssue").unwrap_or_default()) >= 600 {
                 if let Err(error) = crate::floating_chats::task_context::compact(&s, local::idle) {
                     let _ = s.set("lastContextIssue", &json!(now()));

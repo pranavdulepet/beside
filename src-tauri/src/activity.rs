@@ -9,6 +9,7 @@ mod shortfall;
 mod shopping;
 mod meal_plan;
 pub mod workspace;
+pub(crate) mod vectors;
 use crate::{conversation, models, store::*};
 use chrono::{Local, Utc};
 use rusqlite::params;
@@ -29,10 +30,7 @@ extern "C" {
 const APPS: &[&str] = &["com.apple.mail", "com.apple.MobileSMS", "com.openai.chat"];
 const DAY: i64 = 86400;
 pub fn init(s: &Store) -> Res<()> {
-    s.db.lock()
-        .unwrap()
-        .execute_batch(include_str!("activity.sql"))
-        .msg()?;
+    vectors::init(s)?;
     prune(s)?;
     crate::activity_files::sync(s)
 }
@@ -490,15 +488,15 @@ pub(crate) fn ingest(s: &Store, captured: &Value, row: &Value, stamp: i64) -> Re
             ""
         }
     ));
+    let vector = vectors::passage(&title, &body);
     let mut db = s.db.lock().unwrap();
     let tx = db.transaction().msg()?;
     let key = id();
     let wrote=tx.execute("INSERT INTO activity SELECT ?1,?2,?3,?4,?5,?6 WHERE (SELECT json_extract(v,'$.generation') FROM kv WHERE k='activitySettings')=?7 AND COALESCE((SELECT digest FROM activity WHERE source=?2 AND title=?3 AND stamp>=?5-1800 ORDER BY stamp DESC,rowid DESC LIMIT 1),'')!=?6",params![key,source,title,body,stamp,digest,c["generation"].as_str()]).msg()?;
     if wrote == 1 {
-        let excerpt = body.chars().take(500).collect::<String>();
         tx.execute(
-            "INSERT INTO activity_vectors(event_id,feature) VALUES (?,?)",
-            params![key, crate::local::embedding(&format!("{title}. {excerpt}"))],
+            "INSERT INTO activity_vectors(event_id,space,feature) VALUES (?,?,?)",
+            params![key, vector.space, vector.feature],
         )
         .msg()?;
     }
@@ -816,6 +814,7 @@ pub(crate) fn search_excluding(
     } else {
         None
     };
+    let vector = vectors::embed(question);
     let db = s.db.lock().unwrap();
     let start = Utc::now().timestamp() - 30 * DAY;
     let (since, until) = date
@@ -871,22 +870,19 @@ pub(crate) fn search_excluding(
             }
         }
     }
-    if ranked.len() < 4 && !terms.is_empty() {
-        let mut stmt=db.prepare(&format!("SELECT a.id,a.source,a.title,a.body,a.stamp FROM (SELECT event_id,distance FROM activity_vectors WHERE feature MATCH ? AND k=24 ORDER BY distance) AS hit JOIN activity a ON a.id=hit.event_id WHERE a.stamp>=? AND a.stamp<? AND (?4='' OR a.title<>?4) AND (?5='' OR substr(a.title,-length(?5))<>?5) AND {source_filter} AND hit.distance<0.78 ORDER BY hit.distance LIMIT 3")).msg()?;
+    if !terms.is_empty() {
+        let mut stmt=db.prepare(&format!("SELECT a.id,a.source,a.title,a.body,a.stamp FROM (SELECT event_id,distance FROM activity_vectors WHERE feature MATCH ? AND space=?8 AND k=64 ORDER BY distance) AS hit JOIN activity a ON a.id=hit.event_id WHERE a.stamp>=? AND a.stamp<? AND (?4='' OR a.title<>?4) AND (?5='' OR substr(a.title,-length(?5))<>?5) AND {source_filter} AND hit.distance<0.78 ORDER BY hit.distance,a.stamp DESC,a.id LIMIT 16")).msg()?;
         let rows = stmt
             .query_map(
-                params![crate::local::embedding(question), since, until, excluded_title, excluded_suffix, notes, mail],
+                params![vector.feature, since, until, excluded_title, excluded_suffix, notes, mail, vector.space],
                 event,
             )
             .msg()?;
-        for row in rows {
-            let v = row.msg()?;
-            if found.insert(v["id"].to_string()) {
-                ranked.push(v)
-            }
-        }
+        let semantic = rows.collect::<Result<Vec<_>, _>>().msg()?;
+        ranked = vectors::fuse(ranked, semantic);
+        found = ranked.iter().map(|v| v["id"].to_string()).collect();
     }
-    for id in prior {
+    for id in prior.iter().filter(|_| !notes && !mail && excluded_title.is_empty() && excluded_suffix.is_empty()) {
         if let Ok(v) = db.query_row(
             "SELECT id,source,title,body,stamp FROM activity WHERE id=? AND stamp>=? AND stamp<?",
             params![id, since, until],
@@ -897,7 +893,7 @@ pub(crate) fn search_excluding(
             }
         }
     }
-    if ranked.is_empty()
+    if ranked.is_empty() && !notes && !mail && excluded_title.is_empty() && excluded_suffix.is_empty()
         && (date.is_some()
             || [
                 "recent",
@@ -922,7 +918,7 @@ pub(crate) fn search_excluding(
             .iter()
             .any(|w| lower.contains(w));
         let later = ["after", "happened next"].iter().any(|w| lower.contains(w));
-        if earlier || later {
+        if (earlier || later) && !notes && !mail && excluded_title.is_empty() && excluded_suffix.is_empty() {
             let stamp = head["stamp"].as_i64().unwrap_or(0);
             let range = if earlier {
                 (since.max(stamp - 900), stamp - 1)

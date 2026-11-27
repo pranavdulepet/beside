@@ -38,7 +38,7 @@ char *sumi_entities(const char *input) {
  }
 }
 void sumi_free(char *p){free(p);}
-int sumi_semantic(const char *input, float *result, int length) {
+static int semantic_vector(const char *input, float *result, int length, BOOL project) {
     @autoreleasepool {
         static NLEmbedding *embedding;
         static dispatch_once_t once;
@@ -52,11 +52,25 @@ int sumi_semantic(const char *input, float *result, int length) {
             NSArray<NSNumber *> *vector = [embedding vectorForString:text];
             if (!vector.count) return 0;
             for (NSUInteger i = 0; i < vector.count; i++) {
-                result[i % length] += vector[i].floatValue;
+                float value = vector[i].floatValue;
+                if (!project) { result[i % length] += value; continue; }
+                uint64_t h = ((uint64_t)i * 0x9E3779B97F4A7C15ULL) ^ 0xBF58476D1CE4E5B9ULL;
+                for (int k = 0; k < 3; k++) {
+                    h ^= h >> 30; h *= 0xBF58476D1CE4E5B9ULL;
+                    h ^= h >> 27; h *= 0x94D049BB133111EBULL;
+                    h ^= h >> 31;
+                    result[h % length] += value * ((h >> 63) ? -0.577350269f : 0.577350269f);
+                }
             }
         }
-        return 1;
+        return (int)embedding.revision + 1;
     }
+}
+int sumi_semantic(const char *input, float *result, int length) {
+    return semantic_vector(input, result, length, NO);
+}
+int beside_passage_vector(const char *input, float *result, int length) {
+    return semantic_vector(input, result, length, YES);
 }
 
 static dispatch_group_t sumi_notification_permission(void) {

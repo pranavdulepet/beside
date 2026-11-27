@@ -28,7 +28,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS activity_search USING fts5(
     tokenize='porter unicode61'
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS activity_vectors USING vec0(
-    event_id TEXT PRIMARY KEY, feature float[192]
+    event_id TEXT PRIMARY KEY, space TEXT PARTITION KEY, feature float[192]
 );
 CREATE TRIGGER IF NOT EXISTS activity_unembed AFTER DELETE ON activity BEGIN
     DELETE FROM activity_vectors WHERE event_id=OLD.id;
