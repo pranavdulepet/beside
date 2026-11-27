@@ -75,14 +75,16 @@ func writeAnswer(stream completionStream, out *json.Encoder) error {
 			continue
 		}
 		choice := chunk.Choices[0]
-		if choice.FinishReason != "" {
-			if choice.FinishReason != "stop" {
-				return fmt.Errorf("the model stopped before completing the answer")
-			}
+		switch choice.FinishReason {
+		case "stop", "length":
 			finished = true
+		case "":
+			// An ordinary delta has no finish reason.
+		default:
+			return fmt.Errorf("the model stopped before completing the answer")
 		}
 		if choice.Delta.Content != "" {
-			if err := out.Encode(map[string]string{"delta": chunk.Choices[0].Delta.Content}); err != nil {
+			if err := out.Encode(map[string]string{"delta": choice.Delta.Content}); err != nil {
 				return err
 			}
 		}
