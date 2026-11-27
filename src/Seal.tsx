@@ -13,7 +13,7 @@ function AnswerReviews({
   const automatic = log.filter(
     row =>
       row.agent === agent.id &&
-      row.tool === 'sumi_answer' &&
+      ['beside_answer', 'sumi_answer'].includes(row.tool) &&
       ['answered', 'reviewed'].includes(row.status) &&
       typeof row.shared?.answer === 'string',
   );
@@ -80,10 +80,10 @@ function Agent({a, act, log}: {a: Row; act: Action; log: Row[]}) {
     );
   }
   const instructions: Record<string, string> = {
-    Read: 'Before choosing a default for me, call sumi_context for the relevant preferences.',
-    Ask: 'Before asking me a preference question, call sumi_predict and use its guess as advice.',
+    Read: 'Before choosing a default for me, call beside_recall for the relevant preferences.',
+    Ask: 'Before asking me a preference question, call beside_predict and use its guess as advice.',
     'Answer for me':
-      'Before asking me a preference question, call sumi_answer and use its answer or wait for my reply.',
+      'Before asking me a preference question, call beside_answer and use its answer or wait for my reply.',
   };
   return (
     <details>
@@ -126,6 +126,7 @@ function Agent({a, act, log}: {a: Row; act: Action; log: Row[]}) {
             {label}
           </label>
         ))}
+        <label className="check"><input type="checkbox" checked={a.shareMemories === true} onChange={e => update({shareMemories:e.target.checked})}/>Current non-private memories</label>
       </fieldset>
       {a.permission === 'Answer for me' && (
         <AnswerReviews agent={a} log={log} update={update} />
@@ -253,7 +254,7 @@ export function Seal({
     [justAnswered, confirmAnswer] = useState('');
   const waiting = data.log.filter((row: Row) => row.status === 'waiting');
   const isCheck = (row: Row) =>
-    row.tool === 'sumi_answer' && ['served', 'checked'].includes(row.status);
+    ['beside_answer', 'sumi_answer'].includes(row.tool) && ['served', 'checked'].includes(row.status);
   const checks: Row[] = data.log.filter(isCheck);
   const recent = data.log.filter(
     (row: Row) => row.status !== 'waiting' && !isCheck(row),
@@ -306,7 +307,7 @@ export function Seal({
                 <p>Access was revoked before you answered.</p>
               )}
               {v.status === 'answered' &&
-                v.tool === 'sumi_answer' &&
+                ['beside_answer', 'sumi_answer'].includes(v.tool) &&
                 !v.human &&
                 v.shared?.answer &&
                 logId !== v.id && (
@@ -319,7 +320,7 @@ export function Seal({
                     That was right
                   </button>
                 )}
-              {v.tool === 'sumi_answer' &&
+              {['beside_answer', 'sumi_answer'].includes(v.tool) &&
                 ['waiting', 'answered', 'reviewed'].includes(v.status) &&
                 (logId !== v.id ? (
                   <button
