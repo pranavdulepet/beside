@@ -867,6 +867,9 @@ static char *sampleDisplay(BOOL preview, NSString *generation) {
 // uses this before focusing its own window; no new capture is taken here.
 // Whole-window guidance needs whole-window permission. Browser-host scopes
 // continue to use the web-area-only pointer reader below.
+BOOL beside_guidance_session(void) {
+    return availableSession() && screenAccess(NO);
+}
 BOOL sumi_overlay_allowed(const char *raw, NSString *bundle) {
     NSDictionary *cfg = [NSJSONSerialization JSONObjectWithData:
         [[NSString stringWithUTF8String:raw] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
@@ -1513,6 +1516,7 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
     dispatch_semaphore_t done=dispatch_semaphore_create(0);
     __block NSDictionary *result=nil;
     [SCShareableContent getShareableContentExcludingDesktopWindows:YES onScreenWindowsOnly:YES completionHandler:^(SCShareableContent *content,NSError *error) {
+        if (error) { dispatch_semaphore_signal(done); return; }
         for (SCWindow *w in content.windows) {
             if (w.windowID!=wid || w.owningApplication.processID!=pid || !CGRectContainsPoint(w.frame,point)) continue;
             CGRect frame=w.frame;
@@ -1586,7 +1590,7 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
                         @"lineKind":selected ? @"selection" : @"point",
                         @"nearby":nearby,
                         @"image":[jpeg base64EncodedStringWithOptions:0] ?: @"",
-                        @"fullImage":fullB64,
+                        @"fullImage":fullB64, @"wid":@(wid), @"pid":@(pid),
                         @"cursor":@{@"x_pct":@(xPct), @"y_pct":@(yPct)},
                         @"windowFrame":@{@"x":@(round(frame.origin.x)), @"y":@(round(frame.origin.y)), @"w":@(round(frame.size.width)), @"h":@(round(frame.size.height))}
                     };

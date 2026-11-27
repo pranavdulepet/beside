@@ -2,15 +2,23 @@ use crate::{activity, bundled, models, plan, providers, store::*};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read};
 
-pub const CLOUD_PROVIDERS: [&str; 6] = [
+mod confidential;
+pub fn verify_confidential() -> Res<Value> {
+    confidential::exchange("", None, || Ok(()), &mut |_| {})?;
+    Ok(json!({"verified":true}))
+}
+
+pub const CLOUD_PROVIDERS: [&str; 7] = [
     "ChatGPT",
     "Anthropic",
     "Gemini",
     "OpenAI",
     "OpenRouter",
     "Compatible",
+    "Tinfoil",
 ];
 
+#[derive(Clone)]
 pub struct BrainOpts<'a> {
     pub max_tokens: u32,
     pub direct_reply: bool,
@@ -79,6 +87,7 @@ pub fn provider_label(id: &str) -> &'static str {
         "OpenAI" => "OpenAI",
         "OpenRouter" => "OpenRouter",
         "Compatible" => "Custom Endpoint",
+        "Tinfoil" => "Tinfoil",
         _ => "On-device",
     }
 }
@@ -110,6 +119,7 @@ pub fn status(s: &Store) -> Res<Value> {
             "cloudConsent": true,
             "contextShared": true,
             "localModel": local,
+            "maskCloudText":cfg["maskCloudText"] == true,
             "availableCloud": cloud_list
         }))
     } else {
@@ -130,6 +140,7 @@ pub fn status(s: &Store) -> Res<Value> {
             "cloudConsent": consent,
             "contextShared": false,
             "localModel": local,
+            "maskCloudText":cfg["maskCloudText"] == true,
             "availableCloud": cloud_list
         }))
     }
@@ -137,6 +148,9 @@ pub fn status(s: &Store) -> Res<Value> {
 
 pub fn configure(s: &Store, a: &Value) -> Res<Value> {
     let mut cfg = raw_settings(s)?;
+    if let Some(mask) = a["maskCloudText"].as_bool() {
+        cfg["maskCloudText"] = json!(mask);
+    }
     if let Some(consent) = a["cloudConsent"].as_bool() {
         cfg["cloudConsent"] = json!(consent);
         if !consent {
@@ -192,6 +206,7 @@ fn cloud_input(s: &Store, input: &Value, provider: &str) -> Res<Value> {
         }
         fields.remove("open_windows_on_this_mac");
         fields.remove("working_context");
+        fields.remove("procedural_lessons");
         fields.remove("personal_notes");
         fields.remove("previous_question");
         if let Some(notes) = fields.get_mut("notes").and_then(Value::as_array_mut) {
@@ -201,6 +216,36 @@ fn cloud_input(s: &Store, input: &Value, provider: &str) -> Res<Value> {
     Ok(shared)
 }
 
+struct CloudGrant {
+    settings: Value,
+    epoch: Value,
+    generation: Value,
+    source_revision: Value,
+}
+impl CloudGrant {
+    fn capture(s: &Store) -> Res<Self> {
+        Ok(Self {
+            settings: raw_settings(s)?,
+            epoch: s.get("activityEpoch")?,
+            generation: activity::config(s)?["generation"].clone(),
+            source_revision: s.get("sourceRevision")?,
+        })
+    }
+    fn check(&self, s: &Store, provider: &str) -> Res<()> {
+        if self.settings["mode"] != "cloud"
+            || self.settings["provider"] != provider
+            || self.settings["cloudConsent"] != true
+            || raw_settings(s)? != self.settings
+            || s.get("activityEpoch")? != self.epoch
+            || activity::config(s)?["generation"] != self.generation
+            || s.get("sourceRevision")? != self.source_revision
+        {
+            return Err("Sharing changed while preparing this reply. Ask again.".into());
+        }
+        Ok(())
+    }
+}
+
 pub fn infer(
     s: &Store,
     system: &str,
@@ -208,19 +253,105 @@ pub fn infer(
     opts: &BrainOpts<'_>,
     sink: &mut dyn FnMut(&str),
 ) -> Res<(String, Value)> {
+    infer_for_window(s, system, input, opts, None, sink)
+}
+
+pub(crate) fn infer_for_window(
+    s: &Store,
+    system: &str,
+    input: &Value,
+    opts: &BrainOpts<'_>,
+    window: Option<&Value>,
+    sink: &mut dyn FnMut(&str),
+) -> Res<(String, Value)> {
+    let verify_window = || {
+        if window.is_none_or(|snap| crate::overlay::usable(s, snap)) {
+            Ok(())
+        } else {
+            Err("The window changed. Summon Beside again.".to_string())
+        }
+    };
+    verify_window()?;
     if opts.requires_image && opts.image_base64.is_none() {
         let message = "I don’t have an image of that moment to check.";
         sink(message);
         return Ok((message.into(), json!({"usedImage": false})));
     }
-    if let Some(mut active) = opts.allow_cloud.then(|| status(s)).transpose()?.filter(|b| b["mode"] == "cloud") {
+    let grant = opts
+        .allow_cloud
+        .then(|| CloudGrant::capture(s))
+        .transpose()?;
+    let cloud = grant
+        .as_ref()
+        .filter(|g| g.settings["mode"] == "cloud")
+        .map(|_| status(s))
+        .transpose()?
+        .filter(|b| b["mode"] == "cloud");
+    let local_image = opts.requires_image
+        && cloud
+            .as_ref()
+            .is_some_and(|b| b["maskCloudText"] == true || b["provider"] == "Tinfoil");
+    if local_image && activity::private_model(s).is_none() {
+        let answer = "This image stays on your Mac. Set up a local vision model to read it.";
+        sink(answer);
+        return Ok((
+            answer.into(),
+            json!({"usedImage":false,"contextShared":false}),
+        ));
+    }
+    if let Some(mut active) = cloud.filter(|_| !local_image) {
         let provider_id = active["provider"].as_str().unwrap_or("");
-        let answer = infer_cloud(s, provider_id, system, &cloud_input(s, input, provider_id)?.to_string(), opts, sink)?;
-        active["usedImage"] = json!(opts.image_base64.is_some());
+        let grant = grant.as_ref().ok_or("Cloud sharing is off.")?;
+        grant.check(s, provider_id)?;
+        let shared = cloud_input(s, input, provider_id)?;
+        let mut selected = opts.clone();
+        if provider_id == "Tinfoil" {
+            selected.image_base64 = None;
+        }
+        let answer = if active["maskCloudText"] == true {
+            selected.image_base64 = None;
+            let mut bridge = crate::privacy_bridge::Pseudonymizer::new();
+            let instructions = bridge.scrub_str(system);
+            let payload = bridge.scrub_value(&shared).to_string();
+            let mut stream = crate::privacy_bridge::StreamRestorer::new(&bridge);
+            let raw = infer_cloud(
+                s,
+                grant,
+                &verify_window,
+                provider_id,
+                &instructions,
+                &payload,
+                &selected,
+                &mut |part| {
+                    let text = stream.push(part);
+                    if !text.is_empty() {
+                        sink(&text)
+                    }
+                },
+            )?;
+            let tail = stream.finish();
+            if !tail.is_empty() {
+                sink(&tail)
+            }
+            bridge.restore(&raw)
+        } else {
+            infer_cloud(
+                s,
+                grant,
+                &verify_window,
+                provider_id,
+                system,
+                &shared.to_string(),
+                &selected,
+                sink,
+            )?
+        };
+        active["usedImage"] = json!(selected.image_base64.is_some());
         return Ok((answer, active));
     }
-    let mut model = activity::private_model(s)
-        .ok_or("Set up a local model (like Inkling 2 Mini) or connect a cloud account in Settings.")?;
+    let mut model = activity::private_model(s).ok_or(
+        "Set up a local model (like Inkling 2 Mini) or connect a cloud account in Settings.",
+    )?;
     if opts.direct_reply {
         model["directReply"] = json!(true);
     }
@@ -311,6 +442,8 @@ fn infer_local(
 
 fn infer_cloud(
     s: &Store,
+    grant: &CloudGrant,
+    verify_window: &dyn Fn() -> Res<()>,
     provider_id: &str,
     system: &str,
     input: &str,
@@ -325,10 +458,30 @@ fn infer_cloud(
         .map(|b| vec![json!(b)])
         .unwrap_or_default();
 
+    grant.check(s, provider_id)?;
+    verify_window()?;
     let answer = match provider_id {
+        "Tinfoil" => {
+            let cred = providers::credential(s, provider_id)?;
+            let key = cred["key"].as_str().ok_or("Reconnect Tinfoil.")?;
+            confidential::exchange(
+                key,
+                Some(json!({"model":model,"system":system,"input":input,"maxTokens":limit})),
+                || {
+                    grant.check(s, provider_id)?;
+                    verify_window()?;
+                    providers::reserve(s, &s.doc("provider", provider_id)?)
+                },
+                sink,
+            )?
+        }
         "ChatGPT" => {
             let token = providers::access_token(s)?;
-            let name = if model.is_empty() { "gpt-4.1-mini" } else { model };
+            let name = if model.is_empty() {
+                "gpt-4.1-mini"
+            } else {
+                model
+            };
             plan::complete_with(
                 plan::API,
                 &token,
@@ -529,6 +682,29 @@ fn consume_gemini_sse(reader: impl Read, sink: &mut dyn FnMut(&str)) -> Res<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_inflight_cloud_grant_expires_on_provider_mode_or_mask_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let s = Store::with_key(temp.path().into(), &[13; 32]).unwrap();
+        crate::app::setup(&s).unwrap();
+        let cloud = json!({"mode":"cloud", "provider":"Tinfoil", "cloudConsent":true});
+        s.set("brainSettings", &cloud).unwrap();
+        let grant = CloudGrant::capture(&s).unwrap();
+        assert!(grant.check(&s, "Tinfoil").is_ok());
+        assert!(grant.check(&s, "OpenAI").is_err());
+        for (field, value) in [
+            ("mode", json!("local")),
+            ("maskCloudText", json!(true)),
+            ("provider", json!("OpenAI")),
+            ("cloudConsent", json!(false)),
+        ] {
+            let mut changed = cloud.clone();
+            changed[field] = value;
+            s.set("brainSettings", &changed).unwrap();
+            assert!(grant.check(&s, "Tinfoil").is_err());
+        }
+    }
 
     #[test]
     fn a_pixel_question_cannot_be_answered_by_a_text_only_runtime() {

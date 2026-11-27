@@ -5,7 +5,9 @@ fn main() {
     println!("cargo:rerun-if-changed=meeting.m");
     println!("cargo:rerun-if-changed=voice.m");
     println!("cargo:rerun-if-changed=overlay.m");
+    println!("cargo:rerun-if-changed=calendar.m");
     cc::Build::new()
+        .file("calendar.m")
         .file("native.m")
         .file("activity.m")
         .file("bag_vision.m")
@@ -17,6 +19,7 @@ fn main() {
         .compile("sumi_native");
     for name in [
         "Foundation",
+        "EventKit",
         "Vision",
         "AVFoundation",
         "CoreMedia",

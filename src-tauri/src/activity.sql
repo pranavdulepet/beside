@@ -74,3 +74,8 @@ CREATE TABLE IF NOT EXISTS proactive_dismissals (
     digest TEXT PRIMARY KEY,
     expires INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS proactive_feedback (
+    app TEXT NOT NULL, kind TEXT NOT NULL, balance INTEGER NOT NULL, updated INTEGER NOT NULL,
+    PRIMARY KEY(app,kind)
+);

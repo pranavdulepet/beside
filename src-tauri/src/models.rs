@@ -55,6 +55,9 @@ pub fn infer_reply(
     let name = config["name"]
         .as_str()
         .ok_or("Choose a local model first.")?;
+    if crate::bundled::is_inkling(config) {
+        return crate::bundled::inkling_reply(config, system, input, limit, schema, sink);
+    }
     let messages = json!([{"role":"system","content":system},{"role":"user","content":input}]);
     if config["runtime"] == "Sumi" {
         return crate::bundled::infer(config, messages, limit, schema, sink);

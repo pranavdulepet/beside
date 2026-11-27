@@ -31,6 +31,10 @@ const CLOUD_PRESETS: Record<
     placeholder: 'sk-…',
     hint: 'OpenAI API key stored locally in macOS Keychain.',
   },
+  Tinfoil: {
+    label: 'Tinfoil', defaultModel: '', placeholder: 'Tinfoil API key',
+    hint: 'Enter a model ID from your Tinfoil account. Beside verifies the confidential router before sharing text.',
+  },
   OpenRouter: {
     label: 'OpenRouter',
     defaultModel: 'anthropic/claude-sonnet-4.5',
@@ -298,6 +302,16 @@ export function BrainPicker({
                 . Excluded apps stay local.
               </span>
             </label>
+            <label className="check"><input type="checkbox" checked={brain?.maskCloudText === true}
+              disabled={!!busy} onChange={async e => {
+                try {const next=await call('brainConfigure',{maskCloudText:e.target.checked}); setBrain(next); onChange?.(next);}
+                catch (err) {setError(String(err));}
+              }}/>Mask identifying text in cloud companion replies. Images stay on this Mac when enabled.</label>
+            {selectedCloud === 'Tinfoil' && <button type="button" disabled={!!busy} onClick={async () => {
+              setBusy('attestation'); setError(''); setStatus('');
+              try {await call('brainVerifyConfidential'); setStatus('Verified the confidential router. Each answer verifies its own connection.');}
+              catch (err) {setError(String(err));} finally {setBusy('');}
+            }}>{busy==='attestation' ? 'Verifying…' : 'Verify confidential connection'}</button>}
           </div>
 
           {selectedCloud === 'ChatGPT' ? (

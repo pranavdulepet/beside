@@ -16,7 +16,7 @@ export function SearchResult({
   if (web.status === 'ready' || web.status === 'retry')
     return (
       <div className="search-proposal">
-        <small>Public search · Exa</small>
+        <small>Public search</small>
         <p>{web.query}</p>
         <button
           disabled={busy}

@@ -1,3 +1,4 @@
+mod fallback;
 use crate::{local, plan, sources, store::*};
 use chrono::{Datelike, Days, NaiveDate};
 use serde_json::{json, Value};
@@ -193,12 +194,15 @@ pub fn introduction(web: &Value) -> &'static str {
     }
 }
 pub fn public_url(raw: &str) -> bool {
-    url::Url::parse(raw).is_ok_and(|u| {
-        matches!(u.scheme(), "https" | "http")
-            && u.has_host()
-            && u.username().is_empty()
-            && u.password().is_none()
-    })
+    let Ok(u) = url::Url::parse(raw) else { return false };
+    if !matches!(u.scheme(), "https" | "http") || !u.username().is_empty() || u.password().is_some() {return false}
+    match u.host() {
+        Some(url::Host::Domain(d)) => {
+            let d=d.trim_end_matches('.'); d.contains('.') && ![".localhost",".local",".lan",".internal",".test",".invalid",".home.arpa",".onion"].iter().any(|t|d.ends_with(t))
+        }
+        // Public source links are publisher domain names. Numeric IPs are unnecessary here.
+        _ => false,
+    }
 }
 fn blocks(raw: &str) -> Res<Vec<String>> {
     let mut blocks = Vec::new();
@@ -279,17 +283,17 @@ fn retry_delay(error: &ureq::Error) -> Option<Duration> {
 }
 
 fn request(tool: &str, arguments: Value) -> Res<String> {
-    const BUDGET: Duration = Duration::from_secs(22);
+    let budget = Duration::from_secs(if tool == "web_search_exa" { 9 } else { 12 });
     let agent = ureq::AgentBuilder::new().redirects(0).build();
     let payload = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":tool,"arguments":arguments}});
-    let deadline = std::time::Instant::now() + BUDGET;
+    let deadline = std::time::Instant::now() + budget;
     let send = |timeout| {
         agent.post("https://mcp.exa.ai/mcp")
             .set("Accept", "application/json, text/event-stream")
             .timeout(timeout)
             .send_json(&payload)
     };
-    let response = send(BUDGET).or_else(|error| {
+    let response = send(budget).or_else(|error| {
         let Some(delay) = retry_delay(&error) else { return Err(error) };
         if deadline.saturating_duration_since(std::time::Instant::now()) <= delay { return Err(error); }
         std::thread::sleep(delay);
@@ -310,13 +314,25 @@ fn request(tool: &str, arguments: Value) -> Res<String> {
 }
 
 pub(crate) fn search(query: &str, outing: bool) -> Res<Vec<Value>> {
-    parse(&request(
+    search_using(query,outing,request,fallback::search)
+}
+
+fn search_using(query:&str, outing:bool, exa:impl FnOnce(&str,Value)->Res<String>, alternative:impl FnOnce(&str,usize)->Res<Vec<Value>>)->Res<Vec<Value>>{
+    let primary = exa(
         "web_search_exa",
         json!({"query":query,"numResults":if outing{8}else{5},"objective":format!(
             "Today is {}. {}",chrono::Local::now().date_naive(),
             if outing {"Find official venue event pages within the requested place and dates. Include the title, date, time and admission. Exclude sold-out and cancelled listings."}
             else {"Find primary sources directly answering the question. Return specific passage evidence, dates and details from official documentation or publishers."})}),
-    )?)
+    )
+    .and_then(|raw| parse(&raw));
+    match primary {
+        Ok(pages) if !pages.is_empty() => Ok(pages),
+        primary_err => match alternative(query, if outing { 8 } else { 5 }) {
+            Ok(pages) if !pages.is_empty() => Ok(pages),
+            _ => primary_err,
+        },
+    }
 }
 
 fn available_pages(raw: &str, results: &[Value], today: NaiveDate) -> Res<Vec<Value>> {
@@ -438,6 +454,7 @@ fn dated_choice(
     let mut best = None;
     let mut best_score = 0;
     for (i, p) in pages.iter().enumerate() {
+        if p["availabilityUnverified"]==true {continue;}
         let lines = display_lines(p);
         let mut active: Option<(usize, &str)> = None;
         for (j, line) in lines.iter().enumerate() {
@@ -618,6 +635,16 @@ pub fn complete(s: &Store, turn: &mut Value, model: &Value, notes: &[Value]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn public_overrides_accept_protocols_and_unavailable_listing_pages_stay_unverified() {
+        for q in ["HTTP/3 status","C# 13 release date"] {assert!(public_typed_lookup(q),"{q}");}
+        for q in ["HTTP/3 status in my email","HTTP/3 /Users/someone/private","C# 13 private meeting"] {assert!(!public_typed_lookup(q),"{q}");}
+        let page=json!({"url":"https://example.org/shows","title":"Town hall","excerpt":"December 12, 2026 — pottery workshop at 10 am","searchProvider":"DuckDuckGo"});
+        let found=research_with("ceramics weekend",true,None,|_,_|Ok(vec![page]),|_,_|Err("offline".into())).unwrap();
+        assert_eq!(found[0]["availabilityUnverified"],true);
+        assert!(weekend_pick(&found,&["2026-12-12".parse().unwrap()],&[]).is_none());
+    }
+
     #[test]
     fn weekends_include_today_and_cross_year() {
         for (today, start) in [("2026-11-22", "2026-11-21"), ("2027-01-01", "2027-01-02")] {
@@ -887,6 +914,10 @@ pub fn floating_lookup(question: &str) -> bool {
 
 /// Read the underlying pages while retaining search snippets if a publisher is unavailable.
 pub(crate) fn research(query: &str, outing: bool, city: Option<&str>) -> Res<Vec<Value>> {
+    research_with(query,outing,city,search,request)
+}
+
+fn research_with(query:&str,outing:bool,city:Option<&str>,search:impl FnOnce(&str,bool)->Res<Vec<Value>>, fetch:impl Fn(&str,Value)->Res<String>)->Res<Vec<Value>>{
     let mut pages = search(query, outing)?;
     let has_snippets = pages
         .iter()
@@ -905,12 +936,13 @@ pub(crate) fn research(query: &str, outing: bool, city: Option<&str>) -> Res<Vec
         return Ok(pages);
     }
     let raw =
-        match request("web_fetch_exa", json!({"urls":urls,"maxCharacters":9000})) {
+        match fetch("web_fetch_exa", json!({"urls":urls,"maxCharacters":9000})) {
             Ok(raw) => raw,
-            Err(_) if outing => return Err(
-                "Couldn’t verify current availability on the event pages. Try the search again."
-                    .into(),
-            ),
+            Err(_) if outing => {
+                // Offer the search links without inferring current availability from a snippet.
+                for page in &mut pages { page["availabilityUnverified"] = json!(true); }
+                return Ok(pages);
+            }
             Err(_) => return Ok(pages),
         };
     if outing {
@@ -1157,6 +1189,9 @@ pub(crate) fn clarified_topic(previous: &str, reply: &str) -> Option<String> {
 // Automatic search can use the user's own public question. A private reference
 // needs a narrower query before dispatch.
 pub fn public_typed_lookup(q: &str) -> bool {
+    static PROTOCOL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)\b(?:http/[123](?:\.[01])?|c#)(?:\s|$)").unwrap());
+    let normalized = PROTOCOL.replace_all(q, "technology ");
+    let q = normalized.as_ref();
     let lower = q.to_lowercase();
     let words = lower.replace("this weekend", "weekend").replace("is it raining", "rain").replace("what time is it", "time");
     !words.split(|c: char| !c.is_alphabetic()).any(|w| {

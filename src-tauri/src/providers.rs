@@ -6,7 +6,7 @@ use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-const KINDS: [&str; 7] = [
+const KINDS: [&str; 8] = [
     "ChatGPT",
     "OpenRouter",
     "OpenAI",
@@ -14,6 +14,7 @@ const KINDS: [&str; 7] = [
     "Gemini",
     "Jev",
     "Compatible",
+    "Tinfoil",
 ];
 pub(crate) fn http() -> ureq::Agent {
     ureq::AgentBuilder::new()
@@ -76,7 +77,7 @@ pub fn configure(s: &Store, a: &Value) -> Res<()> {
     }
     s.put(
         "provider",
-        &json!({"id":k,"model":model,"cap":cap,"endpoint":endpoint,"enabled":a["enabled"]==true,"imageModel":a["imageModel"].as_str().filter(|v|k=="OpenRouter" && v.len()<=160).unwrap_or(""),"typedQuestions":a["typedQuestions"]==true,"conversation":k=="OpenRouter" && a["conversation"]==true,"quiz":k=="Jev" && a["quiz"]==true,"backtest":k!="Jev" && a["backtest"]==true}),
+        &json!({"id":k,"model":model,"cap":cap,"endpoint":endpoint,"enabled":a["enabled"]==true,"imageModel":a["imageModel"].as_str().filter(|v|k=="OpenRouter" && v.len()<=160).unwrap_or(""),"typedQuestions":k!="Tinfoil" && a["typedQuestions"]==true,"conversation":k=="OpenRouter" && a["conversation"]==true,"quiz":k=="Jev" && a["quiz"]==true,"backtest":k!="Jev" && k!="Tinfoil" && a["backtest"]==true}),
     )?;
     Ok(())
 }
@@ -174,6 +175,14 @@ pub(crate) fn reserve(s: &Store, p: &Value) -> Res<()> {
     .msg()?;
     tx.commit().msg()
 }
+fn reflection_provider(p: &Value) -> bool {
+    p["enabled"] == true
+        && matches!(
+            p["id"].as_str(),
+            Some("ChatGPT" | "OpenAI" | "Anthropic" | "Gemini" | "OpenRouter" | "Compatible")
+        )
+}
+
 pub fn reflect(s: &Store, sys: &str, batch: &[Value]) -> Res<Option<String>> {
     if !crate::local::idle() {
         return Ok(None);
@@ -181,7 +190,7 @@ pub fn reflect(s: &Store, sys: &str, batch: &[Value]) -> Res<Option<String>> {
     let Some(p) = s
         .list("provider")?
         .into_iter()
-        .find(|v| v["enabled"] == true && v["id"] != "Jev")
+        .find(reflection_provider)
     else {
         return Ok(None);
     };
@@ -234,6 +243,15 @@ pub fn typed_question(s: &Store, a: &Value) -> Res<Value> {
     if a["approved"] != true || !allows_question(&p) {
         return Err("Enable typed questions for this provider first.".into());
     }
+    let mask_identifiers = s.get("brainSettings")?["maskCloudText"] == true;
+    let mut mask = mask_identifiers.then(crate::privacy_bridge::Pseudonymizer::new);
+    let masked = mask.as_mut().map(|m| m.scrub_str(input));
+    let input = masked.as_deref().unwrap_or(input);
+    if s.doc("provider", name)? != p
+        || (s.get("brainSettings")?["maskCloudText"] == true) != mask_identifiers
+    {
+        return Err("Sharing settings changed. Ask again.".into());
+    }
     let answer = if name == "ChatGPT" {
         crate::plan::standalone(s, input)?
     } else {
@@ -247,6 +265,10 @@ pub fn typed_question(s: &Store, a: &Value) -> Res<Value> {
             1,
         )?
     };
+    let answer = match mask {
+        Some(m) => m.restore(&answer),
+        None => answer,
+    };
     Ok(
         json!({"answer":answer,"sources":[],"notes":[],"epoch":s.get("activityEpoch")?,"provider":name}),
     )
@@ -255,8 +277,14 @@ fn send_text(s: &Store, p: &Value, sys: &str, input: &str, job: &str, items: usi
     let k = p["id"].as_str().unwrap();
     let model = p["model"].as_str().unwrap();
     let h = http();
-    let cred = credential(s, k)?;
-    let key = cred["key"].as_str().unwrap_or("");
+    let (router_base, key) = if k == "OpenRouter" {
+        router_session(s)?
+    } else {
+        (
+            String::new(),
+            credential(s, k)?["key"].as_str().unwrap_or("").to_owned(),
+        )
+    };
     reserve(s, p)?;
     let limit = match job {
         "typed question" => 650,
@@ -279,7 +307,7 @@ fn send_text(s: &Store, p: &Value, sys: &str, input: &str, job: &str, items: usi
         let (request, body) = match k {
             "Anthropic" => (
                 h.post("https://api.anthropic.com/v1/messages")
-                    .set("x-api-key", key)
+                    .set("x-api-key", &key)
                     .set("anthropic-version", "2023-06-01"),
                 json!({"model":model,"max_tokens":limit,"system":sys,"messages":[{"role":"user","content":input}]}),
             ),
@@ -291,12 +319,12 @@ fn send_text(s: &Store, p: &Value, sys: &str, input: &str, job: &str, items: usi
                     return Err("Invalid Gemini model identifier.".into());
                 }
                 (h.post(&format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"))
-                    .set("x-goog-api-key",key),
+                    .set("x-goog-api-key",&key),
                     json!({"systemInstruction":{"parts":[{"text":sys}]},"contents":[{"parts":[{"text":input}]}],"generationConfig":{"maxOutputTokens":limit}}))
             }
             "OpenRouter" | "Compatible" => {
                 let base = if k == "OpenRouter" {
-                    "https://openrouter.ai/api/v1"
+                    router_base.as_str()
                 } else {
                     p["endpoint"].as_str().ok_or("Missing endpoint")?
                 };
@@ -941,6 +969,57 @@ pub fn image_data(s: &Store, a: &Value) -> Res<Value> {
 #[cfg(test)]
 mod router_contract {
     use super::*;
+    #[test]
+    #[ignore = "Uses a loopback provider without a key or paid inference"]
+    fn typed_question_masks_the_outbound_body_and_restores_the_reply() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::with_key(dir.path().into(), &[12; 32]).unwrap();
+        crate::app::setup(&s).unwrap();
+        s.set("brainSettings", &json!({"maskCloudText":true}))
+            .unwrap();
+        s.put(
+            "provider",
+            &json!({"id":"OpenRouter","model":"fixture","cap":1,"typedQuestions":true}),
+        )
+        .unwrap();
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        ROUTER_FIXTURE.with(|v| *v.borrow_mut() = Some(format!("http://{}", server.server_addr())));
+        let worker = std::thread::spawn(move || {
+            let mut req = server
+                .recv_timeout(Duration::from_secs(8))
+                .unwrap()
+                .unwrap();
+            assert_eq!(req.url(), "/chat/completions");
+            let body: Value = serde_json::from_reader(req.as_reader()).unwrap();
+            assert!(!body.to_string().contains("alias@example.org"));
+            let masked = body["messages"][1]["content"].as_str().unwrap();
+            assert!(masked.contains("_EMAIL_1]"));
+            req.respond(tiny_http::Response::from_string(
+                json!({"choices":[{"message":{"content":masked}}]}).to_string(),
+            ))
+            .unwrap();
+        });
+        let args = json!({"provider":"OpenRouter","approved":true,"text":"Send the receipt to alias@example.org"});
+        let result = typed_question(&s, &args).unwrap();
+        assert_eq!(result["answer"], args["text"]);
+        assert!(result["sources"].as_array().unwrap().is_empty());
+        worker.join().unwrap();
+        ROUTER_FIXTURE.with(|v| *v.borrow_mut() = None);
+    }
+
+    #[test]
+    fn confidential_companion_does_not_claim_unrelated_background_jobs() {
+        let connected = [
+            json!({"id":"Tinfoil","enabled":true}),
+            json!({"id":"OpenAI","enabled":true}),
+        ];
+        assert_eq!(
+            connected.iter().find(|p| reflection_provider(p)).unwrap()["id"],
+            "OpenAI"
+        );
+        assert!(!reflection_provider(&connected[0]));
+        assert!(!allows_question(&connected[0]));
+    }
     #[test]
     #[ignore = "Uses a local OpenRouter protocol fixture, no provider charges"]
     fn model_and_picture_require_separate_consent_and_share_the_cap() {

@@ -19,6 +19,8 @@ struct Running {
 // to the quit handler while the model loads or an HTTP response is pending.
 static REQUEST: Mutex<()> = Mutex::new(());
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
+static EMBED_REQUEST: Mutex<()> = Mutex::new(());
+static EMBED_RUNNING: Mutex<Option<Running>> = Mutex::new(None);
 fn stop(r: &mut Option<Running>) {
     if let Some(mut r) = r.take() {
         let _ = r.child.kill();
@@ -26,16 +28,17 @@ fn stop(r: &mut Option<Running>) {
     }
 }
 pub fn reap(force: bool) {
-    if force {
-        stop(&mut RUNNING.lock().unwrap());
-        return;
-    }
-    if let Ok(_request) = REQUEST.try_lock() {
-        let mut r = RUNNING.lock().unwrap();
-        if r.as_ref()
-            .is_some_and(|r| r.last.elapsed() > Duration::from_secs(240))
-        {
-            stop(&mut r);
+    for (requests, state) in [(&REQUEST, &RUNNING), (&EMBED_REQUEST, &EMBED_RUNNING)] {
+        if force {
+            stop(&mut state.lock().unwrap());
+        } else if let Ok(_request) = requests.try_lock() {
+            let mut child = state.lock().unwrap();
+            if child
+                .as_ref()
+                .is_some_and(|r| r.last.elapsed() > Duration::from_secs(240))
+            {
+                stop(&mut child);
+            }
         }
     }
 }
@@ -172,6 +175,41 @@ pub fn inkling_text(
     grammar: Option<&str>,
     sink: &mut dyn FnMut(&str),
 ) -> Res<String> {
+    let constraint = grammar.map(|rule| ("grammar", json!(rule)));
+    inkling_completion(cfg, instruction, input, limit, single_line, constraint, sink)
+}
+
+pub(crate) fn inkling_reply(
+    cfg: &Value,
+    instruction: &str,
+    input: &str,
+    limit: u32,
+    schema: Option<&Value>,
+    sink: Option<&mut dyn FnMut(&str)>,
+) -> Res<String> {
+    let fields = serde_json::from_str(input).unwrap_or_else(|_| json!(input));
+    let constraint = schema.map(|schema| ("json_schema", schema.clone()));
+    let mut discard = |_: &str| {};
+    inkling_completion(
+        cfg,
+        instruction,
+        &fields,
+        limit,
+        false,
+        constraint,
+        sink.unwrap_or(&mut discard),
+    )
+}
+
+fn inkling_completion(
+    cfg: &Value,
+    instruction: &str,
+    input: &Value,
+    limit: u32,
+    single_line: bool,
+    constraint: Option<(&str, Value)>,
+    sink: &mut dyn FnMut(&str),
+) -> Res<String> {
     use std::io::{BufRead, BufReader};
     let quoted = input.to_string().replace('<', "\\u003c");
     let prompt=format!("<|message_system|><|content_text|>{instruction}<|end_message|><|message_system|><|content_text|>Thinking effort level: 0<|end_message|><|message_user|><|content_text|>{quoted}<|end_message|><|message_model|><|content_text|>");
@@ -180,8 +218,8 @@ pub fn inkling_text(
         if single_line {
             body["stop"].as_array_mut().unwrap().push(json!("\n"));
         }
-        if let Some(grammar) = grammar {
-            body["grammar"] = json!(grammar);
+        if let Some((field, value)) = constraint {
+            body[field] = value;
         }
         let response = http
             .post(&format!("http://127.0.0.1:{port}/completion"))
@@ -250,6 +288,34 @@ pub fn warm(cfg: &Value) -> Res<()> {
     with_server(cfg, |_, _, _| Ok(()))
 }
 
+pub(crate) fn embedding_ready(path: &Path) -> bool {
+    EMBED_RUNNING.try_lock().ok().is_some_and(|mut state| {
+        state
+            .as_mut()
+            .is_some_and(|r| r.path == path && r.child.try_wait().ok() == Some(None))
+    })
+}
+
+pub(crate) fn passage_embedding(
+    s: &Store,
+    path: &Path,
+    text: &str,
+    warm_only: bool,
+) -> Res<Vec<f32>> {
+    let cfg =
+        json!({"path":path,"private":s.root.join(".sumi"),"embedding":true,"warmOnly":warm_only});
+    with_server(&cfg, |http, port, token| {
+        let response: Value = http
+            .post(&format!("http://127.0.0.1:{port}/v1/embeddings"))
+            .set("Authorization", &format!("Bearer {token}"))
+            .send_json(json!({"input":text}))
+            .msg()?
+            .into_json()
+            .msg()?;
+        serde_json::from_value(response["data"][0]["embedding"].clone()).msg()
+    })
+}
+
 fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> Res<T>) -> Res<T> {
     let path = PathBuf::from(cfg["path"].as_str().ok_or("Missing model file.")?);
     let projector = cfg["projector"].as_str().map(PathBuf::from);
@@ -258,8 +324,21 @@ fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> 
             .as_str()
             .ok_or("Missing notebook directory.")?,
     );
-    let _request = REQUEST.lock().unwrap();
-    let mut state = RUNNING.lock().unwrap();
+    let embedding = cfg["embedding"] == true;
+    let (requests, running) = if embedding {
+        (&EMBED_REQUEST, &EMBED_RUNNING)
+    } else {
+        (&REQUEST, &RUNNING)
+    };
+    let warm_only = cfg["warmOnly"] == true;
+    let _request = if warm_only {
+        requests
+            .try_lock()
+            .map_err(|_| "The embedding model is busy.")?
+    } else {
+        requests.lock().unwrap()
+    };
+    let mut state = running.lock().unwrap();
     if crate::quitting() {
         return Err("Beside is quitting.".into());
     }
@@ -271,18 +350,38 @@ fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> 
         .try_proxy_from_env(false)
         .timeout_read(Duration::from_secs(120))
         .build();
+    if !live && warm_only {
+        return Err("The embedding model is cold.".into());
+    }
     if !live {
         stop(&mut state);
-        let pidfile = base.join("runtime.pid");
-        if let Ok(raw) = std::fs::read_to_string(&pidfile) {
-            if let Ok(old_pid) = raw.trim().parse::<u32>() {
+        let pidfile = base.join(if embedding {
+            "embedding.pid"
+        } else {
+            "runtime.pid"
+        });
+        let server = binary()?;
+        let keyfile = base.join(if embedding {
+            "embedding.key"
+        } else {
+            "runtime.key"
+        });
+        if let Ok(old) = std::fs::read_to_string(&pidfile) {
+            if let Ok(pid) = old.trim().parse::<u32>() {
+                // A PID can be reused after a crash. Only clean up the helper launched
+                // with this notebook's private keyfile and the packaged executable.
                 if let Ok(out) = Command::new("/bin/ps")
-                    .args(["-p", &old_pid.to_string(), "-o", "comm="])
+                    .args(["-ww", "-p", &pid.to_string(), "-o", "command="])
                     .output()
                 {
-                    if String::from_utf8_lossy(&out.stdout).contains("llama-server") {
+                    let command = String::from_utf8_lossy(&out.stdout);
+                    let owns = command
+                        .trim_start()
+                        .starts_with(&format!("{} ", server.display()))
+                        && command.contains(&format!(" --api-key-file {} -m ", keyfile.display()));
+                    if owns {
                         let _ = Command::new("/bin/kill")
-                            .args(["-TERM", &old_pid.to_string()])
+                            .args(["-TERM", &pid.to_string()])
                             .status();
                     }
                 }
@@ -294,9 +393,8 @@ fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> 
             .msg()?
             .port();
         let token = id() + &id();
-        let keyfile = base.join("runtime.key");
         atomic(&keyfile, token.as_bytes())?;
-        let child = Command::new(binary()?)
+        let child = Command::new(server)
             .args([
                 "--host",
                 "127.0.0.1",
@@ -316,6 +414,11 @@ fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> 
             .arg(&keyfile)
             .arg("-m")
             .arg(&path)
+            .args(if embedding {
+                &["--embedding", "--pooling", "mean"][..]
+            } else {
+                &[][..]
+            })
             .args(
                 projector
                     .iter()
@@ -345,7 +448,7 @@ fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> 
         let start = Instant::now();
         loop {
             {
-                let mut state = RUNNING.lock().unwrap();
+                let mut state = running.lock().unwrap();
                 let r = state.as_mut().ok_or("The local runtime stopped.")?;
                 if r.child.try_wait().msg()?.is_some() {
                     return Err("The local runtime could not load this model.".into());

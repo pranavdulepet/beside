@@ -1084,7 +1084,7 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
       .toBe('Answer for me');
     await expect(
       page.getByLabel('Line for Claude Code’s instructions'),
-    ).toHaveValue(/sumi_answer/);
+    ).toHaveValue(/beside_answer/);
     await expect(page.getByText('MCP server · sumi-2')).toBeVisible();
     const installed = await readFile(configPath, 'utf8');
     const config = JSON.parse(installed).mcpServers['sumi-2'];
@@ -1980,7 +1980,7 @@ test('a weekend plan uses live sources and the current preference from another s
     await expect(page.locator('.dated-notes')).toContainText('printmaking');
     await page.keyboard.press('Meta+,');
     await page.getByText('Web search and imports', {exact: true}).click();
-    await page.getByLabel('Automatically look up local listings via Exa').check();
+    await page.getByLabel('Automatically look up local listings').check();
     await page.keyboard.press('Meta+3');
     async function fresh() {
       await page.getByRole('button', {name: /^Sheets/}).click();

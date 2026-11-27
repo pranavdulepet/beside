@@ -8,84 +8,117 @@ use std::{
 };
 
 extern "C" {
-    fn sumi_capture_elements_for(hint: *const c_char, config: *const c_char) -> *mut c_char;
-    fn sumi_ocr_elements_from_jpeg(
-        b64: *const c_char,
-        wx: f64,
-        wy: f64,
-        ww: f64,
-        wh: f64,
-    ) -> *mut c_char;
-    fn sumi_overlay_highlight(
-        x: f64,
-        y: f64,
-        w: f64,
-        h: f64,
-        label: *const c_char,
-        note: *const c_char,
-        duration_ms: i32,
-    );
+    fn beside_capture_front_elements(config: *const c_char) -> *mut c_char;
+    fn beside_window_current(owner: *const c_char) -> i32;
+    fn sumi_overlay_highlight_steps(request: *const c_char);
     fn sumi_overlay_clear();
     fn sumi_free(p: *mut c_char);
 }
 
-pub fn ocr_elements_from_jpeg(b64: &str, frame: &Value) -> Vec<Value> {
-    let Some(wx) = frame["x"].as_f64() else {
-        return Vec::new();
+pub fn live_elements(s: &Store) -> Value {
+    let Ok(config) = crate::activity::config(s) else {
+        return Value::Null;
     };
-    let Some(wy) = frame["y"].as_f64() else {
-        return Vec::new();
-    };
-    let Some(ww) = frame["w"].as_f64().filter(|v| *v >= 20.0) else {
-        return Vec::new();
-    };
-    let Some(wh) = frame["h"].as_f64().filter(|v| *v >= 20.0) else {
-        return Vec::new();
-    };
-    let Ok(c) = CString::new(b64) else {
-        return Vec::new();
-    };
-    let ptr = unsafe { sumi_ocr_elements_from_jpeg(c.as_ptr(), wx, wy, ww, wh) };
-    if ptr.is_null() {
-        return Vec::new();
+    if config["enabled"] != true {
+        return Value::Null;
     }
-    unsafe {
-        let parsed = serde_json::from_slice::<Vec<Value>>(CStr::from_ptr(ptr).to_bytes())
-            .unwrap_or_default();
-        sumi_free(ptr);
-        parsed
-    }
-}
-
-pub fn live_elements_for(s: &Store, hint: &str) -> Value {
-    let Ok(config) = crate::activity::config(s) else {return Value::Null;};
-    if config["enabled"] != true {return Value::Null;}
-    let Ok(hint) = CString::new(hint) else {return Value::Null;};
+    let generation = config["generation"].clone();
     let config = CString::new(config.to_string()).unwrap();
-    let ptr = unsafe {sumi_capture_elements_for(hint.as_ptr(), config.as_ptr())};
+    let ptr = unsafe { beside_capture_front_elements(config.as_ptr()) };
     if ptr.is_null() {
         return json!({"elements": []});
     }
     unsafe {
-        let parsed = serde_json::from_slice::<Value>(CStr::from_ptr(ptr).to_bytes())
+        let mut parsed = serde_json::from_slice::<Value>(CStr::from_ptr(ptr).to_bytes())
             .unwrap_or_else(|_| json!({"elements": []}));
         sumi_free(ptr);
-        parsed
+        parsed["generation"] = generation;
+        if usable(s, &parsed) {
+            parsed
+        } else {
+            Value::Null
+        }
     }
 }
 
-pub fn highlight(a: &Value) -> Res<Value> {
-    let x = a["x"].as_f64().ok_or("Missing x coordinate.")?;
-    let y = a["y"].as_f64().ok_or("Missing y coordinate.")?;
-    let w = a["w"].as_f64().unwrap_or(48.0).max(16.0);
-    let h = a["h"].as_f64().unwrap_or(28.0).max(16.0);
-    let label = CString::new(a["label"].as_str().unwrap_or("").replace('\0', "")).msg()?;
-    let note = CString::new(a["note"].as_str().unwrap_or("").replace('\0', "")).msg()?;
-    let duration = a["durationMs"].as_i64().unwrap_or(10000).clamp(1000, 30000) as i32;
-    unsafe {
-        sumi_overlay_highlight(x, y, w, h, label.as_ptr(), note.as_ptr(), duration);
+pub fn describe_front(s: &Store) -> Value {
+    let mut snap = live_elements(s);
+    if let Some(fields) = snap.as_object_mut() {
+        fields.remove("image");
     }
-    Ok(json!({"highlighted": true}))
+    snap
+}
+
+fn owner(snap: &Value) -> Value {
+    json!({"pid":snap["pid"],"wid":snap["wid"],"bundle":snap["bundle"],
+        "window":snap.get("window").unwrap_or(&snap["windowFrame"])})
+}
+
+pub fn visual_frame<'a>(snap: &'a Value, brain: &Value) -> Option<&'a Value> {
+    (brain["usedImage"] == true && snap["window"].is_object()).then_some(&snap["window"])
+}
+
+pub fn current(snap: &Value) -> bool {
+    if !snap["wid"].is_number() || !snap["pid"].is_number() {
+        return false;
+    }
+    CString::new(owner(snap).to_string())
+        .is_ok_and(|c| unsafe { beside_window_current(c.as_ptr()) == 1 })
+}
+
+pub fn usable(s: &Store, snap: &Value) -> bool {
+    crate::activity::config(s)
+        .ok()
+        .is_some_and(|cfg| cfg["enabled"] == true && cfg["generation"] == snap["generation"])
+        && current(snap)
+}
+
+pub fn live_image<'a>(s: &Store, snap: &'a Value) -> Option<&'a str> {
+    let cfg = crate::activity::config(s).ok()?;
+    if cfg["generation"] != snap["generation"] || !current(snap) {
+        return None;
+    }
+    snap["image"].as_str().filter(|v| !v.is_empty())
+}
+
+pub fn present(s: &Store, snap: &Value, steps: &mut Vec<Value>) {
+    steps.truncate(8);
+    if steps.is_empty() {
+        return;
+    }
+    if !current(snap)
+        || crate::activity::config(s)
+            .ok()
+            .is_none_or(|cfg| cfg["generation"] != snap["generation"])
+    {
+        steps.clear();
+        return;
+    }
+    let target = owner(snap);
+    let request = json!({"owner":target,"steps":steps,"config":crate::activity::config(s).unwrap_or_default()});
+    if let Ok(c) = CString::new(request.to_string()) {
+        unsafe { sumi_overlay_highlight_steps(c.as_ptr()) };
+    }
+    for step in steps {
+        step["owner"] = target.clone();
+    }
+}
+
+pub fn replay(s: &Store, step: &Value) -> Res<Value> {
+    let snap = live_elements(s);
+    if owner(&snap) != step["owner"] || !current(&snap) {
+        return Err("The window changed. Ask Beside to point again.".into());
+    }
+    let item = snap["elements"]
+        .as_array()
+        .and_then(|els| {
+            els.iter()
+                .find(|v| v["label"] == step["label"] && v["x"] == step["x"] && v["y"] == step["y"])
+        })
+        .ok_or("That control moved. Ask Beside to point again.")?;
+    let mut steps = vec![item.clone()];
+    present(s, &snap, &mut steps);
+    Ok(json!({"highlighted":!steps.is_empty()}))
 }
 
 pub fn clear() {
@@ -243,13 +276,12 @@ pub fn extract_highlights_with_frame(
 
 fn guidance_tokens(text: &str, app_name: &str) -> Vec<String> {
     const STOP: &[&str] = &[
-        "where", "can", "could", "would", "should", "what", "which", "when", "how",
-        "see", "find", "show", "point", "locate", "open", "view", "access", "check",
-        "click", "press", "tap", "button", "menu", "tab", "icon", "option", "section",
-        "panel", "screen", "window", "page", "app", "here", "there", "this", "that",
-        "the", "for", "with", "from", "into", "onto", "about", "under", "inside",
-        "your", "you", "my", "our", "me", "in", "on", "at", "to", "of", "is", "are",
-        "do", "does", "did", "all", "get", "go",
+        "where", "can", "could", "would", "should", "what", "which", "when", "how", "see", "find",
+        "show", "point", "locate", "open", "view", "access", "check", "click", "press", "tap",
+        "button", "menu", "tab", "icon", "option", "section", "panel", "screen", "window", "page",
+        "app", "here", "there", "this", "that", "the", "for", "with", "from", "into", "onto",
+        "about", "under", "inside", "your", "you", "my", "our", "me", "in", "on", "at", "to", "of",
+        "is", "are", "do", "does", "did", "all", "get", "go",
     ];
     let stop: HashSet<&str> = STOP.iter().copied().collect();
     let app_lower = app_name.to_lowercase();
@@ -270,7 +302,8 @@ pub fn resolve_highlights(
     window_frame: Option<&Value>,
     app_name: &str,
 ) -> (String, Vec<Value>) {
-    let (cleaned, mut highlights) = extract_highlights_with_frame(raw_answer, elements, window_frame);
+    let (cleaned, mut highlights) =
+        extract_highlights_with_frame(raw_answer, elements, window_frame);
     if !highlights.is_empty() || elements.is_empty() {
         return (cleaned, highlights);
     }
@@ -318,7 +351,9 @@ pub fn resolve_highlights(
             }
             if matches!(
                 el["region"].as_str(),
-                Some("left sidebar" | "top bar" | "top-left bar" | "top-right bar" | "right sidebar")
+                Some(
+                    "left sidebar" | "top bar" | "top-left bar" | "top-right bar" | "right sidebar"
+                )
             ) {
                 score += 15;
             }
@@ -358,6 +393,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn coordinates_need_actual_pixels_and_visible_ids_keep_their_order() {
+        let snap = json!({"window":{"x":100,"y":35,"w":600,"h":420}});
+        let raw = "First, choose a tab. [[point:10,12,24,15|First tab]]";
+        assert!(extract_highlights_with_frame(
+            raw,
+            &[],
+            visual_frame(&snap, &json!({"usedImage":false}))
+        )
+        .1
+        .is_empty());
+        assert_eq!(
+            extract_highlights_with_frame(
+                raw,
+                &[],
+                visual_frame(&snap, &json!({"usedImage":true}))
+            )
+            .1
+            .len(),
+            1
+        );
+        let controls = vec![
+            json!({"id":"E1","label":"Review","x":1,"y":1,"w":20,"h":20}),
+            json!({"id":"E2","label":"Summary","x":2,"y":2,"w":20,"h":20}),
+        ];
+        let (_, steps) = extract_highlights_with_frame(
+            "Read both. [[point:E2|Start]] [[point:E1|Finish]]",
+            &controls,
+            None,
+        );
+        assert_eq!(
+            steps.iter().map(|v| &v["label"]).collect::<Vec<_>>(),
+            vec!["Summary", "Review"]
+        );
+    }
+
+    #[test]
     fn parses_point_tags_by_id_and_label_and_strips_markup() {
         let elements = vec![
             json!({"id": "E1", "role": "button", "label": "Export", "x": 120.0, "y": 40.0, "w": 64.0, "h": 28.0}),
@@ -365,7 +436,10 @@ mod tests {
         ];
         let raw = "Click Export in the top bar [[point:E1|Save as PDF]], then enable Include notes [[point:Include notes|Keep comments]].";
         let (clean, hits) = extract_highlights(raw, &elements);
-        assert_eq!(clean, "Click Export in the top bar, then enable Include notes.");
+        assert_eq!(
+            clean,
+            "Click Export in the top bar, then enable Include notes."
+        );
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0]["id"], "E1");
         assert_eq!(hits[0]["note"], "Save as PDF");
@@ -390,7 +464,9 @@ mod tests {
     fn detects_visual_guidance_questions() {
         assert!(wants_guidance("How do I export this file?"));
         assert!(wants_guidance("Show me where the mute button is"));
-        assert!(wants_guidance("where can i see my automations in antigravity?"));
+        assert!(wants_guidance(
+            "where can i see my automations in antigravity?"
+        ));
         assert!(!wants_guidance("Summarize this email"));
     }
 

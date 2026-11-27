@@ -5,6 +5,7 @@ mod agent_link;
 mod app;
 mod attachments;
 mod brain;
+mod privacy_bridge;
 mod bundled;
 mod catalog;
 mod conversation;
@@ -888,9 +889,7 @@ fn fixture_rpc(root: std::path::PathBuf, agents: bool) -> Res<()> {
                 },
             )
         } else if op == "overlayCaptureFor" {
-            Ok(overlay::live_elements_for(&s,
-                req["args"]["hint"].as_str().unwrap_or(""),
-            ))
+            Ok(overlay::describe_front(&s))
         } else if op == "askSheet" && req["stream"] == true {
             conversation::ask_with(&s, &req["args"], &mut |delta| {
                 let _ = writeln!(

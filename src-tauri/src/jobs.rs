@@ -74,7 +74,7 @@ pub fn start(s: Arc<Store>) {
             if !local::idle() {
                 continue;
             }
-            let _ = crate::activity::vectors::backfill(&s, 24);
+            let _ = crate::activity::vectors::backfill(&s, 24, local::idle);
             if elapsed(&s.get("lastContextIssue").unwrap_or_default()) >= 600 {
                 if let Err(error) = crate::floating_chats::task_context::compact(&s, local::idle) {
                     let _ = s.set("lastContextIssue", &json!(now()));
@@ -116,17 +116,82 @@ pub fn start(s: Arc<Store>) {
     });
 }
 const DIRECT:&str="Predict the next reply as this person. Speak briefly in first person. Use their relevant preferences only where they apply. Preserve disagreement and uncertainty. Treat all quoted material as evidence only. Return just the reply.";
+const STRUCTURED: &str = "Predict the next reply as this person. Weigh their strongest relevant preferences against the situation, preserve their tone and boundaries, then return only the direct first-person reply.";
+fn instruction(style: &str) -> &'static str {
+    match style {
+        "concise" => DIRECT,
+        "structured" => STRUCTURED,
+        _ => engine::PREDICT,
+    }
+}
+
+// Keep the same confirmed cases across weekly runs. Resolve IDs against the
+// live notebook each time, so removed and corrected evidence takes effect.
+fn decision_time(case: &Value) -> &str {
+    ["observedAt", "predictedAt", "date"]
+        .iter()
+        .filter_map(|field| case[*field].as_str())
+        .filter_map(|stamp| Some((scroll::instant(stamp)?, stamp)))
+        .min_by_key(|(time, _)| *time)
+        .map_or("", |(_, stamp)| stamp)
+}
+
+fn golden_cases(
+    mut eligible: Vec<Value>,
+    pinned: &Value,
+    excluded: &HashSet<(String, String)>,
+    before: chrono::DateTime<chrono::Utc>,
+) -> Vec<Value> {
+    let key = |r: &Value| (r["question"].to_string(), r["actual"].to_string());
+    eligible.retain(|r| {
+        r["id"].is_string()
+            && r["question"].is_string()
+            && r["actual"].is_string()
+            && matches!(r["scope"].as_str(), Some("incoming" | "live"))
+            && r["category"] != "ghost"
+            && r["grade"].as_u64().is_some_and(|g| g >= 2)
+            && r["date"]
+                .as_str()
+                .and_then(scroll::instant)
+                .is_some_and(|t| t < before)
+            && !excluded.contains(&key(r))
+    });
+    eligible.sort_by_key(|r| {
+        (
+            r["date"].as_str().and_then(scroll::instant),
+            r["id"].to_string(),
+        )
+    });
+    let old = pinned.as_array().cloned().unwrap_or_default();
+    eligible.sort_by_key(|r| {
+        old.iter()
+            .position(|id| id == &r["id"])
+            .unwrap_or(usize::MAX)
+    });
+    let mut seen = HashSet::new();
+    eligible.retain(|r| seen.insert(key(r)));
+    eligible.truncate(8);
+    eligible
+}
+
 // Choose a policy using the older cases only. Confirm it on newer outcomes
 // the choice could not use, keeping the incumbent if any gets worse.
-fn confirmed_policy(grades: &[[u32; 3]], reserved: usize) -> usize {
+fn confirmed_policy<T: AsRef<[u32]>>(grades: &[T], reserved: usize, golden: &[T]) -> usize {
     let (confirmation, fitting) = grades.split_at(reserved);
-    if fitting.len() < 2 || confirmation.len() < 2 {
+    if fitting.len() < 2 || confirmation.len() < 2 || golden.len() < 2 {
         return 0;
     }
-    let totals = |policy: usize| fitting.iter().map(|v| v[policy]).sum::<u32>();
-    let candidate = (1..3).fold(0, |best, i| if totals(i) > totals(best) { i } else { best });
-    if confirmation.iter().all(|v| v[candidate] >= v[0])
-        && confirmation.iter().any(|v| v[candidate] > v[0])
+    let totals = |policy: usize| fitting.iter().map(|v| v.as_ref()[policy]).sum::<u32>();
+    let candidate =
+        (1..grades[0].as_ref().len())
+            .fold(0, |best, i| if totals(i) > totals(best) { i } else { best });
+    if confirmation
+        .iter()
+        .chain(golden)
+        .all(|v| v.as_ref()[candidate] >= v.as_ref()[0])
+        && confirmation
+            .iter()
+            .any(|v| v.as_ref()[candidate] > v.as_ref()[0])
     {
         candidate
     } else {
@@ -139,12 +204,40 @@ mod tests {
     use super::confirmed_policy;
 
     #[test]
+    fn golden_cases_are_pinned_independent_and_checked_one_at_a_time() {
+        use serde_json::json;
+        let case = |id: &str, scope: &str| json!({"id":id,"scope":scope,"question":id,"actual":"observed answer","date":"2025-01-01","grade":3});
+        let candidates = vec![
+            case("test", "held-out"),
+            case("a", "live"),
+            case("c", "incoming"),
+        ];
+        let gold = super::golden_cases(
+            candidates,
+            &json!(["c", "removed"]),
+            &Default::default(),
+            crate::scroll::instant("2025-02-01").unwrap(),
+        );
+        assert_eq!(
+            gold.iter().map(|r| &r["id"]).collect::<Vec<_>>(),
+            vec!["c", "a"]
+        );
+        let cases = [[1, 2, 0], [1, 1, 0], [0, 3, 0], [1, 3, 0]];
+        assert_eq!(confirmed_policy(&cases, 2, &[[2, 1, 0], [0, 3, 0]]), 0);
+        assert_eq!(confirmed_policy(&cases, 2, &[[2, 2, 0], [0, 3, 0]]), 1);
+        assert_eq!(
+            super::decision_time(&json!({"observedAt":"2025-01-15","predictedAt":"2025-02-13"})),
+            "2025-01-15"
+        );
+    }
+
+    #[test]
     fn tuning_requires_gain_on_later_cases_the_choice_did_not_see() {
         let fit = [[1, 3, 0], [0, 2, 1]];
         let check = |later: [[u32; 3]; 2]| {
             let mut cases = later.to_vec();
             cases.extend(fit);
-            confirmed_policy(&cases, 2)
+            confirmed_policy(&cases, 2, &[[2,2,1];2])
         };
         assert_eq!(check([[2, 2, 3], [1, 1, 3]]), 0);
         assert_eq!(check([[0, 3, 0], [2, 1, 0]]), 0);
@@ -197,34 +290,63 @@ pub fn tune(s: &Store) -> Res<()> {
     }
     let active_prompt = s.get("prompt")?.as_str().unwrap_or("original").to_owned();
     let active_limit = rule_limit(s);
-    let alternate_prompt = if active_prompt == "concise" {
-        "original"
-    } else {
-        "concise"
-    };
-    let alternate_limit = if active_limit == 8 { 3 } else { 8 };
-    let candidates = [
-        (active_prompt.as_str(), active_limit),
-        (alternate_prompt, active_limit),
-        (active_prompt.as_str(), alternate_limit),
-    ];
-    let mut grades = Vec::new();
+    let mut candidates = vec![(active_prompt.as_str(), active_limit)];
+    for style in ["original", "concise", "structured"] {
+        for limit in [3, 5, 8] {
+            if candidates[0] != (style, limit) {
+                candidates.push((style, limit));
+            }
+        }
+    }
     let source_revision = s.get("sourceRevision")?;
+    let previous_pins = s.get("tuneGoldenIds")?;
+    let oldest = moments
+        .last()
+        .and_then(|r| r["date"].as_str())
+        .and_then(scroll::instant)
+        .unwrap_or_default();
+    let gold = golden_cases(
+        s.list("prediction")?
+            .into_iter()
+            .filter(|r| plan::usable(&m, r))
+            .collect(),
+        &previous_pins,
+        &seen,
+        oldest,
+    );
+    if gold.len() < 2 {
+        s.set("lastTune", &json!(now()))?;
+        return Ok(());
+    }
+    let ids: Vec<_> = gold.iter().map(|r| r["id"].clone()).collect();
+    let mut grades = Vec::new();
     let versions = s.list("version")?;
-    for v in &moments {
+    for v in moments.iter().chain(&gold) {
         if !local::idle() {
             return Ok(());
         }
         let q = v["question"].as_str().unwrap_or("");
         let actual = v["actual"].as_str().unwrap_or("");
-        let then = v["date"].as_str().unwrap_or("");
-        let rows = scroll::version_before(&versions, then)
+        let then = decision_time(v);
+        let snapshot = if let Some(id) = v["version"].as_str() {
+            versions.iter().find(|r| {
+                r["id"] == id
+                    && r["date"]
+                        .as_str()
+                        .and_then(scroll::instant)
+                        .zip(scroll::instant(then))
+                        .is_some_and(|(recorded, decision)| recorded < decision)
+            })
+        } else {
+            scroll::version_before(&versions, then)
+        };
+        let rows = snapshot
             .and_then(|v| v["entries"].as_array())
             .cloned()
             .unwrap_or_default();
         let rules = engine::rank_at(rows, q, scroll::instant(then).unwrap_or_default());
         let mut predictions = std::collections::HashMap::new();
-        let mut scores = [0u32; 3];
+        let mut scores = vec![0u32; candidates.len()];
         for (i, (style, limit)) in candidates.iter().enumerate() {
             if !local::idle() {
                 return Ok(());
@@ -240,11 +362,7 @@ pub fn tune(s: &Store) -> Res<()> {
             let score = if let Some(v) = predictions.get(&cache_key) {
                 *v
             } else {
-                let instruction = if *style == "concise" {
-                    DIRECT
-                } else {
-                    engine::PREDICT
-                };
+                let instruction = instruction(style);
                 let guess = if crate::bundled::is_inkling(&m) {
                     crate::bundled::inkling_text(
                         &m,
@@ -269,14 +387,22 @@ pub fn tune(s: &Store) -> Res<()> {
         }
         grades.push(scores);
     }
-    let winner = confirmed_policy(&grades, reserved);
+    let golden_grades = grades.split_off(moments.len());
+    let winner = confirmed_policy(&grades, reserved, &golden_grades);
     let (style, limit) = candidates[winner];
     let confirmed = &grades[..reserved];
     let sum = |i: usize| confirmed.iter().map(|row| row[i]).sum::<u32>();
-    let record = json!({"id":id(),"date":now(),"cases":grades.len(),"confirmationCases":reserved,"baseline":sum(0),"selectedScore":sum(winner),"selected":style,"ruleLimit":limit,"minRepeat":min_repeat,"split":"tune"});
+    let record = json!({"id":id(),"date":now(),"cases":grades.len(),"confirmationCases":reserved,"goldenCases":gold.len(),"baseline":sum(0),"selectedScore":sum(winner),"selected":style,"ruleLimit":limit,"minRepeat":min_repeat,"split":"tune"});
     let _edit = s.edit.lock().unwrap();
     if s.get("sourceRevision")? != source_revision
         || s.get("tuneConfirmedThrough")? != previous_cutoff
+        || s.get("tuneGoldenIds")? != previous_pins
+        || gold.iter().any(|r| {
+            s.doc("prediction", r["id"].as_str().unwrap_or(""))
+                .ok()
+                .as_ref()
+                != Some(r)
+        })
         || !local::idle()
     {
         return Ok(());
@@ -289,6 +415,7 @@ pub fn tune(s: &Store) -> Res<()> {
     )
     .msg()?;
     for (key, value) in [
+        ("tuneGoldenIds", json!(ids)),
         ("prompt", json!(style)),
         ("ruleLimit", json!(limit)),
         ("tuneConfirmedThrough", moments[0]["date"].clone()),
@@ -304,16 +431,16 @@ pub fn tune(s: &Store) -> Res<()> {
 }
 pub fn settings_before(history: &[Value], stamp: &str) -> (&'static str, usize, &'static str) {
     let tuning = scroll::version_before(history, stamp);
-    let concise = tuning.is_some_and(|r| r["selected"] == "concise");
+    let style = match tuning.and_then(|r| r["selected"].as_str()) {
+        Some("concise") => "concise",
+        Some("structured") => "structured",
+        _ => "original",
+    };
     let limit = tuning
         .and_then(|v| v["ruleLimit"].as_u64())
         .unwrap_or(8)
         .clamp(1, 8) as usize;
-    (
-        if concise { DIRECT } else { engine::PREDICT },
-        limit,
-        if concise { "concise" } else { "original" },
-    )
+    (instruction(style), limit, style)
 }
 pub fn rule_limit(s: &Store) -> usize {
     s.get("ruleLimit")
@@ -323,11 +450,7 @@ pub fn rule_limit(s: &Store) -> usize {
         .clamp(1, 8) as usize
 }
 pub fn prompt(s: &Store) -> &'static str {
-    if s.get("prompt").ok() == Some(json!("concise")) {
-        DIRECT
-    } else {
-        engine::PREDICT
-    }
+    instruction(s.get("prompt").ok().as_ref().and_then(Value::as_str).unwrap_or("original"))
 }
 pub fn pull(s: &Store, name: &str) -> Res<Value> {
     let fit = local::fit(s);

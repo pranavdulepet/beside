@@ -170,11 +170,13 @@ void sumi_reveal_after_paint(void *pointer) {
     [web callAsyncJavaScript:@"await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))); return true;"
                    arguments:@{} inFrame:nil inContentWorld:WKContentWorld.pageWorld
            completionHandler:^(id painted, NSError *scriptError) {
+            (void)scriptError;
         if (generation != panelPaintGeneration || !panel.visible) return;
         WKSnapshotConfiguration *config = [WKSnapshotConfiguration new];
         config.rect = CGRectMake(0, 0, 1, 1);
         config.afterScreenUpdates = YES;
         [web takeSnapshotWithConfiguration:config completionHandler:^(NSImage *pixel, NSError *error) {
+            (void)error;
             if (generation == panelPaintGeneration && panel.visible && (pixel || [painted boolValue]))
                 [panelCover removeFromSuperview];
         }];
@@ -293,14 +295,14 @@ void sumi_position_reply(void *pointer) {
         if ([AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio]==AVAuthorizationStatusNotDetermined)
             [AVCaptureDevice requestAccessForMediaType:AVMediaTypeAudio completionHandler:^(BOOL granted) {
                 if (granted && SFSpeechRecognizer.authorizationStatus==SFSpeechRecognizerAuthorizationStatusNotDetermined)
-                    [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status){}];
+                    [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status){ (void)status; }];
             }];
         return;
     }
     if (SFSpeechRecognizer.authorizationStatus!=SFSpeechRecognizerAuthorizationStatusAuthorized) {
         [self fail:@"Allow Speech Recognition for Beside in System Settings, then hold the shortcut again. You can type here now."];
         if (SFSpeechRecognizer.authorizationStatus==SFSpeechRecognizerAuthorizationStatusNotDetermined)
-            [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status){}];
+            [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus status){ (void)status; }];
         return;
     }
     self.recognizer=[[SFSpeechRecognizer alloc] initWithLocale:NSLocale.currentLocale];
@@ -316,7 +318,7 @@ void sumi_position_reply(void *pointer) {
     AVAudioFormat *format=[input outputFormatForBus:0];
     if (format.channelCount==0 || format.sampleRate==0) { [self fail:@"No microphone is available. Type your question here."]; return; }
     SFSpeechAudioBufferRecognitionRequest *request=self.request;
-    [input installTapOnBus:0 bufferSize:1024 format:format block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when){ [request appendAudioPCMBuffer:buffer]; }];
+    [input installTapOnBus:0 bufferSize:1024 format:format block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when){ (void)when; [request appendAudioPCMBuffer:buffer]; }];
     self.tapped=YES;
     __weak SumiVoice *weak=self;
     self.task=[self.recognizer recognitionTaskWithRequest:self.request resultHandler:^(SFSpeechRecognitionResult *r,NSError *error){
@@ -383,4 +385,40 @@ void sumi_voice_key(int down,const char *raw,SumiVoiceCallback callback) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW,60*NSEC_PER_SEC),dispatch_get_main_queue(),^{ if (current==s && !s.released) [s releaseKey]; });
         });
     });
+}
+
+// Read the displayed answer with a system voice.
+static AVSpeechSynthesizer *speechSynth;
+
+void sumi_stop_speaking(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (speechSynth && speechSynth.isSpeaking) {
+            [speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+        }
+    });
+}
+
+void sumi_speak(const char *rawText) {
+    if (!rawText || !rawText[0]) return;
+    NSString *text = [NSString stringWithUTF8String:rawText];
+    if (!text.length) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!speechSynth) {
+            speechSynth = [AVSpeechSynthesizer new];
+        }
+        if (speechSynth.isSpeaking) {
+            [speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+        }
+        AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:text];
+        utterance.rate = MIN(AVSpeechUtteranceMaximumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * 1.04f);
+        AVSpeechSynthesisVoice *voice = [AVSpeechSynthesisVoice voiceWithLanguage:NSLocale.currentLocale.languageCode ?: @"en-US"];
+        if (voice) utterance.voice = voice;
+        [speechSynth speakUtterance:utterance];
+    });
+}
+int beside_speaking(void) {
+    if (NSThread.isMainThread) return speechSynth.isSpeaking;
+    __block BOOL speaking=NO;
+    dispatch_sync(dispatch_get_main_queue(), ^{ speaking=speechSynth.isSpeaking; });
+    return speaking;
 }

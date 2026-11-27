@@ -142,17 +142,22 @@ fn finish_setup(s: &Store, companion: bool) -> Res<Value> {
 pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
     match op {
         "brainStatus" => crate::brain::status(s),
+        "brainVerifyConfidential" => crate::brain::verify_confidential(),
         "brainConfigure" => crate::brain::configure(s, a),
-        "overlayHighlight" => crate::overlay::highlight(a),
+        "overlayHighlight" => crate::overlay::replay(s,a),
+        "speakReply" => crate::point::speak(text(a,"text")?),
+        "stopSpeaking" => {crate::point::stop_speaking(); Ok(Value::Null)},
+        "speechStatus" => Ok(json!(crate::point::speaking())),
         "overlayClear" => {
             crate::overlay::clear();
             Ok(Value::Null)
         }
-        "overlayElements" => Ok(crate::overlay::live_elements_for(s, "")),
+        "overlayElements" => Ok(crate::overlay::describe_front(s)),
         "proactiveStatus" => Ok(json!({
             "settings": crate::proactive::settings(s)?,
             "nudge": crate::proactive::visible(s)
         })),
+        "proactiveMeetingBrief" => crate::proactive::meeting_brief(s,a),
         "proactiveConfigure" => crate::proactive::configure(s, a),
         "proactiveReadMemory" => crate::proactive::read_profile(s, a),
         "proactiveDismiss" => crate::proactive::respond(s, a, true),
@@ -594,7 +599,7 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
         "respond" => {
             let _lock = crate::agent_link::notebook_lock(s)?;
             let mut l = s.doc("log", text(a, "id")?)?;
-            if l["tool"] != "sumi_answer"
+            if !matches!(l["tool"].as_str(),Some("sumi_answer" | "beside_answer"))
                 || !matches!(
                     l["status"].as_str(),
                     Some("waiting" | "answered" | "reviewed")

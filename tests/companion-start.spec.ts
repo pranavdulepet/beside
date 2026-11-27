@@ -171,3 +171,28 @@ test('reading only on summon survives a restart and never starts the observer', 
     await expect(book.rpc('activityAsk', {text: 'What does that say?', onDemand: true, gesture: 'revoked'})).rejects.toThrow(/no longer available/);
   } finally { await closeNotebook(book); }
 });
+
+test('Web in the composer keeps private references local and accepts a bare public topic', async ({page}) => {
+  const book=await fixtureNotebook();
+  try {
+    await book.rpc('companionSetup',{step:'ready'});
+    let last:Row={};
+    await openCompanion(page,async(op,args)=>{
+      if(nativeWindow.has(op))return null;
+      if(op==='activityAsk')last=args;
+      return book.rpc(op,args);
+    });
+    const field=page.getByRole('textbox',{name:/Your question|Follow up/});
+    await expect(page.getByRole('button',{name:'Search public web'})).toHaveCount(0);
+    await field.fill('Find this in my email');
+    await page.getByRole('button',{name:'Search public web'}).click();
+    await field.press('Enter');
+    await expect(page.locator('.activity-turn .reply').last()).toContainText('What public topic');
+    expect(last.forceWeb).toBe(true);
+    expect(last.publicQuery).toBeUndefined();
+    await field.fill('Remember that I prefer short recipes.');
+    await field.press('Enter');
+    await expect(page.locator('.activity-turn .reply').last()).toContainText(/remember|saved|short recipes/i);
+    expect(last.forceWeb).toBe(false);
+  } finally {await closeNotebook(book);}
+});

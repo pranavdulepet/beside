@@ -1,3 +1,4 @@
+mod calendar;
 use crate::{conversation, memory, scroll, store::*};
 use chrono::Utc;
 use regex::Regex;
@@ -14,6 +15,7 @@ pub(crate) struct Watcher {
     last_digest: String,
     active: Option<Value>,
     announced: bool,
+    calendar_minute: i64,
 }
 
 impl Watcher {
@@ -31,6 +33,10 @@ static ERROR_LINE: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap()
 });
 
+pub fn meeting_brief(s: &Store, a: &Value) -> Res<Value> {
+    calendar::read(s, a)
+}
+
 pub fn settings(s: &Store) -> Res<Value> {
     let v = s.get("proactiveSettings")?;
     if v.is_object() {
@@ -46,6 +52,13 @@ pub fn settings(s: &Store) -> Res<Value> {
 
 pub fn configure(s: &Store, a: &Value) -> Res<Value> {
     let mut cfg = settings(s)?;
+    if let Some(on) = a["calendarBriefs"].as_bool() {
+        if on {
+            calendar::authorize()?;
+        }
+        cfg["calendarBriefs"] = json!(on);
+        clear_active(s);
+    }
     if let Some(enabled) = a["enabled"].as_bool() {
         cfg["enabled"] = json!(enabled);
     }
@@ -85,25 +98,32 @@ pub fn follow_front(s: &Store, source: &str, title: &str) {
     }
 }
 
-// Only a dismissal persists. Opening an offer consumes the current dot.
+// Exact dismissals and bounded per-app feedback are committed with the interaction.
 pub fn respond(s: &Store, args: &Value, dismiss: bool) -> Res<Value> {
     let _edit = s.activity_edit.lock().unwrap();
     let mut w = s.proactive.lock().unwrap();
     let active = w.active.as_ref().ok_or("That suggestion has expired.")?;
-    let key = active["id"].as_str().ok_or("That suggestion has expired.")?;
-    if args["id"] != key || (!args["eventId"].is_null() && args["eventId"] != active["eventId"])
+    let key = active["id"]
+        .as_str()
+        .ok_or("That suggestion has expired.")?;
+    if args["id"] != key
+        || (!args["eventId"].is_null() && args["eventId"] != active["eventId"])
         || Utc::now().timestamp() - active["createdAt"].as_i64().unwrap_or(0) > 240
     {
         return Err("That suggestion has expired.".into());
     }
+    let mut db = s.db.lock().unwrap();
+    let tx = db.transaction().msg()?;
     if dismiss {
-        let mut db = s.db.lock().unwrap();
-        let tx = db.transaction().msg()?;
         tx.execute("INSERT OR REPLACE INTO proactive_dismissals(digest,expires) VALUES (?,unixepoch()+604800)", [hash(key)]).msg()?;
-        tx.execute("DELETE FROM proactive_dismissals WHERE digest IN (
-            SELECT digest FROM proactive_dismissals ORDER BY expires DESC,rowid DESC LIMIT -1 OFFSET 100)", []).msg()?;
-        tx.commit().msg()?;
+        tx.execute("DELETE FROM proactive_dismissals WHERE digest IN (SELECT digest FROM proactive_dismissals ORDER BY expires DESC,rowid DESC LIMIT -1 OFFSET 100)", []).msg()?;
     }
+    let kind = feedback_kind(active);
+    tx.execute("INSERT INTO proactive_feedback(app,kind,balance,updated) VALUES (?,?,?,unixepoch())
+      ON CONFLICT(app,kind) DO UPDATE SET balance=max(-8,min(3,(CASE WHEN updated<unixepoch()-604800 THEN 0 ELSE balance END)+excluded.balance)),updated=excluded.updated",
+      rusqlite::params![hash(active["app"].as_str().unwrap_or("")),kind,if dismiss {-1} else {1}]).msg()?;
+    tx.execute("DELETE FROM proactive_feedback WHERE rowid IN (SELECT rowid FROM proactive_feedback ORDER BY updated DESC,rowid DESC LIMIT -1 OFFSET 128)",[]).msg()?;
+    tx.commit().msg()?;
     w.revision = w.revision.wrapping_add(1);
     w.active = None;
     Ok(Value::Null)
@@ -120,7 +140,7 @@ pub fn visible(s: &Store) -> Value {
 fn current(s: &Store, idle_seconds: Option<fn() -> f64>) -> Value {
     let mut w = s.proactive.lock().unwrap();
     if let Some(nudge) = &w.active {
-        if Utc::now().timestamp() - nudge["createdAt"].as_i64().unwrap_or(0) > 240 {
+        if (nudge["kind"] == "meeting" && !calendar::permitted()) || Utc::now().timestamp() - nudge["createdAt"].as_i64().unwrap_or(0) > 240 {
             w.active = None;
         } else {
             if let Some(idle) = idle_seconds.filter(|_| !w.announced) {
@@ -259,14 +279,14 @@ pub fn read_profile(s: &Store, request: &Value) -> Res<Value> {
     }).ok_or_else(|| expired.into())
 }
 
-fn find_memory_nudge(
+fn memory_candidates(
     s: &Store,
     event_id: &str,
     source: &str,
     title: &str,
     body: &str,
     now_ts: i64,
-) -> Option<Value> {
+) -> Option<Vec<(i64, Value)>> {
     let screen_words = content_words(body);
     let visible = as_read(body);
     if screen_words.len() < 4 {
@@ -366,34 +386,62 @@ fn find_memory_nudge(
     let focus = title_terms(title);
     let mut query_terms: Vec<_> = focus.iter().cloned().collect();
     query_terms.sort();
-    let context_terms = query.split_whitespace().take(24).map(str::to_owned).collect::<Vec<_>>();
+    let context_terms = query
+        .split_whitespace()
+        .take(24)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
     // Untitled chats and new browser tabs still expose the current conversation.
     // With no topic in the title, require three terms in the same unseen sentence.
-    let lookup = if query_terms.is_empty() { &context_terms } else { &query_terms };
+    let lookup = if query_terms.is_empty() {
+        &context_terms
+    } else {
+        &query_terms
+    };
     if !lookup.is_empty() {
-        for row in crate::activity::imported::candidates(s, lookup, &context_terms).unwrap_or_default() {
+        for row in
+            crate::activity::imported::candidates(s, lookup, &context_terms).unwrap_or_default()
+        {
             let name = row["title"].as_str().unwrap_or("");
             let origin = clean_nudge_title(source, title);
-            if (matches!(app_name(source, title).as_str(), "Mail" | "Notes" | "Microsoft Outlook")
-                && title.to_lowercase().contains(&name.to_lowercase())) || name.eq_ignore_ascii_case(&origin) {
+            if (matches!(
+                app_name(source, title).as_str(),
+                "Mail" | "Notes" | "Microsoft Outlook"
+            ) && title.to_lowercase().contains(&name.to_lowercase()))
+                || name.eq_ignore_ascii_case(&origin)
+            {
                 continue;
             }
-            let Some((score, line)) = note_passage(name, row["body"].as_str().unwrap_or(""), &focus, &screen_words, &visible) else { continue };
-            if best.as_ref().is_some_and(|(prev, _)| *prev >= score) { continue; }
-            best = Some((score, json!({
-                "id":format!("passage:{}", &hash(&format!("{}:{title}:{line}",row["id"]))[..20]),
-                "kind":"memory", "badge":if row["kind"] == "mail" {"Related email"} else {"Related note"}, "title":name,"detail":line,"sourceId":row["id"],
-                "source":source,"app":app_name(source,title),"createdAt":now_ts,
-                "prompt":"How does this relate to the passage Beside found?"
-            })));
+            let Some((score, line)) = note_passage(
+                name,
+                row["body"].as_str().unwrap_or(""),
+                &focus,
+                &screen_words,
+                &visible,
+            ) else {
+                continue;
+            };
+            if best.as_ref().is_some_and(|(prev, _)| *prev >= score) {
+                continue;
+            }
+            best = Some((
+                score,
+                json!({
+                    "id":format!("passage:{}", &hash(&format!("{}:{title}:{line}",row["id"]))[..20]),
+                    "kind":"memory", "badge":if row["kind"] == "mail" {"Related email"} else {"Related note"}, "title":name,"detail":line,"sourceId":row["id"],
+                    "source":source,"app":app_name(source,title),"createdAt":now_ts,
+                    "prompt":"How does this relate to the passage Beside found?"
+                }),
+            ));
         }
     }
-    if let Some((_, passage)) = best {
-        return Some(passage);
-    }
+    let mut candidates: Vec<_> = best
+        .map(|(score, n)| ((58 + score as i64).min(96), n))
+        .into_iter()
+        .collect();
     // A precise document can answer a question outright. Consider profile
     // reminders only when several distinctive terms tie them to this screen.
-    profile_records(s).into_iter().filter_map(|(kind, record)| {
+    let profile=profile_records(s).into_iter().filter_map(|(kind, record)| {
         let text = record["text"].as_str()?;
         let words = content_words(text);
         let shared = words.intersection(&screen_words).count();
@@ -406,7 +454,44 @@ fn find_memory_nudge(
             "detail":text.chars().take(140).collect::<String>(),"app":app_name(source,title),
             "source":source,"createdAt":now_ts
         })))
-    }).max_by_key(|(shared, _)| *shared).map(|(_, v)| v)
+    }).max_by_key(|(shared, _)| *shared);
+    if let Some((shared, profile)) = profile {
+        candidates.push(((30 + 4 * shared as i64).min(68), profile));
+    }
+    Some(candidates)
+}
+
+fn find_memory_nudge(
+    s: &Store,
+    event: &str,
+    source: &str,
+    title: &str,
+    body: &str,
+    now: i64,
+) -> Option<Value> {
+    memory_candidates(s, event, source, title, body, now)?
+        .into_iter()
+        .max_by_key(|(score, _)| *score)
+        .map(|(_, v)| v)
+}
+
+fn feedback_kind(n: &Value) -> &str {
+    if n["profileId"].is_string() {
+        "profile"
+    } else {
+        n["kind"].as_str().unwrap_or("memory")
+    }
+}
+
+fn pick(s: &Store, candidates: Vec<(i64, Value)>) -> Option<Value> {
+    let db = s.db.lock().ok()?;
+    candidates.into_iter().filter_map(|(score,n)|{
+        let key=n["id"].as_str()?;
+        let (dismissed,balance):(bool,i64)=db.query_row("SELECT EXISTS(SELECT 1 FROM proactive_dismissals WHERE digest=?1 AND expires>unixepoch()),COALESCE((SELECT balance FROM proactive_feedback WHERE app=?2 AND kind=?3 AND updated>=unixepoch()-604800),0)",
+          rusqlite::params![hash(key),hash(n["app"].as_str()?),feedback_kind(&n)],|r|Ok((r.get(0)?,r.get(1)?))).ok()?;
+        let score=score+balance*9;
+        (!dismissed && balance > -4 && score>=35).then_some((score,n))
+    }).max_by_key(|(score,_)|*score).map(|(_,n)|n)
 }
 
 fn find_reply_nudge(source: &str, title: &str, body: &str, now_ts: i64) -> Option<Value> {
@@ -449,13 +534,15 @@ pub fn evaluate(
 ) -> Option<Value> {
     let revision = s.proactive.lock().ok()?.observe(source, title);
     let cfg = settings(s).ok()?;
-    if !crate::activity::allowed(&crate::activity::config(s).ok()?, source) || cfg["enabled"] != true {
+    if !crate::activity::allowed(&crate::activity::config(s).ok()?, source)
+        || cfg["enabled"] != true
+    {
         return None;
     }
     let app = app_name(source, title);
     if cfg["mutedApps"]
-            .as_array()
-            .is_some_and(|list| list.iter().any(|v| v == source || v == app.as_str()))
+        .as_array()
+        .is_some_and(|list| list.iter().any(|v| v == source || v == app.as_str()))
     {
         return None;
     }
@@ -466,7 +553,10 @@ pub fn evaluate(
     {
         let w = s.proactive.lock().ok()?;
         if !force {
-            if w.last_digest == digest && w.active.as_ref().is_none_or(|n| n["eventId"] == event_id) {
+            if (cfg["calendarBriefs"] != true || w.calendar_minute == now_ts / 60)
+                && w.last_digest == digest
+                && w.active.as_ref().is_none_or(|n| n["eventId"] == event_id)
+            {
                 return None;
             }
             if w.active.is_none() && now_ts - w.last_nudge_at < cooldown {
@@ -475,19 +565,20 @@ pub fn evaluate(
         }
     }
 
-    let candidate = find_memory_nudge(s, event_id, source, title, body, now_ts)
-        .or_else(|| find_error_nudge(source, title, body, now_ts))
-        .or_else(|| find_reply_nudge(source, title, body, now_ts));
-
-    // Read storage before taking the watcher lock. Responding bumps the revision
-    // so an evaluation already in flight cannot republish the consumed offer.
-    let dismissed = match candidate.as_ref().and_then(|n| n["id"].as_str()) {
-        Some(key) => s.db.lock().ok()?.query_row(
-            "SELECT EXISTS(SELECT 1 FROM proactive_dismissals WHERE digest=? AND expires>unixepoch())",
-            [hash(key)], |row| row.get::<_, bool>(0),
-        ).ok()?,
-        None => false,
-    };
+    let mut candidates =
+        memory_candidates(s, event_id, source, title, body, now_ts).unwrap_or_default();
+    if let Some(error) = find_error_nudge(source, title, body, now_ts) {
+        candidates.push((84, error));
+    }
+    if let Some(reply) = find_reply_nudge(source, title, body, now_ts) {
+        candidates.push((50, reply));
+    }
+    if cfg["calendarBriefs"] == true {
+        if let Some(brief) = calendar::candidate(s, source, &app, now_ts) {
+            candidates.push((72, brief));
+        }
+    }
+    let candidate = pick(s, candidates);
     let epoch = s.get("activityEpoch").ok()?;
     let mut w = s.proactive.lock().ok()?;
     if w.revision != revision {
@@ -496,24 +587,26 @@ pub fn evaluate(
     // A conversation can change subjects without changing its window title.
     // The cooldown limits new interruptions. Evidence for an existing dot
     // still has to match the newly captured passage.
+    w.calendar_minute = now_ts / 60;
     let previous = w.active.take();
     let mut candidate = candidate?;
+    w.last_digest = digest;
     candidate["epoch"] = epoch;
     candidate["eventId"] = json!(event_id);
     candidate["originTitle"] = json!(title);
     let key = candidate["id"].as_str()?;
-    if dismissed {
-        return None;
-    }
     if let Some(same) = previous.filter(|n| !force && n["id"] == key) {
         candidate["createdAt"] = same["createdAt"].clone();
-        if now_ts - candidate["createdAt"].as_i64()? > 240 { return None; }
+        if now_ts - candidate["createdAt"].as_i64()? > 240 {
+            return None;
+        }
     } else {
-        if !force && now_ts - w.last_nudge_at < cooldown { return None; }
+        if !force && now_ts - w.last_nudge_at < cooldown {
+            return None;
+        }
         w.announced = false;
         w.last_nudge_at = now_ts;
     }
-    w.last_digest = digest;
     w.active = Some(candidate.clone());
     Some(candidate)
 }
@@ -561,6 +654,34 @@ pub fn scan_latest(s: &Store) -> Res<Value> {
 mod tests {
     use super::*;
 
+
+    #[test]
+    fn repeated_reply_dismissals_spare_other_apps_and_other_kinds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::with_key(tmp.path().into(), &[15; 32]).unwrap();
+        crate::activity::init(&s).unwrap();
+        let row = |app: &str, kind: &str, i: usize| json!({"id":format!("{app}/{kind}/{i}"),"kind":kind,"app":app,"createdAt":Utc::now().timestamp()});
+        for i in 0..4 {
+            let n = row("Mail", "reply", i);
+            s.proactive.lock().unwrap().active = Some(n.clone());
+            respond(&s, &n, true).unwrap();
+        }
+        assert!(pick(&s, vec![(90, row("Mail", "reply", 5))]).is_none());
+        assert!(pick(&s, vec![(50, row("Messages", "reply", 5))]).is_some());
+        assert_eq!(
+            pick(
+                &s,
+                vec![
+                    (85, row("Mail", "help", 0)),
+                    (40, row("Notes", "memory", 0))
+                ]
+            )
+            .unwrap()["kind"],
+            "help"
+        );
+        crate::activity::forget(&s, &json!({"scope":"all"})).unwrap();
+        assert!(pick(&s, vec![(50, row("Mail", "reply", 5))]).is_some());
+    }
 
     #[test]
     fn a_pause_reveals_the_pending_offer_and_only_explicit_dismissal_survives_reopening() {

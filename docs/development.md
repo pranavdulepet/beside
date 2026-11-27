@@ -2,7 +2,7 @@
 
 ## Run the desktop app
 
-Start on an Apple Silicon Mac running macOS 14 or later. Install rustup for the pinned Rust toolchain, Node.js 22.12 or later, npm, and the Xcode command line tools. The runtime setup verifies the pinned upstream llama.cpp archive. You can pass a previously downloaded archive as its first argument for offline setup.
+Start on an Apple Silicon Mac running macOS 14 or later. Install rustup for the pinned Rust toolchain, Node.js 22.12 or later, npm, Go with automatic toolchain selection (the confidential helper pins Go 1.26.11), and the Xcode command line tools. The runtime setup verifies the pinned upstream llama.cpp archive. You can pass a previously downloaded archive as its first argument to restore llama.cpp offline. Building the confidential helper offline also requires its Go modules and toolchain to have been cached.
 
 ```sh
 git clone https://github.com/pranavdulepet/beside.git
@@ -26,10 +26,13 @@ Follow a shortcut, a background observation or a memory correction through the r
 | Memory and ownership | [Store](../src-tauri/src/store.rs), [memory](../src-tauri/src/memory.rs), [agent access](../src-tauri/src/agent_link.rs) |
 | Tests | [Browser workflows](../tests/notebook.spec.ts) and Rust tests alongside their modules |
 
+Beside uses the native on-device embedding index by default. To use an embedding model you already have in Ollama, start Beside with `BESIDE_OLLAMA_EMBED_MODEL=name:tag` in its environment. The idle worker reads the local manifest, verifies the GGUF blob and builds the new index. Inference runs inside the bundled, offline llama.cpp runtime on loopback. Model tags from remote registries are unsupported. Set `BRAVE_API_KEY` in the app’s environment to enable Brave as a web search fallback.
+
 ## Run the checks
 
 ```sh
 npm run build
+(cd src-tauri/confidential && go test -mod=readonly ./...)
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 cargo build --locked --manifest-path src-tauri/Cargo.toml
 # The browser suite uses the packaged archive and the model described below.
@@ -47,7 +50,7 @@ To exercise the publisher download in the browser suite, set `BESIDE_TEST_MODEL_
 
 For the local activity walkthrough, place the pinned Inkling model and optional vision projector in the ignored `release/` directory as `Inkling-2-Mini-UD-IQ3_XXS.gguf` and `mmproj-F16.gguf`. Run `BESIDE_TEST_INKLING=1 npm run test:ui -- -g 'ask anywhere remembers'` with both files to exercise OCR, visual inference, corrections, and forgetting against the Rust backend. The test uses a synthetic window and never needs permission to inspect your screen.
 
-The weekend walkthrough is opt-in. With the local model and browser prerequisites above, run `BESIDE_LIVE_SEARCH=1 npm run test:ui -- -g 'a weekend plan'`. It creates a synthetic notebook, searches public listings through the keyless Exa endpoint, checks the source and memory mark, retires the preference, and reopens the notebook. Results vary with the date and available listings.
+The weekend walkthrough is opt-in. With the local model and browser prerequisites above, run `BESIDE_LIVE_SEARCH=1 npm run test:ui -- -g 'a weekend plan'`. It creates a synthetic notebook, searches public listings through public web search, checks the source and memory mark, retires the preference, and reopens the notebook. Results vary with the date and available listings.
 
 To measure a saved-line lookup on a real Mac, compile the native check with `swiftc -parse-as-library tests/recall-latency.swift -o /tmp/beside-recall-latency`. Tuck the assistant, activate another app, and run the binary with a local JSON example on standard input containing `question`, `answer`, and `quote`. The check submits one question to the open notebook. It times shortcut focus, Return acknowledgement, the new reply, and a window capture in which local OCR verifies the question, answer, and exact line. The pixel time is an upper bound. OCR processing time is excluded.
 

@@ -11,6 +11,7 @@
     <key>NSRequiredContext</key><dict/>
 </dict></array>
 <key>NSAppleEventsUsageDescription</key><string>Read the unlocked Apple Notes you choose to import into your encrypted notebook.</string>
+<key>NSCalendarsFullAccessUsageDescription</key><string>Read the next meeting to show its brief when you turn on Calendar briefs.</string>
 <key>NSMicrophoneUsageDescription</key><string>Hear your question while you hold the shortcut, or include your voice in a meeting you choose to record.</string>
 <key>NSSpeechRecognitionUsageDescription</key><string>Transcribe your held-shortcut questions and meeting notes on this Mac.</string>
 <key>NSAudioCaptureUsageDescription</key><string>Record audio from the meeting app you select in the sharing picker.</string>

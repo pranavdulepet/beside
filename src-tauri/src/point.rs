@@ -79,6 +79,9 @@ pub(crate) fn drafting_selection<'a>(point: &'a Value, question: &str) -> Option
 }
 
 extern "C" {
+    fn sumi_speak(text:*const c_char);
+    fn sumi_stop_speaking();
+    fn beside_speaking()->i32;
     fn sumi_summon_access() -> i32;
     fn sumi_position_reply(pointer: *mut std::ffi::c_void);
     fn sumi_voice_key(down: i32, config: *const c_char, callback: extern "C" fn(*const c_char));
@@ -96,7 +99,15 @@ fn screen_available() -> bool {
     unsafe { sumi_summon_access() != 0 }
 }
 
+pub fn speak(text:&str)->Res<Value>{
+    if text.trim().is_empty() || text.len()>64000{return Err("Choose a reply to read aloud.".into())}
+    let text=std::ffi::CString::new(text).msg()?;unsafe{sumi_speak(text.as_ptr())};Ok(Value::Null)
+}
+pub fn stop_speaking(){unsafe{sumi_stop_speaking()}}
+pub fn speaking()->bool{unsafe{beside_speaking()!=0}}
+
 pub fn dismiss() {
+    stop_speaking();
     if let Ok(mut slot) = LAST.lock() {
         if slot.as_ref().is_some_and(|g| g.payload["onDemand"] == true) {
             *slot = None;
@@ -117,6 +128,7 @@ pub fn expire(clear: bool) {
 }
 
 pub fn key(app: &tauri::AppHandle, down: bool) {
+    if down {stop_speaking();}
     let _ = APP.set(app.clone());
     let s = app.state::<Arc<Store>>();
     let mut config = if down {
@@ -304,7 +316,7 @@ fn answer_window(
         || !document.is_empty()
         || nearby.as_array().is_some_and(|v| !v.is_empty());
     let requires_image = !has_text || (selected.is_none() && activity::asks_for_pixels(question));
-    let image = if requires_image {
+    let image = if requires_image && crate::overlay::current(&point) {
         point["fullImage"].as_str().filter(|v| !v.is_empty())
             .or_else(|| point["image"].as_str().filter(|v| !v.is_empty()))
     } else {
@@ -371,7 +383,9 @@ fn answer_window(
     Ok(Some(output))
 }
 pub fn target(s: &Store, id: &str) -> Res<Value> {
-    with_target(s, id, &LAST, Value::clone)
+    let generation=activity::config(s)?["generation"].clone();
+    let mut point=with_target(s,id,&LAST,Value::clone)?;
+    point["generation"]=generation; Ok(point)
 }
 
 pub(crate) fn check_selection(s: &Store, id: &str, selection: &str) -> Res<()> {

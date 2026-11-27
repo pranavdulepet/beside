@@ -1528,12 +1528,12 @@ fn shared_agent_configuration_survives_connect_repair_and_removal() {
                 .map(|v| v["name"].as_str().unwrap().to_owned())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(tools("Read"), vec!["sumi_context", "sumi_observe"]);
+        assert_eq!(tools("Read"), vec!["beside_recall","beside_profile","sumi_context"]);
         assert_eq!(
             tools("Ask"),
-            vec!["sumi_context", "sumi_predict", "sumi_observe"]
+            vec!["beside_recall","beside_profile","beside_predict","beside_observe","sumi_context","sumi_predict","sumi_observe"]
         );
-        assert_eq!(tools("Answer for me").len(), 4);
+        assert_eq!(tools("Answer for me").len(), 9);
         let untouched = fs::read(&target).unwrap();
         seal::connect(&s, name, tmp.path(), exe).unwrap();
         assert_eq!(fs::read(&target).unwrap(), untouched);

@@ -728,6 +728,8 @@ export function ActivityControls({
       <details>
         <summary>Earlier notes and mail</summary>
         <div className="details-body">
+          <label className="field"><span><input type="checkbox" checked={config.proactive?.calendarBriefs === true} disabled={pending}
+            onChange={e => void run('proactiveConfigure', {calendarBriefs:e.target.checked}, 'calendar-briefs', 'Meeting briefs updated.')} /> Upcoming meeting briefs</span></label>
           <small>Include older notes and messages you haven’t opened with Beside.</small>
           {[
             {label: 'Apple Notes', count: config.importedAppleNotes, unit: 'notes', hint: 'Import unlocked notes into your encrypted notebook.', refresh: 'refreshAppleNotes', remove: 'removeAppleNotes'},
@@ -1314,7 +1316,7 @@ function PublicLookup({
       >
         Search the web
       </button>
-      <small>Only these words go to Exa.</small>
+      <small>Only these search terms leave your notebook.</small>
     </form>
   );
 }
@@ -1399,6 +1401,28 @@ export function ActivitySheet({
     [preview, setPreview] = useState<Row | null>(null),
     [error, fail] = useState('');
   const busy = !!pendingQuestion;
+  const [spoken, setSpoken] = useState<number | null>(null);
+  const [webOverride, setWebOverride] = useState(false);
+  useEffect(() => {
+    if (spoken === null) return;
+    let active = true;
+    const tick = window.setInterval(async () => {
+      try {
+        const speaking = await call('speechStatus');
+        if (active && !speaking) setSpoken(null);
+      } catch {
+        if (active) setSpoken(null);
+      }
+    }, 450);
+    return () => {
+      active = false;
+      window.clearInterval(tick);
+    };
+  }, [spoken]);
+  useEffect(() => {
+    setSpoken(null);
+    return () => {void call('stopSpeaking').catch(() => {});};
+  }, [chatId]);
 
   const field = useRef<HTMLTextAreaElement>(null),
     sequence = useRef(0),
@@ -1529,6 +1553,7 @@ export function ActivitySheet({
     } catch (e) { fail(String(e)); }
   }
   const [provider, route] = useState('');
+  useEffect(() => {setWebOverride(false);}, [chatId, provider]);
   const [selection, renderSelection] = useState('');
   const activeSelection = useRef('');
   const readPendingSelection = useRef<() => Promise<void>>(() => Promise.resolve());
@@ -1884,6 +1909,10 @@ export function ActivitySheet({
   async function submitTyped() {
     const question = field.current?.value ?? text;
     if (!question.trim() || busy || submittingTyped.current) return;
+    if (webOverride || /^\/web\s/i.test(question)) {
+      setWebOverride(false);
+      return ask(question.replace(/^\/web\s+/i, ''), undefined, '', null, undefined, false, undefined, undefined, true);
+    }
     if (close) return ask(question);
     const previousChat = activeChatId.current;
     submittingTyped.current = true;
@@ -1905,12 +1934,13 @@ export function ActivitySheet({
     fresh = false,
     anchorId = fresh ? undefined : anchor?.id,
     related?: Row,
+    forceWeb = false,
   ) {
     const q = question.trim();
     if (!q || (busy && !fresh)) return;
     const n = ++sequence.current;
     const requestChat = activeChatId.current;
-    const selectedText = activeSelection.current;
+    const selectedText = forceWeb ? '' : activeSelection.current;
     const turn = crypto.randomUUID();
     const at = new Date().toISOString();
     setPreview(null);
@@ -1937,7 +1967,7 @@ export function ActivitySheet({
         return;
       }
       const passage =
-        related || selectedText || target || publicQuery
+        forceWeb || related || selectedText || target || publicQuery
           ? null
           : await call('activityRecallPreview', {
               text: q,
@@ -1967,6 +1997,7 @@ export function ActivitySheet({
       const prior = fresh ? undefined : turns.at(-1);
       if (prior?.id) await writes.current;
       const r = await call('activityAsk', {
+        forceWeb,
         selection: target ? undefined : selectedText || undefined,
         gesture: target?.id,
         onDemand: target?.onDemand === true,
@@ -1987,6 +2018,7 @@ export function ActivitySheet({
         previous: prior?.question,
         awaitingSearchCity: prior?.awaitingSearchCity === true,
         awaitingSearchTopic: prior?.awaitingSearchTopic === true,
+        manualWebClarification: prior?.manualWebClarification === true,
         baggageAwaitingWeight: prior?.baggageAwaitingWeight === true,
         clarifyConnection: prior?.clarifyConnection === true,
         allowGeneral: true,
@@ -2376,6 +2408,11 @@ export function ActivitySheet({
                       notify('That suggestion has expired.');
                       return;
                     }
+                    if (current.kind === 'meeting') {
+                      const brief = await call('proactiveMeetingBrief', {id:current.id,eventId:current.eventId});
+                      showProfile({text:brief.text,id:current.id,eventId:current.eventId});
+                      return;
+                    }
                     if (current.profileId) {
                       const saved = await call('proactiveReadMemory', {id: current.id, eventId: current.eventId});
                       showProfile({...saved, id: current.id, eventId: current.eventId});
@@ -2388,8 +2425,8 @@ export function ActivitySheet({
                     route('');
                     await ask(current.prompt, undefined, '', null, undefined, true, current.eventId, current);
                   } catch (e) { fail(String(e)); }
-                }}>{nudge.profileId ? 'Read saved memory' : nudge.kind === 'reply' ? 'Draft a reply' : nudge.kind === 'help' ? 'Explain this' : 'Show connection'} →</button>}
-                <button className="bar-link" onClick={() => void call('proactiveDismiss', {id: nudge.id, eventId: nudge.eventId}).then(() => setNudge(null)).catch(e => fail(String(e)))}>Dismiss</button>
+                }}>{nudge.profileId ? 'Read saved memory' : nudge.kind === 'reply' ? 'Draft a reply' : nudge.kind === 'help' ? 'Explain this' : nudge.kind === 'meeting' ? 'Read meeting brief' : 'Show connection'} →</button>}
+                <button className="bar-link" onClick={() => void call(profile ? 'proactiveAccept' : 'proactiveDismiss', {id: nudge.id, eventId: nudge.eventId}).then(() => setNudge(null)).catch(e => fail(String(e)))}>{profile ? 'Close' : 'Dismiss'}</button>
                 {tab === 'journal' && nudge.app && <button className="bar-link" onClick={() =>
                   void call('proactiveConfigure', {muteApp: nudge.app}).then(() => setNudge(null)).catch(e => fail(String(e)))
                 }>Mute {nudge.app}</button>}
@@ -2768,6 +2805,19 @@ export function ActivitySheet({
                             <button type="button" disabled={savingCorrection} onClick={() => setCorrecting(null)}>Cancel</button>
                           </form>
                         ) : <button className="turn-action-btn" onClick={() => {setCorrecting(i);setCorrection('');}}>Correct this reply</button>)}
+                        <button type="button" className="turn-action-btn" onClick={async () => {
+                          try {
+                            if (spoken === i) {
+                              await call('stopSpeaking');
+                              setSpoken(null);
+                            } else {
+                              await call('speakReply', {text: t.answer});
+                              setSpoken(i);
+                            }
+                          } catch (err) {
+                            fail(String(err));
+                          }
+                        }}>{spoken === i ? 'Stop' : 'Speak'}</button>
                         <button
                           type="button"
                           className="turn-action-btn"
@@ -2954,6 +3004,8 @@ export function ActivitySheet({
                   : 'Tap ⌥⇧Space to type · Hold to speak'}
             </small>
           )}
+          {webOverride && <button type="button" className="point-target" aria-label="Cancel public web search" onClick={() => setWebOverride(false)}>Web ×</button>}
+          {!busy && !webOverride && text.trim() && !provider && <button type="button" className="bar-link" onClick={() => { setWebOverride(true); field.current?.focus(); }}>Search public web</button>}
           <div className="composer-input">
             <label className="activity-question">
               <span className="assist-field-label">

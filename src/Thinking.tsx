@@ -225,7 +225,7 @@ export function ThinkingSettings({
                 }
               }}
             />
-            <span>Automatically look up local listings via Exa</span>
+            <span>Automatically look up local listings</span>
           </label>
           <Sources
             sources={data.sources}

@@ -40,6 +40,7 @@ Open **What Beside knows → Sources**. Observation starts when you select **Sta
 | Other open windows | Under **All displays**, enable **Include other open windows in local answers**. Beside lists eligible macOS windows, including covered windows. It rotates through them for on-device text recognition. The live list and excerpts stay in memory, and the model can use them for local answers. Open Memory to see **In front** and **Also open**. Closing a window removes it on the next refresh. Minimized windows can lack readable content, and inactive browser tabs have no independent window to capture. |
 | Folders and local files | Choose folders explicitly. Beside searches them with Spotlight and a bounded fallback scan and can read text, Markdown, PDF, RTF, Word and spreadsheet files. Remove a folder to revoke future searches. |
 | Voice | Microphone and Speech Recognition support hold-to-talk. On-device recognition needs a supported language. Typed questions work independently of the microphone. |
+| Calendar | Turn on **Upcoming meeting briefs** in Sources to see an upcoming meeting and related passages from your imported notes or mail. |
 | Meetings | On macOS 15 or later, select **Record a meeting**, choose whether to include your microphone, and pick the window to share. Stop using the sheet or menu bar. **Get action items from last meeting** uses local transcription and a local model. |
 
 The activity index retains passages for up to 30 days. Optional visual recall retains up to 150 encrypted previews for 24 hours. Apple Notes capture waits for the visible title and nearby text to settle. Use **Last seen** to check observation, even when the screen hasn’t changed. Forgetting a source also removes observations and corrections derived from it.
@@ -86,13 +87,15 @@ In TextEdit, select a sentence and choose **TextEdit → Services → Ask Beside
 
 Tell Beside “For project updates, I prefer a paragraph of background first.” If you later change that to “Actually, I want the risk first, then the decision,” Beside saves the new preference. From your next project note, select the brief and ask “Draft my project update. Two sentences, please.” You can check or retire the preference in **What Beside knows → Memory**.
 
+Ask “Where do I click?” in an allowed window to point to a visible control. For a walkthrough, clicking a highlighted control advances to the next visible step. Choose **Speak** beneath a reply to hear it read aloud. **Stop** or the shortcut ends playback.
+
 ## Models, web search and sharing
 
 The floating assistant defaults to a local model. If you explicitly enable cloud context sharing, the selected provider can receive permitted screen text, images, file excerpts and saved passages. Private memories and local-only corrections are excluded. Model downloads are separate from the app. The model picker checks available memory and disk space, and verifies a bundled download’s digest. If you already run Ollama or LM Studio, open local model setup and select an available model.
 
 In the notebook, an eligible ChatGPT plan or an API provider is optional. A cloud notebook model can receive conversation passages needed for the answer. Private sheets stay local, and attached excerpts have their own sharing control. In the floating sheet, choosing a provider for one typed question sends that text and returns the next question to local thinking. Anthropic uses an API key. Provider usage follows the account you connect.
 
-Ask a current public question and Beside looks it up automatically. Exa receives the public search terms. Click a source beneath a floating answer to read the passage Beside used, then choose **Open source** to visit the page. A question about what’s on your screen uses local context. When a lookup needs a city or a clearer public topic, Beside asks. Notebook Settings also lets you manage weekend listing searches and access for connected agents.
+Ask a current public question and Beside looks it up automatically. To request a lookup yourself, type a topic and click **Search public web**. Beside sends those terms to Exa, Brave if configured, or DuckDuckGo. Click a source beneath a floating answer to read the passage Beside used, then choose **Open source** to visit the page. A question about what’s on your screen uses local context. When a lookup needs a city or a clearer public topic, Beside asks. Notebook Settings also lets you manage weekend listing searches and access for connected agents.
 
 ## Floating conversations and corrections
 
@@ -125,3 +128,5 @@ Use **Correct this reply** to teach Beside a preference. A red memory mark opens
 Under **What Beside knows → Sources → Earlier notes and mail**, choose **Import Apple Notes**. macOS may ask for Automation access to Notes. Beside copies unlocked note titles and text into the encrypted notebook. It can then find a passage under a matching heading while Notes is closed. Choose **Refresh Apple Notes** after editing or locking notes to replace the snapshot. **Remove imported notes** clears the index. A passage you already accepted can also appear in your saved conversation. Inkling explains these suggestions locally.
 
 In Apple Mail choose **Mailbox → Export Mailbox**, then open **Earlier notes and mail**, choose **Import Mail export** in Beside and select the export folder. Beside streams the mbox files locally and replaces its previous Mail snapshot. It keeps up to 12,000 characters of message text, preferring plain text and extracting readable text from HTML locally. It skips attachments and raw messages over 24 MiB. The import reports how many messages it kept and skipped. Apple Notes and Mail each have a removal control.
+
+In cloud model settings, **Mask identifying text** hides recognized identifiers in companion prompts and keeps images on your Mac. Choosing **Tinfoil** verifies its confidential router before sending any text. Its **Verify confidential connection** button checks the connection without submitting a question.
