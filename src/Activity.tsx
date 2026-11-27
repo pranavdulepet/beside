@@ -2112,8 +2112,14 @@ export function ActivitySheet({
             <blockquote>{t.selection}</blockquote>
           </details>
         )}
-        {t.usedVisual && (
-          <small>Inkling read the saved window on this Mac.</small>
+        {t.usedVisual && t.brain?.usedImage === true && (
+          <small>
+            {t.brain.mode === 'cloud'
+              ? 'The connected model used the screen image.'
+              : /inkling/i.test(t.brain.model || '')
+                ? 'Inkling used the screen image on this Mac.'
+                : 'The local model used the screen image.'}
+          </small>
         )}
         {t.passagesOnly && t.quote === undefined && (
           <small>

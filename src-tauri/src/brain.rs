@@ -15,6 +15,7 @@ pub struct BrainOpts<'a> {
     pub max_tokens: u32,
     pub direct_reply: bool,
     pub image_base64: Option<&'a str>,
+    pub requires_image: bool,
     pub job: &'a str,
     pub allow_cloud: bool,
 }
@@ -25,6 +26,7 @@ impl Default for BrainOpts<'_> {
             max_tokens: 320,
             direct_reply: false,
             image_base64: None,
+            requires_image: false,
             job: "assistant",
             allow_cloud: true,
         }
@@ -206,9 +208,15 @@ pub fn infer(
     opts: &BrainOpts<'_>,
     sink: &mut dyn FnMut(&str),
 ) -> Res<(String, Value)> {
-    if let Some(active) = opts.allow_cloud.then(|| status(s)).transpose()?.filter(|b| b["mode"] == "cloud") {
+    if opts.requires_image && opts.image_base64.is_none() {
+        let message = "I don’t have an image of that moment to check.";
+        sink(message);
+        return Ok((message.into(), json!({"usedImage": false})));
+    }
+    if let Some(mut active) = opts.allow_cloud.then(|| status(s)).transpose()?.filter(|b| b["mode"] == "cloud") {
         let provider_id = active["provider"].as_str().unwrap_or("");
         let answer = infer_cloud(s, provider_id, system, &cloud_input(s, input, provider_id)?.to_string(), opts, sink)?;
+        active["usedImage"] = json!(opts.image_base64.is_some());
         return Ok((answer, active));
     }
     let mut model = activity::private_model(s)
@@ -216,13 +224,14 @@ pub fn infer(
     if opts.direct_reply {
         model["directReply"] = json!(true);
     }
-    let answer = infer_local(s, &model, system, input, opts, sink)?;
+    let (answer, used_image) = infer_local(s, &model, system, input, opts, sink)?;
     let meta = json!({
         "mode": "local",
         "provider": "local",
         "providerLabel": "On-device",
         "model": model["name"].as_str().unwrap_or("Local model"),
         "runtime": model["runtime"].as_str().unwrap_or("Local"),
+        "usedImage": used_image,
         "contextShared": false
     });
     Ok((answer, meta))
@@ -235,8 +244,9 @@ fn infer_local(
     input: &Value,
     opts: &BrainOpts<'_>,
     sink: &mut dyn FnMut(&str),
-) -> Res<String> {
+) -> Res<(String, bool)> {
     if let Some(image) = opts.image_base64 {
+        let limit = if opts.requires_image { opts.max_tokens.clamp(24, 80) } else { opts.max_tokens.max(240) };
         if model["runtime"] == "Sumi" {
             if let Some(projector) = crate::weights::projector(s, model) {
                 let mut cfg = model.clone();
@@ -248,19 +258,36 @@ fn infer_local(
                         {"type": "image_url", "image_url": {"url": format!("data:image/jpeg;base64,{image}")}}
                     ]}
                 ]);
-                return bundled::infer(&cfg, messages, opts.max_tokens.max(240), None, Some(sink));
+                return bundled::infer(&cfg, messages, limit, None, Some(sink))
+                    .map(|answer| (answer, true));
             }
         } else if model["runtime"] == "Ollama" && models::vision(model) {
             return models::photo_reply(
                 model,
                 system,
                 input,
-                opts.max_tokens.max(240),
+                limit,
                 &[json!(image)],
                 Some(sink),
-            );
+            ).map(|answer| (answer, true));
         }
     }
+    if opts.requires_image {
+        let message = if bundled::is_inkling(model) {
+            "I need to see the image to check that. In Sources, open Visual screenshots & vision and choose Prepare local vision."
+        } else {
+            "I need to see the image to check that. The selected model can read text only."
+        };
+        sink(message);
+        return Ok((message.into(), false));
+    }
+    // Optional images may accompany text requests. Describe the actual evidence
+    // to the model if this runtime can only use the extracted text.
+    let text_only;
+    let system = if opts.image_base64.is_some() {
+        text_only = format!("{system}\nYou received only text. Ground the answer in that text. If a detail requires seeing the image, say so.");
+        &text_only
+    } else { system };
     if bundled::is_inkling(model) {
         return bundled::inkling_text(
             model,
@@ -270,7 +297,7 @@ fn infer_local(
             false,
             None,
             sink,
-        );
+        ).map(|answer| (answer, false));
     }
     models::infer_reply(
         model,
@@ -279,7 +306,7 @@ fn infer_local(
         opts.max_tokens,
         None,
         Some(sink),
-    )
+    ).map(|answer| (answer, false))
 }
 
 fn infer_cloud(
@@ -502,6 +529,22 @@ fn consume_gemini_sse(reader: impl Read, sink: &mut dyn FnMut(&str)) -> Res<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pixel_question_cannot_be_answered_by_a_text_only_runtime() {
+        let temp = tempfile::tempdir().unwrap();
+        let s = Store::with_key(temp.path().join("book"), &[3; 32]).unwrap();
+        let opts = BrainOpts { requires_image: true, ..Default::default() };
+        let (missing, meta) = infer(&s, "", &Value::Null, &opts, &mut |_| {}).unwrap();
+        assert!(missing.contains("don’t have an image"));
+        assert_eq!(meta["usedImage"], false);
+
+        let model = json!({"runtime":"Sumi", "name":"Inkling 2 Mini", "path":temp.path().join("Inkling-2-Mini.gguf")});
+        let opts = BrainOpts { image_base64: Some("unused-test-pixels"), ..opts };
+        let (answer, used) = infer_local(&s, &model, "", &Value::Null, &opts, &mut |_| {}).unwrap();
+        assert!(!used);
+        assert!(answer.contains("Prepare local vision"));
+    }
 
     #[test]
     fn cloud_payload_excludes_private_memories_and_cross_provider_history() {

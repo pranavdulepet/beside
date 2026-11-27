@@ -303,12 +303,10 @@ fn answer_window(
         || line.len() >= 6
         || !document.is_empty()
         || nearby.as_array().is_some_and(|v| !v.is_empty());
-    let model =
-        activity::private_model(s).ok_or("Choose a local model in Beside to read this window.")?;
-    let visual = !has_text
-        && (crate::weights::projector(s, &model).is_some() || crate::models::vision(&model));
-    let image = if visual {
+    let requires_image = !has_text || (selected.is_none() && activity::asks_for_pixels(question));
+    let image = if requires_image {
         point["fullImage"].as_str().filter(|v| !v.is_empty())
+            .or_else(|| point["image"].as_str().filter(|v| !v.is_empty()))
     } else {
         None
     };
@@ -337,6 +335,7 @@ fn answer_window(
         max_tokens: if selected.is_some() { 400 } else { 160 },
         direct_reply: true,
         image_base64: image,
+        requires_image,
         job: "point",
         allow_cloud: false,
     };
@@ -360,7 +359,7 @@ fn answer_window(
     if !streamed {
         sink(&answer);
     }
-    let mut output = json!({"answer":answer,"brain":brain,"pointApp":point["app"],"sources":[],"notes":[],"epoch":epoch});
+    let mut output = json!({"answer":answer,"usedVisual":brain["usedImage"] == true,"brain":brain,"pointApp":point["app"],"sources":[],"notes":[],"epoch":epoch});
     if !line.is_empty() {
         output["quote"] = json!(line);
         output["quoteTitle"] = json!(if selected.is_some() {

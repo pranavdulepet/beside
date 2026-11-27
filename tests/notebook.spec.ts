@@ -2273,20 +2273,18 @@ test('ask anywhere remembers a window, credits a source, learns a correction and
       {timeout: 120000},
     );
     if ((process.env.BESIDE_TEST_INKLING ?? process.env.SUMI_TEST_INKLING) === '1') {
-      await page
-        .getByLabel('Follow up')
-        .fill('What color is the rectangle in the Messages screenshot?');
+      const question = 'What color is the rectangle in the Messages screenshot?';
+      await page.getByLabel('Follow up').fill(question);
       await page.getByRole('button', {name: 'Ask on this Mac'}).click();
-      await expect(page.locator('.activity-turn .reply').last()).toContainText(
-        /red|crimson|burgundy|maroon|brick|rust/i,
-        {
-          timeout: 120000,
-        },
+      const visualTurn = page.locator('.activity-turn').filter({
+        has: page.getByText(question, {exact: true}),
+      });
+      await expect(visualTurn.locator('.reply')).toContainText(
+        /\b(?:red|crimson|burgundy|maroon|brick|rust)\b/i,
+        {timeout: 120000},
       );
       await expect(
-        page.getByText('Inkling read the saved window on this Mac.', {
-          exact: true,
-        }),
+        page.getByText('Inkling used the screen image on this Mac.', {exact: true}),
       ).toBeVisible();
     }
     await page.getByRole('button', {name: 'What Beside knows'}).click();
