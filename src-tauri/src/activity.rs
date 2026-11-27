@@ -1835,7 +1835,7 @@ pub fn ask_with_phases(
         if let Some(topic) = a["previous"].as_str().and_then(|previous| crate::web_search::clarified_topic(previous, question)) {
             // A typed clarification supplies the terms. Keep the previous screen and chat out of the lookup.
             phase("web");
-            return guide_answer(s, &json!({"publicQuery":topic}), &format!("Look up {topic}"), &epoch, sink, phase);
+            return guide_answer(s, &json!({"publicQuery":topic}), &topic, &epoch, sink, phase);
         }
     }
     if a["awaitingSearchCity"] == true && crate::web_search::city(question).is_some() {
@@ -2784,7 +2784,8 @@ fn guide_answer(
     phase: &mut dyn FnMut(&str),
 ) -> Res<Value> {
     use crate::web_search;
-    let standalone = web_search::standalone_query(q);
+    let standalone = web_search::confirmed_topic(q, a["publicQuery"].as_str())
+        .or_else(|| web_search::standalone_query(q));
     let public_only = standalone.is_some_and(|terms| {
         a["publicQuery"].as_str().is_none_or(|approved| approved.trim() == terms)
     });

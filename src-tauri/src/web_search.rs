@@ -654,6 +654,12 @@ mod tests {
     fn typed_search_clarification_carries_only_public_terms_and_the_requested_detail() {
         assert_eq!(clarified_topic("Look up its opening hours", "Kew Gardens").as_deref(), Some("Kew Gardens opening hours"));
         assert_eq!(clarified_topic("Look this up", "apple checklist shortcuts").as_deref(), Some("apple checklist shortcuts"));
+        for topic in ["LAX", "the \"silver birch\""] {
+            assert_eq!(clarified_topic("look it up", topic).as_deref(), Some(topic));
+            assert_eq!(confirmed_topic(topic, Some(topic)), Some(topic));
+            assert_eq!(confirmed_topic(topic, Some("a different search")), None);
+        }
+        assert_eq!(confirmed_topic("my itinerary", Some("my itinerary")), None);
         for reply in ["her home address", "my notes", "/Volumes/work", "no thanks", "new@example.org", "write a poem", "what is a sonnet?"] {
             assert_eq!(clarified_topic("look it up", reply), None, "{reply}");
         }
@@ -1114,6 +1120,13 @@ mod floating_tests {
             assert!(dictated_query(q).is_none());
         }
     }
+}
+
+/// A confirmed public topic stays on the sources-only path even when the
+/// term is an airport code or contains a quoted phrase.
+pub(crate) fn confirmed_topic<'a>(question: &'a str, approved: Option<&str>) -> Option<&'a str> {
+    (approved == Some(question) && !outing(question, &Value::Null)
+        && public_typed_lookup(question)).then_some(question)
 }
 
 /// Complete an immediately preceding request for public terms using only
