@@ -239,39 +239,46 @@ pub fn typed_question(s: &Store, a: &Value) -> Res<Value> {
         .map(str::trim)
         .filter(|t| !t.is_empty() && t.chars().count() <= 3000)
         .ok_or("Enter a question under 3,000 characters.")?;
+    if a["approved"] != true {
+        return Err("Enable typed questions for this provider first.".into());
+    }
+    let answer = send_approved_question(s, name, input)?;
+    Ok(
+        json!({"answer":answer,"sources":[],"notes":[],"epoch":s.get("activityEpoch")?,"provider":name}),
+    )
+}
+
+pub(crate) fn send_approved_question(s: &Store, name: &str, input: &str) -> Res<String> {
     let mut p = s.doc("provider", name)?;
-    if a["approved"] != true || !allows_question(&p) {
+    if !allows_question(&p) {
         return Err("Enable typed questions for this provider first.".into());
     }
     let mask_identifiers = s.get("brainSettings")?["maskCloudText"] == true;
     let mut mask = mask_identifiers.then(crate::privacy_bridge::Pseudonymizer::new);
     let masked = mask.as_mut().map(|m| m.scrub_str(input));
     let input = masked.as_deref().unwrap_or(input);
+    let instructions = if name == "ChatGPT" {
+        crate::plan::QUESTION_INSTRUCTIONS
+    } else {
+        "Answer the user's question directly."
+    };
+    let masked_instructions = mask.as_mut().map(|m| m.scrub_instructions(instructions));
+    let instructions = masked_instructions.as_deref().unwrap_or(instructions);
     if s.doc("provider", name)? != p
         || (s.get("brainSettings")?["maskCloudText"] == true) != mask_identifiers
     {
         return Err("Sharing settings changed. Ask again.".into());
     }
     let answer = if name == "ChatGPT" {
-        crate::plan::standalone(s, input)?
+        crate::plan::standalone(s, input, instructions)?
     } else {
         p["enabled"] = json!(true);
-        send_text(
-            s,
-            &p,
-            "Answer the user's question directly.",
-            input,
-            "typed question",
-            1,
-        )?
+        send_text(s, &p, instructions, input, "typed question", 1)?
     };
-    let answer = match mask {
+    Ok(match mask {
         Some(m) => m.restore(&answer),
         None => answer,
-    };
-    Ok(
-        json!({"answer":answer,"sources":[],"notes":[],"epoch":s.get("activityEpoch")?,"provider":name}),
-    )
+    })
 }
 fn send_text(s: &Store, p: &Value, sys: &str, input: &str, job: &str, items: usize) -> Res<String> {
     let k = p["id"].as_str().unwrap();
@@ -992,6 +999,10 @@ mod router_contract {
             assert_eq!(req.url(), "/chat/completions");
             let body: Value = serde_json::from_reader(req.as_reader()).unwrap();
             assert!(!body.to_string().contains("alias@example.org"));
+            assert!(body["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .contains("Preserve bracketed placeholders like [B...] verbatim"));
             let masked = body["messages"][1]["content"].as_str().unwrap();
             assert!(masked.contains("_EMAIL_1]"));
             req.respond(tiny_http::Response::from_string(

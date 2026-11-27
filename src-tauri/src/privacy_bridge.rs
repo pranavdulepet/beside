@@ -9,11 +9,85 @@ static SECRET_RE: LazyLock<Regex> = LazyLock::new(|| {
         (?:AIza[0-9A-Za-z_\-]{28,}) |
         (?:gh[pousr]_[A-Za-z0-9]{24,}) |
         (?:AKIA[0-9A-Z]{16}) |
-        (?:-----BEGIN\s+(?:[A-Z]+\s+)*PRIVATE\s+KEY-----[\s\S]*?-----END\s+(?:[A-Z]+\s+)*PRIVATE\s+KEY-----) |
-        (?:\b(?:\d[\x20-]*?){13,16}\b)
+        (?:-----BEGIN\s+(?:[A-Z]+\s+)*PRIVATE\s+KEY-----[\s\S]*?-----END\s+(?:[A-Z]+\s+)*PRIVATE\s+KEY-----)
     ")
     .unwrap()
 });
+
+const REDACTED: &str = "[REDACTED_SECRET]";
+const PRESERVE_ALIASES: &str =
+    "Preserve bracketed placeholders like [B...] verbatim if you refer to them.";
+static DIGIT_GROUP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\d+\b").unwrap());
+static DECIMAL_DIGIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d$").unwrap());
+
+// Unicode decimal digits occur in consecutive sets of ten starting at zero.
+// This also handles adjacent sets, such as the mathematical typefaces.
+fn decimal_digit(ch: char) -> u8 {
+    if ch.is_ascii_digit() {
+        return ch as u8 - b'0';
+    }
+    let mut first = ch as u32;
+    let mut buf = [0; 4];
+    while let Some(prev) = char::from_u32(first - 1) {
+        if !DECIMAL_DIGIT.is_match(prev.encode_utf8(&mut buf)) {
+            break;
+        }
+        first -= 1;
+    }
+    ((ch as u32 - first) % 10) as u8
+}
+
+fn valid_card(digits: &[u8]) -> bool {
+    if !(13..=19).contains(&digits.len()) {
+        return false;
+    }
+    let mut sum = 0;
+    for (i, &digit) in digits.iter().rev().enumerate() {
+        let n = if i % 2 == 1 { 2 * digit } else { digit };
+        sum += if n > 9 { n - 9 } else { n };
+    }
+    sum % 10 == 0
+}
+
+fn redact_cards(text: &str) -> String {
+    let groups: Vec<_> = DIGIT_GROUP.find_iter(text).collect();
+    let mut output = String::with_capacity(text.len());
+    let mut copied = 0;
+    let mut digits = Vec::with_capacity(19);
+    // Try whole groups so a nearby quantity cannot hide a card or truncate a longer ID.
+    for (i, first) in groups.iter().enumerate() {
+        digits.clear();
+        let mut end = first.start();
+        for group in &groups[i..] {
+            if !text[end..group.start()]
+                .bytes()
+                .all(|b| matches!(b, b' ' | b'-'))
+            {
+                break;
+            }
+            digits.extend(
+                group
+                    .as_str()
+                    .chars()
+                    .take(20 - digits.len())
+                    .map(decimal_digit),
+            );
+            if digits.len() > 19 {
+                break;
+            }
+            end = group.end();
+            if valid_card(&digits) {
+                if first.start() >= copied {
+                    output.push_str(&text[copied..first.start()]);
+                    output.push_str(REDACTED);
+                }
+                copied = copied.max(end);
+            }
+        }
+    }
+    output.push_str(&text[copied..]);
+    output
+}
 
 static EMAIL_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b").unwrap());
@@ -112,9 +186,7 @@ impl Pseudonymizer {
             return String::new();
         }
         // 1. Hard-redact irreversible secrets first.
-        let step1 = SECRET_RE
-            .replace_all(input, "[REDACTED_SECRET]")
-            .into_owned();
+        let step1 = redact_cards(&SECRET_RE.replace_all(input, REDACTED));
 
         // 2. Reversible replacement for emails.
         let mut out = String::with_capacity(step1.len());
@@ -171,9 +243,27 @@ impl Pseudonymizer {
         out
     }
 
+    // Call after scrubbing the payload, so aliases from either part are covered.
+    pub fn scrub_instructions(&mut self, system: &str) -> String {
+        let mut instructions = self.scrub_str(system);
+        if self.count() > 0 {
+            instructions.push('\n');
+            instructions.push_str(PRESERVE_ALIASES);
+        }
+        instructions
+    }
+
     pub fn scrub_value(&mut self, value: &Value) -> Value {
         match value {
             Value::String(s) => Value::String(self.scrub_str(s)),
+            Value::Number(n) if n.is_u64() => {
+                let digits: Vec<_> = n.to_string().bytes().map(|b| b - b'0').collect();
+                if valid_card(&digits) {
+                    Value::String(REDACTED.into())
+                } else {
+                    value.clone()
+                }
+            }
             Value::Array(arr) => Value::Array(arr.iter().map(|v| self.scrub_value(v)).collect()),
             Value::Object(map) => {
                 let mut next = serde_json::Map::with_capacity(map.len());
@@ -206,9 +296,7 @@ impl Pseudonymizer {
     }
 }
 
-/// Streaming token-boundary restorer so placeholders split across multiple SSE
-/// deltas (e.g. `"[EMA"` + `"IL_1]"`) are transparently re-hydrated locally
-/// before emitting text to the UI.
+/// Restores this request's aliases even when SSE splits one across several deltas.
 pub struct StreamRestorer<'a> {
     bridge: &'a Pseudonymizer,
     buffer: String,
@@ -227,8 +315,7 @@ impl<'a> StreamRestorer<'a> {
             return delta.to_owned();
         }
         self.buffer.push_str(delta);
-        // Hold back any trailing incomplete `[...` segment up to 18 chars so
-        // split placeholders complete before replacement.
+        // Buffer a suffix only while it can still become one of this request's aliases.
         if let Some(open) = self.buffer.rfind('[') {
             let tail = &self.buffer[open..];
             if tail.len() <= 80 && self.bridge.reverse.keys().any(|key| key.starts_with(tail)) {
@@ -254,6 +341,58 @@ impl<'a> StreamRestorer<'a> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn card_redaction_keeps_non_card_identifiers_and_their_json_types() {
+        let mut bridge = Pseudonymizer::new();
+        for card in [
+            "4222222222222",
+            "3782-822463-10005",
+            "4242 4242 4242 4242",
+            "4000000000000000006",
+            "４２４２ ４２４２ ４２４２ ４２４２",
+        ] {
+            let masked = bridge.scrub_str(card);
+            assert_eq!(bridge.restore(&masked), REDACTED);
+        }
+        assert_eq!(bridge.count(), 0);
+        let identifiers = json!({"isbn":"978-0-306-40615-7", "order":"1234567890123456",
+                                 "stamp":1700000000123_u64, "tracking":"123456789012345678901"});
+        assert_eq!(bridge.scrub_value(&identifiers), identifiers);
+        assert_eq!(bridge.scrub_value(&json!(4242424242424242_u64)), REDACTED);
+        assert_eq!(
+            redact_cards("2 4242 4242 4242 4242."),
+            format!("2 {REDACTED}.")
+        );
+        assert_eq!(
+            redact_cards("4111111111111111 6011111111111117"),
+            format!("{REDACTED} {REDACTED}")
+        );
+    }
+
+    #[test]
+    fn cloud_instructions_preserve_aliases_created_in_either_part_of_the_request() {
+        let mut bridge = Pseudonymizer::new();
+        let text = "Answer directly.";
+        bridge.scrub_value(&json!({"secret":"4242424242424242"}));
+        assert_eq!(bridge.scrub_instructions(text), text);
+        let value = bridge.scrub_value(&json!({"recipients":["test@example.com"]}));
+        assert_eq!(
+            bridge.scrub_instructions(text),
+            format!("{text}\n{PRESERVE_ALIASES}")
+        );
+        assert_eq!(
+            bridge.restore(value["recipients"][0].as_str().unwrap()),
+            "test@example.com"
+        );
+        let mut bridge = Pseudonymizer::new();
+        let system = bridge.scrub_instructions("Reply to test@example.com.");
+        assert!(system.ends_with(PRESERVE_ALIASES));
+        assert!(!system.contains("test@example.com"));
+        assert!(bridge
+            .restore(&system)
+            .starts_with("Reply to test@example.com."));
+    }
 
     #[test]
     fn secrets_cannot_be_restored_and_literal_tokens_are_not_aliases() {

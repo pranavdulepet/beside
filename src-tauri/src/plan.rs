@@ -44,7 +44,7 @@ pub(crate) fn clean(value: &Value) -> Res<Value> {
     }
 }
 
-fn session(s: &Store) -> Res<(String, String)> {
+pub(crate) fn session(s: &Store) -> Res<(String, String)> {
     #[cfg(test)]
     if let Some(port) = tests::TEST_PORT.get() {
         return Ok((
@@ -122,6 +122,9 @@ pub fn think_with(
     Ok(answer)
 }
 
+pub(crate) const QUESTION_INSTRUCTIONS: &str =
+    "Answer the one question directly. You have no notebook context.";
+
 pub fn one_question(
     s: &Store,
     model: &Value,
@@ -134,11 +137,12 @@ pub fn one_question(
     send_question(
         s,
         model["name"].as_str().ok_or("Connect ChatGPT again.")?,
+        QUESTION_INSTRUCTIONS,
         preview,
         sink,
     )
 }
-pub fn standalone(s: &Store, question: &str) -> Res<String> {
+pub fn standalone(s: &Store, question: &str, instructions: &str) -> Res<String> {
     let provider = s.doc("provider", "ChatGPT")?;
     if provider["standalone"] != true && provider["primary"] != true {
         return Err("Connect ChatGPT for standalone questions first.".into());
@@ -146,18 +150,25 @@ pub fn standalone(s: &Store, question: &str) -> Res<String> {
     send_question(
         s,
         provider["model"].as_str().ok_or("Reconnect ChatGPT.")?,
+        instructions,
         question,
         &mut |_| {},
     )
 }
-fn send_question(s: &Store, name: &str, preview: &str, sink: &mut dyn FnMut(&str)) -> Res<String> {
+fn send_question(
+    s: &Store,
+    name: &str,
+    instructions: &str,
+    preview: &str,
+    sink: &mut dyn FnMut(&str),
+) -> Res<String> {
     let (api, token) = session(s)?;
     reserve(s)?;
     let answer = complete_with(
         &api,
         &token,
         name,
-        "Answer the one question directly. You have no notebook context.",
+        instructions,
         preview,
         650,
         None,
@@ -361,6 +372,74 @@ mod tests {
     }
     fn delta() -> String {
         event(json!({"type":"response.output_text.delta","delta":"Ready"}))
+    }
+
+    #[test]
+    #[ignore = "Round-trips request-scoped aliases through a loopback streaming plan"]
+    fn masked_companion_and_standalone_questions_restore_the_providers_exact_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let s = Store::with_key(tmp.path().into(), &[42; 32]).unwrap();
+        crate::app::setup(&s).unwrap();
+        s.put(
+            "provider",
+            &json!({"id":"ChatGPT","standalone":true,"model":"fixture"}),
+        )
+        .unwrap();
+        s.set(
+            "brainSettings",
+            &json!({"mode":"cloud","provider":"ChatGPT","cloudConsent":true,"maskCloudText":true}),
+        )
+        .unwrap();
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        TEST_PORT.set(Some(server.server_addr().to_ip().unwrap().port()));
+        let worker = std::thread::spawn(move || {
+            let mut previous = String::new();
+            for _ in 0..2 {
+                let mut req = server
+                    .recv_timeout(std::time::Duration::from_secs(8))
+                    .unwrap()
+                    .unwrap();
+                let body: Value = serde_json::from_reader(req.as_reader()).unwrap();
+                assert!(!body.to_string().contains("alias@example.org"));
+                assert!(body["instructions"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Preserve bracketed placeholders like [B...] verbatim"));
+                let input = body["input"][0]["content"].as_str().unwrap();
+                let start = input.find("[B").unwrap();
+                let token = &input[start..=start + input[start..].find(']').unwrap()];
+                assert!(token.ends_with("_EMAIL_1]"));
+                assert_ne!(token, previous);
+                previous = token.into();
+                let stream =
+                    event(json!({"type":"response.output_text.delta","delta":&token[..8]}))
+                        + &event(json!({"type":"response.output_text.delta","delta":&token[8..]}))
+                        + &event(json!({"type":"response.completed"}));
+                req.respond(tiny_http::Response::from_string(stream))
+                    .unwrap();
+            }
+        });
+        let email = "alias@example.org";
+        let mut deltas = Vec::new();
+        let (answer, _) = crate::brain::infer(
+            &s,
+            "Repeat the recipient.",
+            &json!({"recipient":email}),
+            &Default::default(),
+            &mut |s| deltas.push(s.to_owned()),
+        )
+        .unwrap();
+        assert_eq!(deltas, [email]);
+        assert_eq!(answer, email);
+        let standalone = crate::app::action(
+            &s,
+            "standaloneQuestion",
+            &json!({"text":email,"approved":true}),
+        )
+        .unwrap();
+        assert_eq!(standalone, email);
+        worker.join().unwrap();
+        TEST_PORT.set(None);
     }
     #[test]
     fn a_partial_or_overlong_reply_never_confirms_a_connection() {

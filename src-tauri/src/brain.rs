@@ -311,8 +311,8 @@ pub(crate) fn infer_for_window(
         let answer = if active["maskCloudText"] == true {
             selected.image_base64 = None;
             let mut bridge = crate::privacy_bridge::Pseudonymizer::new();
-            let instructions = bridge.scrub_str(system);
             let payload = bridge.scrub_value(&shared).to_string();
+            let instructions = bridge.scrub_instructions(system);
             let mut stream = crate::privacy_bridge::StreamRestorer::new(&bridge);
             let raw = infer_cloud(
                 s,
@@ -476,14 +476,14 @@ fn infer_cloud(
             )?
         }
         "ChatGPT" => {
-            let token = providers::access_token(s)?;
+            let (api, token) = plan::session(s)?;
             let name = if model.is_empty() {
                 "gpt-4.1-mini"
             } else {
                 model
             };
             plan::complete_with(
-                plan::API,
+                &api,
                 &token,
                 name,
                 system,

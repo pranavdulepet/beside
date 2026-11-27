@@ -268,7 +268,7 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
             if question.is_empty() || question.chars().count() > 4000 || a["approved"] != true {
                 return Err("Confirm the text to send to ChatGPT.".into());
             }
-            crate::plan::standalone(s, question).map(Value::String)
+            crate::providers::send_approved_question(s, "ChatGPT", question).map(Value::String)
         }
         "models" => Ok(json!(models::inventory())),
         "downloadBundled" => crate::weights::download(s, a["label"].as_str()),
