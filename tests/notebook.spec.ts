@@ -1917,6 +1917,8 @@ test('a weekend plan uses live sources and the current preference from another s
     (process.env.BESIDE_LIVE_SEARCH ?? process.env.SUMI_LIVE_SEARCH) !== '1',
     'Uses the free public search service and an installed local model.',
   );
+  // Several conversations share this run. Each answer still has its own 90-second deadline.
+  if (process.env.BESIDE_TEST_INKLING === '1') test.setTimeout(300_000);
   const {core, rpc} = await fixtureNotebook();
   try {
     await rpc('mark', {
