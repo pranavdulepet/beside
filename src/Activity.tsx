@@ -1986,6 +1986,7 @@ export function ActivitySheet({
         files: prior?.files?.map((f: Row) => f.path) || [],
         previous: prior?.question,
         awaitingSearchCity: prior?.awaitingSearchCity === true,
+        awaitingSearchTopic: prior?.awaitingSearchTopic === true,
         baggageAwaitingWeight: prior?.baggageAwaitingWeight === true,
         clarifyConnection: prior?.clarifyConnection === true,
         allowGeneral: true,

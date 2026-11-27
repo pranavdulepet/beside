@@ -202,13 +202,18 @@ pub fn public_url(raw: &str) -> bool {
 }
 fn blocks(raw: &str) -> Res<Vec<String>> {
     let mut blocks = Vec::new();
-    for line in raw
-        .lines()
-        .filter_map(|l| l.strip_prefix("data:").map(str::trim))
-        .chain(raw.trim_start().starts_with('{').then_some(raw))
-    {
-        let res: Value = serde_json::from_str(line)
-            .map_err(|_| "The search service returned an unreadable response.")?;
+    let data;
+    let payload = if raw.trim_start().starts_with('{') {
+        raw
+    } else {
+        data = raw.lines()
+            .filter_map(|line| line.strip_prefix("data:").map(str::trim))
+            .filter(|line| !line.is_empty() && *line != "[DONE]")
+            .collect::<Vec<_>>().join("\n");
+        &data
+    };
+    for message in serde_json::Deserializer::from_str(payload).into_iter::<Value>() {
+        let res = message.map_err(|_| "The search service returned an unreadable response.")?;
         if res["error"].is_object() || res["result"]["isError"] == true {
             return Err("Web search is unavailable. Try again in a moment.".into());
         }
@@ -226,24 +231,26 @@ fn parse(raw: &str) -> Res<Vec<Value>> {
     let mut sources = Vec::new();
     let mut seen = HashSet::new();
     for text in blocks(raw)? {
-        for chunk in text.split("\n---\n") {
-            let mut lines = chunk.trim().lines();
-            let Some(title) = lines.next().and_then(|l| l.strip_prefix("Title: ")) else {
-                continue;
-            };
-            let Some(url) = lines
-                .next()
-                .and_then(|l| l.strip_prefix("URL: "))
-                .map(str::trim)
-            else {
-                continue;
-            };
+        let normalized = text.replace("\r\n", "\n");
+        for chunk in normalized.split("\n---\n") {
+            let mut lines = chunk.lines();
+            let mut title = None;
+            let mut url = None;
+            for line in lines.by_ref().map(str::trim) {
+                if matches!(line, "Highlights:" | "Text:" | "Content:") {
+                    break;
+                }
+                if let Some(value) = line.strip_prefix("Title:") {
+                    title.get_or_insert(value.trim());
+                } else if let Some(value) = line.strip_prefix("URL:") {
+                    url.get_or_insert(value.trim());
+                }
+            }
+            let (Some(title), Some(url)) = (title, url) else { continue };
             if !public_url(url) || !seen.insert(url.to_owned()) || title.trim().is_empty() {
                 continue;
             }
             let content = lines
-                .skip_while(|l| !matches!(l.trim(), "Highlights:" | "Text:" | "Content:"))
-                .skip(1)
                 .filter(|l| !l.trim().is_empty())
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -255,12 +262,41 @@ fn parse(raw: &str) -> Res<Vec<Value>> {
     }
     Ok(sources)
 }
+// Both MCP operations read public information. A retry stays at the same endpoint
+// and has to fit inside the original request deadline.
+fn retry_delay(error: &ureq::Error) -> Option<Duration> {
+    match error {
+        ureq::Error::Status(429 | 502 | 503 | 504, response) => match response.header("Retry-After") {
+            Some(value) => value.trim().parse::<u64>().ok().filter(|s| *s <= 1).map(Duration::from_secs),
+            None if response.status() == 429 => None,
+            None => Some(Duration::from_millis(180)),
+        },
+        ureq::Error::Transport(failure) if failure.kind() == ureq::ErrorKind::ConnectionFailed => {
+            Some(Duration::from_millis(180))
+        }
+        _ => None,
+    }
+}
+
 fn request(tool: &str, arguments: Value) -> Res<String> {
-    let agent = ureq::AgentBuilder::new()
-        .redirects(0)
-        .timeout(Duration::from_secs(22))
-        .build();
-    let response=agent.post("https://mcp.exa.ai/mcp").set("Accept","application/json, text/event-stream").send_json(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":tool,"arguments":arguments}})).map_err(|_|"I couldn’t reach web search. Check your connection and try again.".to_owned())?;
+    const BUDGET: Duration = Duration::from_secs(22);
+    let agent = ureq::AgentBuilder::new().redirects(0).build();
+    let payload = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":tool,"arguments":arguments}});
+    let deadline = std::time::Instant::now() + BUDGET;
+    let send = |timeout| {
+        agent.post("https://mcp.exa.ai/mcp")
+            .set("Accept", "application/json, text/event-stream")
+            .timeout(timeout)
+            .send_json(&payload)
+    };
+    let response = send(BUDGET).or_else(|error| {
+        let Some(delay) = retry_delay(&error) else { return Err(error) };
+        if deadline.saturating_duration_since(std::time::Instant::now()) <= delay { return Err(error); }
+        std::thread::sleep(delay);
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() { return Err(error); }
+        send(remaining)
+    }).map_err(|_| "I couldn’t reach web search. Check your connection and try again.".to_owned())?;
     let mut body = String::new();
     response
         .into_reader()
@@ -591,6 +627,40 @@ mod tests {
         }
     }
     #[test]
+    fn source_metadata_ends_when_the_excerpt_starts() {
+        let text = "Rank: 1\r\nTitle: Museum\r\nPublished: today\r\nURL: https://museum.example\r\nText:\r\nOpen at ten\r\n---\r\nTitle: Other\r\nContent:\r\nURL: https://wrong.example\r\nUnknown";
+        let pages = parse(&json!({"result":{"content":[{"text":text}]}}).to_string()).unwrap();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0]["url"], "https://museum.example");
+        assert_eq!(pages[0]["excerpt"], "Open at ten");
+        let frames = ": keepalive\r\nevent: message\r\ndata: {\"result\":\r\ndata: {\"content\":[{\"text\":\"one\"}]}}\r\n\r\ndata: {\"result\":{\"content\":[{\"text\":\"two\"}]}}\r\n\r\ndata: [DONE]\r\n";
+        assert_eq!(blocks(frames).unwrap(), ["one", "two"]);
+        assert!(blocks("data: {broken}").is_err());
+    }
+
+    #[test]
+    fn retries_only_transient_errors_with_a_short_wait() {
+        let error = |code, header: &str| {
+            let response = format!("HTTP/1.1 {code} status\r\n{header}\r\n").parse().unwrap();
+            ureq::Error::Status(code, response)
+        };
+        assert!(retry_delay(&error(503, "")).is_some());
+        assert_eq!(retry_delay(&error(429, "Retry-After: 1\r\n")), Some(Duration::from_secs(1)));
+        for code in [301, 400, 401, 403, 404, 429] { assert!(retry_delay(&error(code, "")).is_none()); }
+        assert!(retry_delay(&error(503, "Retry-After: 60\r\n")).is_none());
+    }
+
+    #[test]
+    fn typed_search_clarification_carries_only_public_terms_and_the_requested_detail() {
+        assert_eq!(clarified_topic("Look up its opening hours", "Kew Gardens").as_deref(), Some("Kew Gardens opening hours"));
+        assert_eq!(clarified_topic("Look this up", "apple checklist shortcuts").as_deref(), Some("apple checklist shortcuts"));
+        for reply in ["her home address", "my notes", "/Volumes/work", "no thanks", "new@example.org", "write a poem", "what is a sonnet?"] {
+            assert_eq!(clarified_topic("look it up", reply), None, "{reply}");
+        }
+        assert_eq!(clarified_topic("draft a reply", "City Hall"), None);
+    }
+
+    #[test]
     fn reads_only_public_source_links_and_surfaces_service_errors() {
         let list="Title: A\nURL: https://museum.example/events\nHighlights:\nSaturday\n---\nTitle: Bad\nURL: file:///private/data\nHighlights:\nNo";
         let raw = json!({"result":{"content":[{"text": list}]}});
@@ -715,6 +785,8 @@ pub fn floating_lookup(question: &str) -> bool {
         "search for ",
         "look up ",
         "look it up",
+        "look this up",
+        "look that up",
         "search online",
         "web search",
         "check online",
@@ -1042,6 +1114,31 @@ mod floating_tests {
             assert!(dictated_query(q).is_none());
         }
     }
+}
+
+/// Complete an immediately preceding request for public terms using only
+/// the typed reply and, when known, the kind of lookup the user asked for.
+pub(crate) fn clarified_topic(previous: &str, reply: &str) -> Option<String> {
+    let topic = reply.trim().trim_end_matches('.');
+    if !(3..=180).contains(&topic.len()) || !topic.chars().any(char::is_alphabetic)
+        || topic.split_whitespace().count() > 12 || !public_typed_lookup(topic)
+        || topic.ends_with('?') || !floating_lookup(previous)
+    {
+        return None;
+    }
+    let lower = topic.to_lowercase();
+    if matches!(lower.as_str(), "no" | "no thanks" | "thanks" | "thank you" | "stop" | "cancel" | "never mind" | "nevermind" | "forget it" | "yes" | "yeah" | "okay" | "sure")
+        || matches!(lower.split_whitespace().next(), Some("what" | "how" | "why" | "can" | "write" | "draft" | "remember" | "summarize" | "instead" | "actually"))
+    {
+        return None;
+    }
+    let request = previous.to_lowercase();
+    let detail = ["opening hours", "current price", "latest version"]
+        .into_iter().find(|kind| request.contains(kind) && !lower.contains(kind));
+    Some(match detail {
+        Some(kind) => format!("{topic} {kind}"),
+        None => topic.to_owned(),
+    })
 }
 
 // Automatic search can use the user's own public question. A private reference

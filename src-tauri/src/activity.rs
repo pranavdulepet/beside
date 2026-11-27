@@ -1829,6 +1829,13 @@ pub fn ask_with_phases(
         phase("memory");
         return connections::answer(s, a, question, &epoch);
     }
+    if a["awaitingSearchTopic"] == true && a["publicQuery"].is_null() && a["selection"].is_null() {
+        if let Some(topic) = a["previous"].as_str().and_then(|previous| crate::web_search::clarified_topic(previous, question)) {
+            // A typed clarification supplies the terms. Keep the previous screen and chat out of the lookup.
+            phase("web");
+            return guide_answer(s, &json!({"publicQuery":topic}), &format!("Look up {topic}"), &epoch, sink, phase);
+        }
+    }
     if a["awaitingSearchCity"] == true && crate::web_search::city(question).is_some() {
         if let Some(previous) = a["previous"].as_str().filter(|q| crate::web_search::outing(q, &Value::Null)) {
             return guide_answer(s, a, &format!("{previous} in {question}"), &epoch, sink, phase);
@@ -2783,6 +2790,14 @@ fn guide_answer(
         Some(id) => crate::point::target(s, id)?,
         None => Value::Null,
     };
+    if point["line"].as_str().is_none_or(|line| line.trim().is_empty())
+        && a["publicQuery"].is_null()
+        && web_search::floating_lookup(q) && !web_search::outing(q, &Value::Null)
+        && web_search::dictated_query(q).is_none() && !web_search::public_typed_lookup(q)
+    {
+        return Ok(json!({"answer":"What public topic or place should I look up?", "awaitingSearchTopic":true,
+            "sources":[], "notes":[], "epoch":epoch}));
+    }
     let active_brain = crate::brain::status(s)?;
     let outing = web_search::outing(q, &Value::Null);
     if !outing && active_brain["mode"] != "cloud" && private_model(s).is_none() {
@@ -2917,6 +2932,7 @@ fn guide_answer(
             && !crate::local::sensitive(&query) && crate::sources::audit(&query).is_some() {
             approved = Some(query);
         } else if lookup {
+            output["awaitingSearchTopic"] = json!(true);
             output["answer"] = json!("What public topic or place should I look up?");
             return Ok(output);
         }

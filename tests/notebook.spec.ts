@@ -1883,6 +1883,16 @@ test('a public question in the floating sheet shows the exact web source in plac
     await expect.poll(() => outbound).toBe(apple.url);
 
     const followup = page.getByRole('textbox', {name: /^(Your question|Follow up)$/});
+    await followup.fill('Look this up');
+    await followup.press('Enter');
+    await expect(page.locator('.activity-turn .reply').last()).toContainText('What public topic');
+    await followup.fill('Apple Notes checklist shortcut for Mac');
+    await followup.press('Enter');
+    await expect.poll(() => result.publicQuery, {timeout: 90000}).toBe('Apple Notes checklist shortcut for Mac');
+    expect(result.webSources.length).toBeGreaterThan(0);
+    expect(result.sources).toEqual([]);
+    expect(result.pointLine).toBe('');
+
     await followup.fill('What should I do this weekend in my area?');
     await followup.press('Enter');
     await expect(page.locator('.activity-turn .reply').last()).toContainText('Which city');

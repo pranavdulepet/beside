@@ -54,6 +54,30 @@ test('an empty notebook can start quietly and keeps the decision after a relaunc
   } finally { await closeNotebook(book); }
 });
 
+test('a public topic can be clarified without a model, and a private follow-up stays local', async ({page}) => {
+  const book = await fixtureNotebook();
+  try {
+    await book.rpc('companionSetup', {step: 'ready'});
+    let last: Row = {};
+    await openCompanion(page, async (op, args) => {
+      if (nativeWindow.has(op)) return null;
+      if (op === 'activityAsk') last = args;
+      return book.rpc(op, args);
+    });
+    const field = page.getByRole('textbox', {name: /Your question|Follow up/});
+    await field.fill('Look this up');
+    await field.press('Enter');
+    await expect(page.locator('.activity-turn .reply').last()).toContainText('What public topic');
+    await field.fill('Remember that I prefer short replies.');
+    await field.press('Enter');
+    await expect.poll(() => last.awaitingSearchTopic).toBe(true);
+    await expect(page.locator('.activity-turn .reply').last()).toContainText(/remember|saved|short replies/i);
+    expect(last.publicQuery).toBeUndefined();
+  } finally {
+    await closeNotebook(book);
+  }
+});
+
 test('screen memory waits for macOS and an explicit start, then works across reopen', async ({page}) => {
   const book = await fixtureNotebook();
   try {
