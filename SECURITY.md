@@ -12,7 +12,7 @@ A user or process with access to your unlocked account can read the notebook’s
 
 The November 25, 2026 maintainer review covered notebook and export permissions, model downloads, the local agent endpoint, webview policy and Mac packaging. On November 26, npm audit and RustSec reported zero known vulnerabilities in the locked dependencies. The public source scan found no recognized credential patterns. RustSec flagged the maintenance status of Chrono, which ships on Mac. Five further warnings concern packages outside the Apple Silicon dependency tree. One also appears in GitHub’s advisory database as a moderate GLib finding. Tauri uses that GTK dependency on Linux and BSD. Both the resolved Mac dependency tree and the linked libraries of the distributed app and runtime exclude it. Reassess the finding before adding another platform. [GLib advisory](https://github.com/advisories/GHSA-wrw7-89jp-8q8g)
 
-On November 27, 2026, Go's vulnerability scanner found no reachable advisories in the confidential helper built with Go 1.26.11. It also identified advisories in dependencies with no detected call path from the helper.
+On November 27, 2026, `govulncheck` reported no known vulnerabilities in the confidential helper built with Go 1.26.11 after updating OpenTelemetry, Go networking and Go cryptography dependencies.
 
 To repeat the dependency checks, run `npm audit` and `cargo audit --file src-tauri/Cargo.lock` with a current advisory database. From `src-tauri/confidential`, run `govulncheck ./...` for Go code reachable from the confidential helper. Run `gitleaks dir . --redact` on a clean source checkout to scan for recognizable credentials. The [development guide](docs/development.md) covers the app tests and package verification.
 
