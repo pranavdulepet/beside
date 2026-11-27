@@ -30,6 +30,19 @@ for package in sorted(metadata["packages"], key=lambda p: (p["name"], p["version
     if package.get("license_file"):
         extra = [*extra, package["license_file"]]
     include(label, Path(package["manifest_path"]).parent, extra)
+# Include the modules actually linked into the confidential helper.
+helper = root / "src-tauri/confidential"
+modules = subprocess.check_output(
+    ["go", "list", "-mod=readonly", "-deps", "-f", "{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}} {{.Dir}}{{end}}{{end}}", "."],
+    cwd=helper, text=True)
+for module in sorted(set(modules.splitlines()) - {""}):
+    name, version, directory = module.split(" ", 2)
+    label = f"{name} {version}"
+    index.append(f"{label}  https://pkg.go.dev/{name}@{version}")
+    include(label, Path(directory))
+goroot = Path(subprocess.check_output(["go", "env", "GOROOT"], cwd=helper, text=True).strip())
+include("Go runtime", goroot)
+
 lock = json.loads((root / "package-lock.json").read_text())
 for path, record in sorted(lock["packages"].items()):
     if not path or record.get("dev") or record.get("optional"):

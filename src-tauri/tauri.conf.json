@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build && scripts/build-confidential.sh",
     "frontendDist": "../dist"
   },
   "app": {
@@ -41,6 +41,7 @@
     },
     "resources": {
       "runtime/LICENSE": "runtime/LICENSE",
+      "runtime/beside-confidential": "runtime/beside-confidential",
       "runtime/llama-server": "runtime/llama-server",
       "runtime/libggml.1.dylib": "runtime/libggml.1.dylib",
       "runtime/libggml-base.1.dylib": "runtime/libggml-base.1.dylib",

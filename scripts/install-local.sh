@@ -27,7 +27,7 @@ mkdir -p "$cache"
 stage=$(mktemp -d "$cache/signed-update-XXXXXXXX")
 new="$stage/Beside.app"
 ditto --norsrc --noextattr "$built" "$new"
-for item in "$new/Contents/Resources/runtime/"*.dylib "$new/Contents/Resources/runtime/llama-server"; do
+for item in "$new/Contents/Resources/runtime/"*.dylib "$new/Contents/Resources/runtime/llama-server" "$new/Contents/Resources/runtime/beside-confidential"; do
   codesign --force --sign "$identity" --timestamp=none --options runtime "$item"
 done
 codesign --force --sign "$identity" --timestamp=none --options runtime --entitlements src-tauri/entitlements.plist "$new"

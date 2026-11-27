@@ -18,3 +18,6 @@ for file in llama-server libggml{,-base,-blas,-cpu,-metal,-rpc}.1.dylib libllama
   install -m 755 "$runtime/$file" "src-tauri/runtime/$file"
 done
 src-tauri/runtime/llama-server --version
+
+# Build the local attestation client from its locked module graph.
+scripts/build-confidential.sh

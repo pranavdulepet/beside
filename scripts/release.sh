@@ -25,7 +25,7 @@ if [[ "$identity" == "-" ]]; then
 else
   sign_flags+=(--options runtime --timestamp)
 fi
-for binary in "$resources/runtime/"*.dylib "$resources/runtime/llama-server"; do
+for binary in "$resources/runtime/"*.dylib "$resources/runtime/llama-server" "$resources/runtime/beside-confidential"; do
   codesign "${sign_flags[@]}" "$binary"
 done
 codesign "${sign_flags[@]}" --entitlements src-tauri/entitlements.plist "$app"
