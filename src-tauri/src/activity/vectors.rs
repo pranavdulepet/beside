@@ -315,25 +315,37 @@ mod tests {
     #[test]
     #[ignore = "Requires explicitly selected local Ollama weights and an offline llama-server"]
     fn installed_embedding_weights_are_shared_only_with_the_bundled_loopback_runtime() {
-        let Some((path, space)) = dense_model() else {
-            panic!("Select installed embedding weights")
-        };
+        let (_, space) = dense_model().expect("Select installed embedding weights");
         let dir = tempfile::tempdir().unwrap();
         let s = Store::with_key(dir.path().join("book"), &[19; 32]).unwrap();
-        let v = dense(
-            &s,
-            "quiet library opening hours",
-            path,
-            space.clone(),
-            false,
-        )
-        .expect("local embedding");
-        assert_eq!(v.space, space);
-        let warm = embed(&s, "When does the library open?");
-        assert_eq!(warm.space, space);
-        assert_eq!(v.feature.len(), 768);
-        assert!(v.feature.iter().any(|b| *b != 0));
-        crate::bundled::reap(true);
+        init(&s).unwrap();
+        struct Runtime;
+        impl Drop for Runtime {
+            fn drop(&mut self) {
+                crate::bundled::reap(true);
+            }
+        }
+        let _runtime = Runtime;
+        s.db.lock().unwrap().execute(
+            "INSERT INTO activity VALUES ('library','com.apple.Notes','Library','Opening hours and quiet study times',unixepoch(),'library')",
+            [],
+        ).unwrap();
+        // Until backfill has indexed a passage, the foreground query uses the native space.
+        assert_ne!(embed(&s, "quiet study").space, space);
+        backfill(&s, 1, || true).unwrap();
+        let (stored_space, feature): (String, Vec<u8>) =
+            s.db.lock()
+                .unwrap()
+                .query_row(
+                    "SELECT space,feature FROM activity_vectors WHERE event_id='library'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+        assert_eq!(stored_space, space);
+        assert_eq!(feature.len(), 768);
+        assert!(feature.iter().any(|b| *b != 0));
+        assert_eq!(embed(&s, "When does the library open?").space, space);
     }
 
     #[test]

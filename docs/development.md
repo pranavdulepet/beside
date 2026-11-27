@@ -2,7 +2,7 @@
 
 ## Run the desktop app
 
-Start on an Apple Silicon Mac running macOS 14 or later. Install rustup for the pinned Rust toolchain, Node.js 22.12 or later, npm, Go with automatic toolchain selection (the confidential helper pins Go 1.26.11), and the Xcode command line tools. The runtime setup verifies the pinned upstream llama.cpp archive. You can pass a previously downloaded archive as its first argument to restore llama.cpp offline. Building the confidential helper offline also requires its Go modules and toolchain to have been cached.
+Start on an Apple Silicon Mac running macOS 14 or later. Install rustup for the pinned Rust toolchain, Node.js 22.12 or later, npm, Go 1.26.11 or later (automatic toolchain selection is supported), and the Xcode command line tools. The runtime setup verifies the pinned upstream llama.cpp archive. You can pass a previously downloaded archive as its first argument to restore llama.cpp offline. Building the confidential helper offline also requires its Go modules and toolchain to have been cached.
 
 ```sh
 git clone https://github.com/pranavdulepet/beside.git
