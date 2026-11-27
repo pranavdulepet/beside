@@ -574,7 +574,7 @@ pub fn evaluate(
         candidates.push((50, reply));
     }
     if cfg["calendarBriefs"] == true {
-        if let Some(brief) = calendar::candidate(s, source, &app, now_ts) {
+        if let Some(brief) = calendar::candidate(source, &app, now_ts, None) {
             candidates.push((72, brief));
         }
     }

@@ -25,22 +25,26 @@ int beside_calendar_allow(void) {
     }
 }
 
-char *beside_next_meeting(void) {
+char *beside_meetings_between(int64_t earliest, int64_t until) {
     @autoreleasepool {
         if ([EKEventStore authorizationStatusForEntityType:EKEntityTypeEvent] != EKAuthorizationStatusFullAccess) return NULL;
-        NSDate *now = NSDate.date;
+        NSDate *from = [NSDate dateWithTimeIntervalSince1970:earliest];
+        NSDate *to = [NSDate dateWithTimeIntervalSince1970:until];
         EKEventStore *store = calendarStore();
         @synchronized(store) {
-            NSPredicate *range = [store predicateForEventsWithStartDate:now endDate:[now dateByAddingTimeInterval:1200] calendars:nil];
+            NSPredicate *range = [store predicateForEventsWithStartDate:from endDate:to calendars:nil];
             NSArray<EKEvent *> *events = [[store eventsMatchingPredicate:range] sortedArrayUsingComparator:^NSComparisonResult(EKEvent *a, EKEvent *b) { return [a.startDate compare:b.startDate]; }];
+            NSMutableArray *items = [NSMutableArray array];
             for (EKEvent *event in events) {
-                if (event.allDay || event.status == EKEventStatusCanceled || [event.startDate compare:now] == NSOrderedAscending || !event.title.length || !event.eventIdentifier.length) continue;
-                NSDictionary *item = @{@"id":event.eventIdentifier, @"title":event.title, @"start":@((long long)event.startDate.timeIntervalSince1970)};
-                NSData *data = [NSJSONSerialization dataWithJSONObject:item options:0 error:NULL];
-                NSString *encoded = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
-                return encoded.UTF8String ? strdup(encoded.UTF8String) : NULL;
+                if (event.allDay || event.status == EKEventStatusCanceled || !event.eventIdentifier.length || !event.title.length || !event.startDate || !event.endDate) continue;
+                if ([event.startDate compare:from] == NSOrderedAscending || [event.startDate compare:to] != NSOrderedAscending) continue;
+                [items addObject:@{@"id":event.eventIdentifier, @"title":event.title,
+                                   @"start":@((int64_t)event.startDate.timeIntervalSince1970),
+                                   @"end":@((int64_t)event.endDate.timeIntervalSince1970)}];
             }
+            NSData *data = [NSJSONSerialization dataWithJSONObject:items options:0 error:NULL];
+            NSString *encoded = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+            return encoded.UTF8String ? strdup(encoded.UTF8String) : NULL;
         }
-        return NULL;
     }
 }
