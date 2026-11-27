@@ -106,7 +106,7 @@ pub fn state(s: &Store) -> Res<Value> {
     out["brain"] = crate::brain::status(s)?;
     out["proactive"] = json!({
         "settings": crate::proactive::settings(s)?,
-        "nudge": crate::proactive::latest(s)
+        "nudge": crate::proactive::visible(s)
     });
     Ok(out)
 }
@@ -151,14 +151,12 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
         "overlayElements" => Ok(crate::overlay::live_elements_for(s, "")),
         "proactiveStatus" => Ok(json!({
             "settings": crate::proactive::settings(s)?,
-            "nudge": crate::proactive::latest(s)
+            "nudge": crate::proactive::visible(s)
         })),
         "proactiveConfigure" => crate::proactive::configure(s, a),
         "proactiveReadMemory" => crate::proactive::read_profile(s, a),
-        "proactiveDismiss" => {
-            crate::proactive::dismiss(s, a["id"].as_str().unwrap_or(""));
-            Ok(Value::Null)
-        }
+        "proactiveDismiss" => crate::proactive::respond(s, a, true),
+        "proactiveAccept" => crate::proactive::respond(s, a, false),
         "proactiveScan" => crate::proactive::scan_latest(s),
         "activityLogin" => crate::activity::login(
             a["enabled"]

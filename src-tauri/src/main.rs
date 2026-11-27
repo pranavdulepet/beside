@@ -558,7 +558,7 @@ fn run() -> Res<()> {
                     if quitting() {
                         break;
                     }
-                    let next_nudge = proactive::latest(&capture_db);
+                    let next_nudge = proactive::visible(&capture_db);
                     if next_nudge["id"] != published["id"] || next_nudge["eventId"] != published["eventId"] {
                         published = next_nudge.clone();
                         let _ = capture_app.emit("proactive-nudge", &next_nudge);

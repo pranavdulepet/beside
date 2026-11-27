@@ -40,6 +40,7 @@ pub fn prune(s: &Store) -> Res<()> {
     let mut db = s.db.lock().unwrap();
     let tx = db.transaction().msg()?;
     let stamp = Utc::now().timestamp();
+    tx.execute("DELETE FROM proactive_dismissals WHERE expires<=?", [stamp]).msg()?;
     let expired = tx
         .execute("DELETE FROM activity WHERE stamp<?", [stamp - 30 * DAY])
         .msg()?;
@@ -164,7 +165,7 @@ pub fn settings(s: &Store) -> Res<Value> {
     v["proactive"] = crate::proactive::settings(s)?;
     v["importedAppleNotes"] = json!(imported::count(s, "note")?);
     v["importedMail"] = json!(imported::count(s, "mail")?);
-    v["nudge"] = crate::proactive::latest(s);
+    v["nudge"] = crate::proactive::visible(s);
     Ok(v)
 }
 pub fn apps() -> Res<Value> {
@@ -715,6 +716,7 @@ pub fn forget(s: &Store, a: &Value) -> Res<Value> {
     }
     .msg()?;
     if a["scope"] == "all" {
+        db.execute("DELETE FROM proactive_dismissals", []).msg()?;
         db.execute("DELETE FROM imported_passages", []).msg()?;
         db.execute("DELETE FROM docs WHERE kind='floatingChat'", []).msg()?;
     } else if a["scope"] == "hour" {

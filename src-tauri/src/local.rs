@@ -11,6 +11,7 @@ extern "C" {
     fn sumi_free(p: *mut c_char);
     fn sumi_quiet_power(seconds: f64) -> i32;
     fn sumi_heavy_allowed() -> i32;
+    fn beside_keyboard_idle_seconds() -> f64;
     fn sumi_background_thread();
 }
 pub fn names(s: &str) -> Vec<String> {
@@ -29,6 +30,9 @@ pub fn names(s: &str) -> Vec<String> {
 }
 pub fn quiet_after_chat() -> bool {
     unsafe { sumi_quiet_power(20.) != 0 }
+}
+pub fn keyboard_idle_seconds() -> f64 {
+    unsafe { beside_keyboard_idle_seconds() }
 }
 pub fn idle() -> bool {
     unsafe { sumi_heavy_allowed() != 0 }

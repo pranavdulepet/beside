@@ -3216,7 +3216,11 @@ test('a suggestion waits for the user and keeps the screen that prompted it', as
       title: 'Screen 1 · Mail active',
       body: 'When should we deliver the indigo panels to the loading dock?',
     });
-    const suggestion = (await rpc('proactiveStatus')).nudge;
+    let suggestion: Row = {};
+    await expect.poll(async () => {
+      suggestion = (await rpc('proactiveStatus')).nudge || {};
+      return suggestion.kind;
+    }, {timeout: 8000}).toBe('memory');
     console.log('Captured text to suggestion ready (ms)', Date.now() - observedAt);
     expect(suggestion.kind).toBe('memory');
     const questions: Row[] = [];

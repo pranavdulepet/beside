@@ -20,6 +20,9 @@ int sumi_quiet_power(double seconds) {
    return onAC && CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateCombinedSessionState,kCGAnyInputEventType)>seconds;
  }
 }
+double beside_keyboard_idle_seconds(void) {
+    return CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateCombinedSessionState, kCGEventKeyDown);
+}
 int sumi_heavy_allowed(void) {return sumi_quiet_power(90.);}
 char *sumi_entities(const char *input) {
  @autoreleasepool {

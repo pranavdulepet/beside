@@ -69,3 +69,8 @@ CREATE TABLE IF NOT EXISTS prepared_baggage (
     booking TEXT PRIMARY KEY REFERENCES activity(id) ON DELETE CASCADE,
     note TEXT
 );
+
+CREATE TABLE IF NOT EXISTS proactive_dismissals (
+    digest TEXT PRIMARY KEY,
+    expires INTEGER NOT NULL
+);

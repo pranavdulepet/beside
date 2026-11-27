@@ -3,7 +3,7 @@ use chrono::Utc;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     sync::LazyLock,
 };
 
@@ -13,7 +13,7 @@ pub(crate) struct Watcher {
     last_nudge_at: i64,
     last_digest: String,
     active: Option<Value>,
-    dismissed: VecDeque<String>,
+    announced: bool,
 }
 
 impl Watcher {
@@ -85,31 +85,50 @@ pub fn follow_front(s: &Store, source: &str, title: &str) {
     }
 }
 
-pub fn dismiss(s: &Store, nudge_id: &str) {
-    if let Ok(mut w) = s.proactive.lock() {
-        if !nudge_id.is_empty() && !w.dismissed.iter().any(|id| id == nudge_id) {
-            w.dismissed.push_back(nudge_id.to_owned());
-            if w.dismissed.len() > 100 {
-                w.dismissed.pop_front();
-            }
-        }
-        if w.active.as_ref().is_some_and(|v| v["id"] == nudge_id) {
-            w.active = None;
-        }
+// Only a dismissal persists. Opening an offer consumes the current dot.
+pub fn respond(s: &Store, args: &Value, dismiss: bool) -> Res<Value> {
+    let _edit = s.activity_edit.lock().unwrap();
+    let mut w = s.proactive.lock().unwrap();
+    let active = w.active.as_ref().ok_or("That suggestion has expired.")?;
+    let key = active["id"].as_str().ok_or("That suggestion has expired.")?;
+    if args["id"] != key || (!args["eventId"].is_null() && args["eventId"] != active["eventId"])
+        || Utc::now().timestamp() - active["createdAt"].as_i64().unwrap_or(0) > 240
+    {
+        return Err("That suggestion has expired.".into());
     }
+    if dismiss {
+        let mut db = s.db.lock().unwrap();
+        let tx = db.transaction().msg()?;
+        tx.execute("INSERT OR REPLACE INTO proactive_dismissals(digest,expires) VALUES (?,unixepoch()+604800)", [hash(key)]).msg()?;
+        tx.execute("DELETE FROM proactive_dismissals WHERE digest IN (
+            SELECT digest FROM proactive_dismissals ORDER BY expires DESC,rowid DESC LIMIT -1 OFFSET 100)", []).msg()?;
+        tx.commit().msg()?;
+    }
+    w.revision = w.revision.wrapping_add(1);
+    w.active = None;
+    Ok(Value::Null)
 }
 
 pub fn latest(s: &Store) -> Value {
-    let now_ts = Utc::now().timestamp();
-    let Ok(mut w) = s.proactive.lock() else {
-        return Value::Null;
-    };
-    if let Some(nudge) = w.active.as_ref() {
-        if now_ts - nudge["createdAt"].as_i64().unwrap_or(0) > 240 {
+    current(s, None)
+}
+
+pub fn visible(s: &Store) -> Value {
+    current(s, Some(crate::local::keyboard_idle_seconds))
+}
+
+fn current(s: &Store, idle_seconds: Option<fn() -> f64>) -> Value {
+    let mut w = s.proactive.lock().unwrap();
+    if let Some(nudge) = &w.active {
+        if Utc::now().timestamp() - nudge["createdAt"].as_i64().unwrap_or(0) > 240 {
             w.active = None;
-            return Value::Null;
+        } else {
+            if let Some(idle) = idle_seconds.filter(|_| !w.announced) {
+                if (0.0..1.5).contains(&idle()) { return Value::Null; }
+                w.announced = true;
+            }
+            return w.active.clone().unwrap_or(Value::Null);
         }
-        return nudge.clone();
     }
     Value::Null
 }
@@ -460,6 +479,15 @@ pub fn evaluate(
         .or_else(|| find_error_nudge(source, title, body, now_ts))
         .or_else(|| find_reply_nudge(source, title, body, now_ts));
 
+    // Read storage before taking the watcher lock. Responding bumps the revision
+    // so an evaluation already in flight cannot republish the consumed offer.
+    let dismissed = match candidate.as_ref().and_then(|n| n["id"].as_str()) {
+        Some(key) => s.db.lock().ok()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM proactive_dismissals WHERE digest=? AND expires>unixepoch())",
+            [hash(key)], |row| row.get::<_, bool>(0),
+        ).ok()?,
+        None => false,
+    };
     let epoch = s.get("activityEpoch").ok()?;
     let mut w = s.proactive.lock().ok()?;
     if w.revision != revision {
@@ -474,7 +502,7 @@ pub fn evaluate(
     candidate["eventId"] = json!(event_id);
     candidate["originTitle"] = json!(title);
     let key = candidate["id"].as_str()?;
-    if !force && w.dismissed.iter().any(|id| id == key) {
+    if dismissed {
         return None;
     }
     if let Some(same) = previous.filter(|n| !force && n["id"] == key) {
@@ -482,6 +510,7 @@ pub fn evaluate(
         if now_ts - candidate["createdAt"].as_i64()? > 240 { return None; }
     } else {
         if !force && now_ts - w.last_nudge_at < cooldown { return None; }
+        w.announced = false;
         w.last_nudge_at = now_ts;
     }
     w.last_digest = digest;
@@ -532,6 +561,47 @@ pub fn scan_latest(s: &Store) -> Res<Value> {
 mod tests {
     use super::*;
 
+
+    #[test]
+    fn a_pause_reveals_the_pending_offer_and_only_explicit_dismissal_survives_reopening() {
+        let temp = tempfile::tempdir().unwrap();
+        let book = temp.path().join("notebook");
+        let open = || {
+            let s = Store::with_key(book.clone(), &[9; 32]).unwrap();
+            crate::activity::init(&s).unwrap();
+            s
+        };
+        let offer = |s: &Store, event: &str| evaluate(s, event, "display", "Terminal",
+            "error: cannot find the requested manifest file", false);
+        let s = open();
+        crate::activity::configure(&s, &json!({"scope":"displays"})).unwrap();
+        crate::activity::configure(&s, &json!({"enabled":true})).unwrap();
+        let first = offer(&s, "first").unwrap();
+        assert!(current(&s, Some(|| 0.1)).is_null());
+        assert_eq!(current(&s, Some(|| 1.8))["id"], first["id"]);
+        assert_eq!(current(&s, Some(|| 0.1))["id"], first["id"]);
+        assert!(respond(&s, &json!({"id":first["id"],"eventId":"stale"}), true).is_err());
+        respond(&s, &first, false).unwrap();
+        assert!(latest(&s).is_null());
+        drop(s);
+
+        let s = open();
+        let again = offer(&s, "next").expect("opening a suggestion must not silence it");
+        respond(&s, &again, true).unwrap();
+        drop(s);
+        let s = open();
+        assert!(offer(&s, "after-restart").is_none());
+        let digest: String = s.db.lock().unwrap().query_row(
+            "SELECT digest FROM proactive_dismissals", [], |r| r.get(0)).unwrap();
+        assert_eq!(digest, hash(again["id"].as_str().unwrap()));
+        s.db.lock().unwrap().execute("UPDATE proactive_dismissals SET expires=unixepoch()-1", []).unwrap();
+        let expired = offer(&s, "after-expiry").unwrap();
+        respond(&s, &expired, true).unwrap();
+        crate::activity::forget(&s, &json!({"scope":"all"})).unwrap();
+        drop(s);
+        assert!(offer(&open(), "after-forget").is_some());
+    }
+
     #[test]
     fn an_active_connection_follows_the_passage_even_during_cooldown() {
         let dir = tempfile::tempdir().unwrap();
@@ -564,7 +634,7 @@ mod tests {
         let other = Store::with_key(dir.path().join("other"), &[8; 32]).unwrap();
         evaluate(&s, "return", "display", title, &topic, true).unwrap();
         assert!(latest(&other).is_null());
-        dismiss(&other, first["id"].as_str().unwrap());
+        assert!(respond(&other, &first, true).is_err());
         assert_eq!(latest(&s)["id"], first["id"]);
     }
 
@@ -670,7 +740,7 @@ mod tests {
         .expect("should detect compiler error");
         assert_eq!(err["kind"], "help");
 
-        dismiss(&s, err["id"].as_str().unwrap());
+        respond(&s, &err, true).unwrap();
         assert!(latest(&s).is_null());
     }
 }

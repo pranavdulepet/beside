@@ -2375,7 +2375,7 @@ export function ActivitySheet({
                       showProfile({...saved, id: current.id, eventId: current.eventId});
                       return;
                     }
-                    await call('proactiveDismiss', {id: current.id});
+                    await call('proactiveAccept', {id: current.id, eventId: current.eventId});
                     setNudge(null);
                     startNewChat();
                     select('ask');
@@ -2383,7 +2383,7 @@ export function ActivitySheet({
                     await ask(current.prompt, undefined, '', null, undefined, true, current.eventId, current);
                   } catch (e) { fail(String(e)); }
                 }}>{nudge.profileId ? 'Read saved memory' : nudge.kind === 'reply' ? 'Draft a reply' : nudge.kind === 'help' ? 'Explain this' : 'Show connection'} →</button>}
-                <button className="bar-link" onClick={() => void call('proactiveDismiss', {id: nudge.id}).then(() => setNudge(null)).catch(e => fail(String(e)))}>Dismiss</button>
+                <button className="bar-link" onClick={() => void call('proactiveDismiss', {id: nudge.id, eventId: nudge.eventId}).then(() => setNudge(null)).catch(e => fail(String(e)))}>Dismiss</button>
                 {tab === 'journal' && nudge.app && <button className="bar-link" onClick={() =>
                   void call('proactiveConfigure', {muteApp: nudge.app}).then(() => setNudge(null)).catch(e => fail(String(e)))
                 }>Mute {nudge.app}</button>}
