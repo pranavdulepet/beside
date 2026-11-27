@@ -303,6 +303,16 @@ pub(super) fn fuse(lexical: Vec<Value>, semantic: Vec<Value>) -> Vec<Value> {
 mod tests {
     use super::*;
     #[test]
+    fn foreground_embedding_does_not_start_a_cold_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::with_key(dir.path().join("book"), &[17; 32]).unwrap();
+        let unused_model = dir.path().join("cold.gguf");
+        let result = crate::bundled::passage_embedding(&s, &unused_model, "question", true);
+        assert_eq!(result.unwrap_err(), "The embedding model is cold.");
+        assert!(!s.root.join(".sumi/embedding.pid").exists());
+    }
+
+    #[test]
     #[ignore = "Requires explicitly selected local Ollama weights and an offline llama-server"]
     fn installed_embedding_weights_are_shared_only_with_the_bundled_loopback_runtime() {
         let Some((path, space)) = dense_model() else {
@@ -319,6 +329,8 @@ mod tests {
         )
         .expect("local embedding");
         assert_eq!(v.space, space);
+        let warm = embed(&s, "When does the library open?");
+        assert_eq!(warm.space, space);
         assert_eq!(v.feature.len(), 768);
         assert!(v.feature.iter().any(|b| *b != 0));
         crate::bundled::reap(true);

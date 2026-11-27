@@ -66,18 +66,18 @@ pub fn current(snap: &Value) -> bool {
         .is_ok_and(|c| unsafe { beside_window_current(c.as_ptr()) == 1 })
 }
 
+fn current_config(s: &Store, snap: &Value) -> Option<Value> {
+    crate::activity::config(s).ok().filter(|cfg| {
+        cfg["enabled"] == true && cfg["generation"] == snap["generation"] && current(snap)
+    })
+}
+
 pub fn usable(s: &Store, snap: &Value) -> bool {
-    crate::activity::config(s)
-        .ok()
-        .is_some_and(|cfg| cfg["enabled"] == true && cfg["generation"] == snap["generation"])
-        && current(snap)
+    current_config(s, snap).is_some()
 }
 
 pub fn live_image<'a>(s: &Store, snap: &'a Value) -> Option<&'a str> {
-    let cfg = crate::activity::config(s).ok()?;
-    if cfg["generation"] != snap["generation"] || !current(snap) {
-        return None;
-    }
+    current_config(s, snap)?;
     snap["image"].as_str().filter(|v| !v.is_empty())
 }
 
@@ -86,16 +86,12 @@ pub fn present(s: &Store, snap: &Value, steps: &mut Vec<Value>) {
     if steps.is_empty() {
         return;
     }
-    if !current(snap)
-        || crate::activity::config(s)
-            .ok()
-            .is_none_or(|cfg| cfg["generation"] != snap["generation"])
-    {
+    let Some(config) = current_config(s, snap) else {
         steps.clear();
         return;
-    }
+    };
     let target = owner(snap);
-    let request = json!({"owner":target,"steps":steps,"config":crate::activity::config(s).unwrap_or_default()});
+    let request = json!({"owner":target,"steps":steps,"config":config});
     if let Ok(c) = CString::new(request.to_string()) {
         unsafe { sumi_overlay_highlight_steps(c.as_ptr()) };
     }

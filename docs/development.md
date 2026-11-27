@@ -40,11 +40,17 @@ scripts/release.sh
 npm run test:ui
 ```
 
-The UI test uses Google Chrome, an installed Ollama llama3.2:3b model, a temporary notebook, and the debug build of the Rust core. Additional integration checks exercise local inference, the packaged command-line agent server and loopback HTTP. Build the release app before running them.
+The browser suite uses Google Chrome, an installed Ollama `llama3.2:3b` model and temporary notebooks. These additional native checks exercise the agent endpoint, cloud masking against a loopback server, and two public services. The public checks send a general search or verify attestation without submitting a notebook prompt.
 
 ```sh
-cargo test --manifest-path src-tauri/Cargo.toml -- --ignored --nocapture --test-threads=1
+cd src-tauri
+cargo test --locked checks::agent_over_http -- --ignored
+cargo test --locked providers::router_contract -- --ignored
+cargo test --locked keyless_public_search -- --ignored
+cargo test --locked verify_real_attestation -- --ignored
 ```
+
+To check dense retrieval with weights already on your Mac, run `BESIDE_OLLAMA_EMBED_MODEL=name:tag cargo test --locked installed_embedding_weights -- --ignored` from `src-tauri/` using an installed model tag.
 
 To exercise the publisher download in the browser suite, set `BESIDE_TEST_MODEL_DOWNLOAD=1`. This optional test downloads the strongest supported tier that fits the available RAM and storage from Hugging Face and removes its temporary notebook and weights afterward. On repeat runs, set `BESIDE_TEST_GGUF_PREFIX` to an existing GGUF with the same filename to reuse its leading bytes. The test still interrupts a real transfer, resumes it from the publisher, verifies the full digest and runs an inference.
 
