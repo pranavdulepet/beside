@@ -263,9 +263,29 @@
       }
       footer {
         margin: 26px 0 4px;
+        display: grid;
+        gap: 6px;
         font-size: 12.5px;
         color: var(--muted);
         letter-spacing: 0.01em;
+      }
+      footer p {
+        margin: 0;
+      }
+      .colophon {
+        font-size: 11.5px;
+        opacity: 0.78;
+      }
+      .colophon a {
+        pointer-events: auto;
+        color: inherit;
+        text-decoration: none;
+        border-bottom: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+        transition: color 140ms ease, border-color 140ms ease;
+      }
+      .colophon a:hover {
+        color: var(--ink);
+        border-bottom-color: currentColor;
       }
       #clear-ink {
         position: fixed;
@@ -363,7 +383,10 @@
           <p>Saves what you teach it on your Mac in plain files you can inspect, delete anytime, or share selectively with other tools.</p>
         </article>
       </section>
-      <footer>Apple silicon · macOS 14 or later · Runs on your Mac</footer>
+      <footer>
+        <p>Apple silicon · macOS 14 or later · Runs on your Mac</p>
+        <p class="colophon">Made by <a href="https://pranavdulepet.github.io/">Pranav Dulepet</a> · Updated <time id="updated" datetime="2026-11">November 2026</time>.</p>
+      </footer>
     </main>
     <dialog class="cinema" aria-label="Expanded walkthrough"></dialog>
     <script type="module">
