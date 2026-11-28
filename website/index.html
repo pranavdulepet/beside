@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Beside — a floating assistant for your Mac</title>
+    <title>Beside — a private, local-first assistant for your Mac</title>
     <style>
       @font-face {
         font-family: Geist;
@@ -169,6 +169,30 @@
       figcaption { margin: 11px auto 0; font-size: 14px; line-height: 1.5; text-wrap: balance; }
       small { margin-top: 9px; font-size: 12px; }
       small a { display: inline; padding: 0; font: inherit; }
+      .highlights {
+        width: min(760px, calc(100vw - 32px));
+        margin: 34px 0 8px;
+        padding-top: 24px;
+        border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px 30px;
+        text-align: left;
+      }
+      @media (max-width: 600px) {
+        .highlights { grid-template-columns: 1fr; gap: 16px; }
+      }
+      .highlights h2 {
+        margin: 0 0 4px;
+        font: 500 15px/1.3 "Söhne", Geist, sans-serif;
+        color: var(--accent);
+      }
+      .highlights p {
+        margin: 0;
+        font-size: 14.5px;
+        line-height: 1.5;
+        text-wrap: pretty;
+      }
     </style>
     <noscript><style>.picker, .player, #caption, body > canvas { display: none; }</style></noscript>
   </head>
@@ -177,9 +201,9 @@
     <main>
       <span class="signature" aria-hidden="true"></span>
       <h1>Beside</h1>
-      <p>A floating assistant for whatever’s open on your Mac.</p>
+      <p>A private, local-first assistant beside whatever’s open on your Mac.</p>
       <a href="https://github.com/pranavdulepet/beside/releases/latest/download/Beside-macOS.zip" download>Download for Mac ↓</a>
-      <small>Apple silicon · macOS 14+ · <a href="https://github.com/pranavdulepet/beside#try-beside">Install guide</a> · <a href="https://github.com/pranavdulepet/beside/blob/main/docs/guide.md#where-your-data-lives">Privacy</a></small>
+      <small>Apple silicon · macOS 14+ · Runs on-device · <a href="https://github.com/pranavdulepet/beside#try-beside">Install guide</a> · <a href="https://github.com/pranavdulepet/beside/blob/main/docs/guide.md#where-your-data-lives">Privacy</a> · <a href="https://github.com/pranavdulepet/beside">GitHub</a></small>
       <section id="demo" aria-label="Beside on a Mac">
         <div class="picker" role="tablist" aria-label="Choose a walkthrough">
           <button id="tab-writing" role="tab" aria-controls="demo-panel" aria-selected="true" data-take="10" data-caption="Who counted the 64 gates? Check two sources while writing about Chandragupta Maurya.">Writing</button>
@@ -220,6 +244,24 @@
             <a href="media/writing.mp4">Writing</a> · <a href="media/groceries.mp4">Groceries</a> · <a href="media/baggage.mp4">Flight</a>
           </p></noscript>
         </figure>
+      </section>
+      <section class="highlights" aria-label="What Beside does">
+        <div>
+          <h2>Recalls what’s closed</h2>
+          <p>Searches recent windows, Apple Notes, exported Mail, and approved folders on your Mac so you don’t hunt for a line you saw earlier.</p>
+        </div>
+        <div>
+          <h2>Guides you in place</h2>
+          <p>Tap ⌥⇧Space to type or hold to speak, ask where to click for step-by-step on-screen pointers, or listen to a reply with Speak.</p>
+        </div>
+        <div>
+          <h2>Quietly proactive</h2>
+          <p>Surfaces a matching note, visible error, or upcoming Calendar meeting brief during a pause in typing—and backs off when you dismiss it.</p>
+        </div>
+        <div>
+          <h2>Private and portable</h2>
+          <p>Encrypted SQLCipher notebook with in-place forgetting, optional alias masking or attested Tinfoil, and scoped local MCP for Claude Code, Codex, and Cursor.</p>
+        </div>
       </section>
     </main>
     <dialog class="cinema" aria-label="Expanded walkthrough"></dialog>

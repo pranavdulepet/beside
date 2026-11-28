@@ -20,7 +20,7 @@ Hold **Option–Shift–Space** with your pointer on the relevant line. Speak wh
 
 Choose **Notebook** to open the full app. Choose **Open companion** in the notebook to return to the floating sheet. Click the Beside mark to open **What Beside knows**. Inspect **Last question** for the pointer context and passages used. A source beneath a connected answer opens the supporting line. Choose **Use this passage** on an earlier observation to ask about it again. You can refer to an item by its contents, such as “the printer’s instructions.”
 
-When observation and suggestions are on, a dot in the menu bar can point to a useful line in Notes or Mail. Choose **View suggestion**, then **Show connection** to see the line and ask Inkling how it relates. If the conversation changes subject, Beside checks the match again when it next reads the screen. You can dismiss a suggestion or mute an app in notebook Settings.
+When observation and suggestions are on, a dot in the menu bar appears during a pause in typing when Beside spots a matching line in Notes or Mail, a visible error, a reply draft, or an upcoming Calendar meeting. Choose **View suggestion**, then **Show connection** to inspect the evidence. If the conversation changes subject, Beside checks the match again on its next read. Dismissing a suggestion suppresses repeats for seven days and teaches Beside to show fewer suggestions of that kind in that app; you can also mute an app in notebook Settings.
 
 Web lookup is available automatically. A standalone public question about current information can go straight to search. Screen-identification questions use local evidence. If Beside needs a public topic or location, it asks for that detail.
 
@@ -96,6 +96,8 @@ The floating assistant defaults to a local model. If you explicitly enable cloud
 
 In the notebook, an eligible ChatGPT plan or an API provider is optional. A cloud notebook model can receive conversation passages needed for the answer. Private sheets stay local, and attached excerpts have their own sharing control. In the floating sheet, choosing a provider for one typed question sends that text and returns the next question to local thinking. Anthropic uses an API key. Provider usage follows the account you connect.
 
+In cloud model settings, **Mask identifying text** replaces recognized names, emails, phone numbers, and home paths with request-specific aliases restored locally, redacts recognized secrets, and keeps images on your Mac. Choosing **Tinfoil** verifies its confidential router before sending any text. Its **Verify confidential connection** button checks attestation without submitting a question.
+
 Ask a current public question and Beside looks it up automatically. To request a lookup yourself, type a topic and click **Search public web**. Beside sends those terms to Exa, Brave if configured, or DuckDuckGo. Click a source beneath a floating answer to read the passage Beside used, then choose **Open source** to visit the page. A question about what’s on your screen uses local context. When a lookup needs a city or a clearer public topic, Beside asks. Notebook Settings also lets you manage weekend listing searches and access for connected agents.
 
 ## Floating conversations and corrections
@@ -116,6 +118,10 @@ Use **Sheets** (⌘O) to reopen a conversation. Return sends a message and Shift
 
 Use **Correct this reply** to teach Beside a preference. A red memory mark opens the supporting memory and its date. **Not true anymore** retires it. **What Beside knows** (⌘K) includes current and earlier memories, people, projects and saved methods. A standing instruction or repeated task can become a named Markdown skill. Idle processing can review proposed memories against later replies. Direct corrections take effect immediately.
 
+### Share preferences with connected agents
+
+In notebook Settings, connect **Claude Code**, **Codex**, **Claude Desktop**, or **Cursor** over Beside’s local MCP server. Each connection gets its own revocable credential, permitted Scroll sections, and permission level (**Read**, **Ask**, or **Answer for me**). Sharing **Current non-private memories** requires its own checkbox. Closed presentation preferences can be answered automatically only after at least 20 human-reviewed shadow trials meet your confidence threshold; everything else waits for you.
+
 ## If something doesn’t work
 
 - **The shortcut does nothing.** Open **Ask about this Mac** from the menu bar. Sources reports a shortcut conflict if another app has registered the same combination.
@@ -131,5 +137,3 @@ Under **What Beside knows → Sources → Earlier notes and mail**, choose **Imp
 In Apple Mail choose **Mailbox → Export Mailbox**, then open **Earlier notes and mail**, choose **Import Mail export** in Beside and select the export folder. Beside streams the mbox files locally and replaces its previous Mail snapshot. It keeps up to 12,000 characters of message text, preferring plain text and extracting readable text from HTML locally. It skips attachments and raw messages over 24 MiB. The import reports how many messages it kept and skipped.
 
 Choose **Remove imported notes** or **Remove imported messages** to forget that collection. Beside removes its search entries and its quoted passages from saved chats. If a reply quoted both a note and an email, removing Notes keeps the email quote, your question and the surrounding reply. New notebook exports reflect the edit. Archives you exported earlier are separate copies.
-
-In cloud model settings, **Mask identifying text** hides recognized identifiers in companion prompts and keeps images on your Mac. Choosing **Tinfoil** verifies its confidential router before sending any text. Its **Verify confidential connection** button checks the connection without submitting a question.

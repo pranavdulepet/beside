@@ -1,8 +1,16 @@
 # Beside
 
-Beside is a floating assistant for your Mac. Point at what you’re working on and press **⌥⇧Space** to ask a question. It can find a detail in a closed note, adjust a plan when you change your mind, and remember how you want the next draft written.
+Beside is a private, local-first floating assistant for your Mac. Press **⌥⇧Space** beside whatever’s open to check a closed note, revise a draft from your own sources, ask where to click on screen, or share scoped preferences with your coding agents.
 
 [Download Beside for Mac](https://github.com/pranavdulepet/beside/releases/latest/download/Beside-macOS.zip) · [Watch Beside on a Mac](https://pranavdulepet.github.io/beside/#demo)
+
+## What Beside does
+
+- **Reads what’s open, recalls what’s closed.** Searches recent screens, Apple Notes, exported Mail, and approved folders on-device with fused full-text and semantic retrieval.
+- **Guides you on screen and by voice.** Points to controls in the active window for step-by-step walkthroughs, listens when you hold **⌥⇧Space**, and reads replies aloud with **Speak**.
+- **Quietly proactive.** Surfaces a matching note, visible error, reply draft, or upcoming Calendar meeting brief during a pause in typing—and backs off when you dismiss it.
+- **Private by default, verifiable in the cloud.** Runs locally on Apple silicon with an encrypted SQLCipher notebook and in-place forgetting. Optional cloud mode supports local alias masking and hardware-attested Tinfoil confidential compute.
+- **Learns and travels with you.** Turns corrections into editable Markdown memory, checks inferred updates against past replies before keeping them, and shares scoped context with Claude Code, Codex, Claude Desktop, and Cursor over local MCP.
 
 ## Try Beside
 
