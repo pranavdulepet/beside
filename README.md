@@ -1,32 +1,32 @@
 # Beside
 
-Beside is a private, local-first floating assistant for your Mac. Press **⌥⇧Space** beside whatever’s open to check a closed note, revise a draft from your own sources, ask where to click on screen, or share scoped preferences with your agents.
+Beside is a personal assistant for any app on your Mac. Press **⌥⇧Space** to ask a question, get quiet help when something matches what you’re working on, and build personal context over time that stays on your Mac and moves with you.
 
 [Download Beside for Mac](https://github.com/pranavdulepet/beside/releases/latest/download/Beside-macOS.zip) · [Watch Beside on a Mac](https://pranavdulepet.github.io/beside/#demo)
 
 ## What Beside does
 
-- **Reads what’s open, recalls what’s closed.** Searches recent screens, Apple Notes, exported Mail, and approved folders on-device with fused full-text and semantic retrieval.
-- **Guides you on screen and by voice.** Points to controls in the active window for step-by-step walkthroughs, listens when you hold **⌥⇧Space**, and reads replies aloud with **Speak**.
-- **Quietly proactive.** Surfaces a matching note, visible error, reply draft, or upcoming Calendar meeting brief during a pause in typing—and backs off when you dismiss it.
-- **Private by default, verifiable in the cloud.** Runs locally on Apple silicon with an encrypted SQLCipher notebook and in-place forgetting. Optional cloud mode supports local alias masking and hardware-attested Tinfoil confidential compute.
-- **Learns and travels with you.** Turns corrections into editable Markdown memory, checks inferred updates against past replies before keeping them, and shares scoped context with Claude Code, Codex, Claude Desktop, and Cursor over local MCP.
+- **Finds what you closed.** Searches recent screens, Apple Notes, Mail exports, and folders you choose so you don’t hunt for something you read earlier.
+- **Helps in any app.** Tap **⌥⇧Space** to type, hold it to speak, ask where to click on screen for step-by-step pointers, or listen to a reply aloud.
+- **Steps in quietly.** Shows a small menu bar dot when a matching note, error, reply draft, or upcoming meeting comes up during a pause in typing, and backs off when you dismiss it.
+- **Private by default.** Runs locally on Apple silicon with an encrypted notebook and one-click forgetting. If you opt into a cloud model, you can mask personal details or use confidential compute.
+- **Context you own.** Turns your corrections into plain Markdown files on your Mac and lets you share chosen sections with tools like ChatGPT Work mode, Claude Code, Claude Desktop, and Cursor.
 
 ## Try Beside
 
-1. **Check your Mac.** Open the Apple menu → **About This Mac**. You’ll need an Apple M-series chip and macOS 14 or later. The built-in model downloads need at least 16 GB of memory.
-2. **Open Beside.** Double-click the downloaded ZIP, drag **Beside** to **Applications**, then open it. The download is ad-hoc signed. If macOS asks you to review the app, see [Apple’s guide to opening downloaded apps](https://support.apple.com/en-us/102445).
-3. **Choose local answers.** The floating sheet offers a model that fits your Mac. It can use an installed copy of Inkling, download one, or open a GGUF file you already have.
-4. **Choose what Beside sees.** Select **Turn on screen memory** to remember work between visits, **Only when I ask** for a one-time look, or **Keep it off**. When macOS asks, allow Screen Recording and return to Beside.
-5. **Ask beside your work.** Point at the relevant part of a window. Tap **Option–Shift–Space** to type, or hold it to speak. Press **Esc** to go back. The notebook and local model live on your Mac.
+1. **Check your Mac.** You’ll need an Apple silicon Mac (M1 or newer) running macOS 14 or later. Built-in model downloads need at least 16 GB of memory.
+2. **Open Beside.** Unzip the download, drag **Beside** into **Applications**, and open it. Because this build isn’t notarized by Apple yet, macOS may ask you to confirm it in **System Settings → Privacy & Security**. [Apple’s guide](https://support.apple.com/en-us/102445)
+3. **Pick a local model.** Beside recommends one that fits your Mac, or lets you use Ollama, LM Studio, or your own model file.
+4. **Choose what Beside can see.** Turn on screen memory to remember work between visits, pick **Only when I ask** for a one-time look, or keep screen access off.
+5. **Ask beside your work.** Point at what you’re looking at. Tap **⌥⇧Space** to type, hold it to speak, and press **Esc** to go back.
 
 ## See it in use
 
 [![Beside checking two research notes while revising an essay about Chandragupta Maurya](website/media/writing.png)](https://pranavdulepet.github.io/beside/#writing)
 
-- Check a disputed claim in TextEdit against two research notes, inspect both passages, and paste the revision. [Writing](https://pranavdulepet.github.io/beside/#writing)
-- At Ryanair’s checked-bag offer, Beside checks the Athens packing list and arrival forecast before recommending you skip the £41.49 extra bag. [Flight](https://pranavdulepet.github.io/beside/#flight)
-- Ask where to turn on Dark Mode. Beside highlights Appearance in System Settings, then points to Dark on the next step. [Guidance](https://pranavdulepet.github.io/beside/#guidance)
-- Scope local MCP access to “How you decide” so ChatGPT Work mode plans a Lisbon weekend around your travel preferences while People stays off-limits and every read is logged. [Agents](https://pranavdulepet.github.io/beside/#agents)
+- Check a line in TextEdit against two saved notes, read both passages, and update the sentence. [Writing](https://pranavdulepet.github.io/beside/#writing)
+- At airline checkout, Beside checks your packing list and arrival weather before telling you to skip the £41.49 extra bag. [Flight](https://pranavdulepet.github.io/beside/#flight)
+- Ask where Dark Mode is in System Settings. Beside highlights Appearance first, then points right to Dark. [Guidance](https://pranavdulepet.github.io/beside/#guidance)
+- Let ChatGPT read just your travel preferences to plan a Lisbon weekend. Personal notes stay private and every read is logged. [Agents](https://pranavdulepet.github.io/beside/#agents)
 
-[User guide](docs/guide.md) · [Walkthroughs](docs/walkthroughs.md) · [Architecture](docs/architecture.md) · [Storage and sharing](docs/guide.md#where-your-data-lives) · [Security](SECURITY.md) · [Build from source](docs/development.md) · [Contribute](CONTRIBUTING.md) · [License](LICENSE) · [Third-party credits](licenses/)
+[User guide](docs/guide.md) · [Walkthroughs](docs/walkthroughs.md) · [How it works](docs/architecture.md) · [Privacy & storage](docs/guide.md#where-your-data-lives) · [Security](SECURITY.md) · [Build from source](docs/development.md) · [Contribute](CONTRIBUTING.md) · [License](LICENSE) · [Credits](licenses/)

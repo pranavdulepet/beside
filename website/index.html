@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Beside — a private, local-first assistant for your Mac</title>
+    <title>Beside — a personal assistant for any app on your Mac</title>
     <style>
       @font-face {
         font-family: Geist;
@@ -24,8 +24,12 @@
         color-scheme: light dark;
         --paper: #faf8f1;
         --ink: #334443;
+        --muted: #5c6d6c;
         --accent: #34656d;
+        --accent-ink: #faf8f1;
         --hover: #eeeae0;
+        --card: rgba(250, 248, 241, 0.78);
+        --line: rgba(51, 68, 67, 0.13);
         --selection: #faeab1;
         --selection-ink: #334443;
       }
@@ -33,22 +37,28 @@
         html {
           --paper: #1c2929;
           --ink: #faf8f1;
+          --muted: #b6c5c2;
           --accent: #a2cccd;
+          --accent-ink: #162222;
           --hover: #293b3b;
+          --card: rgba(34, 49, 49, 0.78);
+          --line: rgba(250, 248, 241, 0.14);
           --selection: #334443;
           --selection-ink: #faeab1;
         }
       }
       body {
+        position: relative;
+        min-height: 100svh;
         margin: 0;
         background: var(--paper);
         color: var(--ink);
-        font:
-          17px "Söhne", Geist, sans-serif;
+        font: 17px/1.5 "Söhne", Geist, sans-serif;
+        -webkit-font-smoothing: antialiased;
       }
       body::before {
         content: '';
-        position: fixed;
+        position: absolute;
         inset: 0;
         background: url('paper.png') repeat;
         opacity: 0.18;
@@ -62,9 +72,6 @@
         touch-action: none;
         cursor: crosshair;
       }
-      @media (pointer: coarse) {
-        body > canvas { touch-action: pan-y pinch-zoom; }
-      }
       main {
         position: relative;
         min-height: 100svh;
@@ -72,7 +79,7 @@
         place-content: center;
         justify-items: center;
         pointer-events: none;
-        padding: 28px 16px;
+        padding: 40px 20px 32px;
         text-align: center;
       }
       .signature {
@@ -83,24 +90,76 @@
         mask: url('beside.png') center / contain no-repeat;
       }
       h1 {
-        font:
-          450 clamp(48px, 6vw, 72px)/1 Newsreader, Georgia, serif;
+        font: 450 clamp(48px, 6vw, 72px)/1 Newsreader, Georgia, serif;
         letter-spacing: -0.045em;
-        margin: 0;
+        margin: 2px 0 0;
       }
-      p {
-        margin: 12px 0 18px; max-width: 36rem; text-wrap: balance;
+      .tagline {
+        margin: 14px 0 22px;
+        max-width: 39rem;
+        font-size: 17.5px;
+        line-height: 1.5;
+        color: var(--ink);
+        text-wrap: balance;
       }
-      a {
+      .actions {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+      }
+      .cta {
         pointer-events: auto;
-        display: block;
-        color: inherit;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 12px 24px;
+        min-height: 46px;
+        border-radius: 999px;
+        background: var(--accent);
+        color: var(--accent-ink);
         text-decoration: none;
-        border-bottom: 1px solid;
-        padding: 5px;
-        font-size: 15px;
+        font: 500 15.5px/1 "Söhne", Geist, sans-serif;
+        letter-spacing: -0.01em;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 8px 22px color-mix(in srgb, var(--accent) 24%, transparent);
+        transition: transform 140ms ease, filter 140ms ease, box-shadow 140ms ease;
       }
-      #demo { width: min(760px, calc(100vw - 32px)); margin: 22px 0 0; pointer-events: auto; }
+      .cta:hover {
+        filter: brightness(1.06);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1), 0 10px 26px color-mix(in srgb, var(--accent) 30%, transparent);
+      }
+      .cta:active {
+        transform: translateY(0);
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 7px;
+      }
+      .pill {
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 13px;
+        min-height: 32px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--ink);
+        text-decoration: none;
+        font: 500 13px/1 "Söhne", Geist, sans-serif;
+        backdrop-filter: blur(4px);
+        transition: background 140ms ease, border-color 140ms ease;
+      }
+      .pill:hover {
+        background: var(--hover);
+        border-color: color-mix(in srgb, currentColor 24%, transparent);
+      }
+      #demo { width: min(760px, calc(100vw - 32px)); margin: 28px 0 0; pointer-events: auto; touch-action: pan-y; }
       .picker {
         display: flex; align-items: center; gap: 2px; width: max-content;
         max-width: 100%; margin: 0 auto 10px; overflow-x: auto;
@@ -121,7 +180,7 @@
       .picker [role="tab"]:focus-visible { outline-offset: -3px; }
       :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
       figure { margin: 0; }
-      noscript a { display: inline; padding: 0; font: inherit; }
+      noscript a { display: inline; padding: 0; font: inherit; color: inherit; }
       [hidden] { display: none !important; }
       .player { position: relative; }
       video, .cover img, .direct-recording { display: block; width: 100%; height: auto; aspect-ratio: auto var(--film-ratio, 16 / 10); object-fit: contain; border-radius: 10px; }
@@ -145,7 +204,7 @@
       @keyframes spin { to { transform: rotate(1turn); } }
       @media (prefers-reduced-motion: reduce) { .cover[aria-busy="true"]::after { animation: none; } }
       .player-message { margin: 10px auto 0; font-size: 14px; }
-      .player-message a { display: inline; padding: 0; font: inherit; }
+      .player-message a { display: inline; padding: 0; font: inherit; color: inherit; }
       .film { border-radius: 10px; overflow: hidden; background: #1c2929; color: #faf8f1; }
       .film-screen { position: relative; }
       .film canvas { display: block; width: 100%; height: auto; }
@@ -165,50 +224,95 @@
       .cinema[open] { display: grid; align-items: center; }
       .cinema::backdrop { background: #142120; }
       .cinema .film canvas { max-height: calc(100dvh - 52px); object-fit: contain; }
-      figcaption { margin: 11px auto 0; font-size: 14px; line-height: 1.5; text-wrap: balance; }
-      small { margin-top: 9px; font-size: 12px; }
-      small a { display: inline; padding: 0; font: inherit; }
+      figcaption { margin: 12px auto 0; max-width: 38rem; font-size: 14.5px; line-height: 1.5; color: var(--muted); text-wrap: balance; }
       .highlights {
-        width: min(760px, calc(100vw - 32px));
-        margin: 34px 0 8px;
-        padding-top: 24px;
-        border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+        width: min(1040px, calc(100vw - 40px));
+        margin: 44px 0 0;
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 20px 30px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
         text-align: left;
+        pointer-events: auto;
+        touch-action: pan-y;
       }
-      @media (max-width: 600px) {
-        .highlights { grid-template-columns: 1fr; gap: 16px; }
+      @media (max-width: 880px) {
+        .highlights { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (max-width: 540px) {
+        .highlights { grid-template-columns: 1fr; }
+      }
+      .highlights article {
+        padding: 18px 18px 20px;
+        border-radius: 14px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        backdrop-filter: blur(4px);
       }
       .highlights h2 {
-        margin: 0 0 4px;
-        font: 500 15px/1.3 "Söhne", Geist, sans-serif;
-        color: var(--accent);
+        margin: 0 0 6px;
+        font: 550 15px/1.3 "Söhne", Geist, sans-serif;
+        color: var(--ink);
+        letter-spacing: -0.01em;
       }
       .highlights p {
         margin: 0;
-        font-size: 14.5px;
-        line-height: 1.5;
+        font-size: 14px;
+        line-height: 1.52;
+        color: var(--muted);
         text-wrap: pretty;
       }
+      footer {
+        margin: 26px 0 4px;
+        font-size: 12.5px;
+        color: var(--muted);
+        letter-spacing: 0.01em;
+      }
+      #clear-ink {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 2;
+        padding: 6px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--muted);
+        font: 500 12.5px/1 "Söhne", Geist, sans-serif;
+        cursor: pointer;
+        backdrop-filter: blur(6px);
+        transition: color 140ms ease, background 140ms ease;
+      }
+      #clear-ink:hover {
+        background: var(--hover);
+        color: var(--ink);
+      }
+      @media (max-width: 640px) {
+        #clear-ink { top: 14px; bottom: auto; right: 14px; }
+      }
     </style>
-    <noscript><style>.picker, .player, #caption, body > canvas { display: none; }</style></noscript>
+    <noscript><style>.picker, .player, #caption, body > canvas, #clear-ink { display: none; }</style></noscript>
   </head>
   <body>
-    <canvas aria-label="Draw with ink on the paper"></canvas>
+    <canvas aria-label="Draw calligraphy on the paper"></canvas>
+    <button id="clear-ink" type="button" hidden>Clear ink</button>
     <main>
       <span class="signature" aria-hidden="true"></span>
       <h1>Beside</h1>
-      <p>A private, local-first assistant beside whatever’s open on your Mac.</p>
-      <a href="https://github.com/pranavdulepet/beside/releases/latest/download/Beside-macOS.zip" download>Download for Mac ↓</a>
-      <small>Apple silicon · macOS 14+ · Runs on-device · <a href="https://github.com/pranavdulepet/beside#try-beside">Install guide</a> · <a href="https://github.com/pranavdulepet/beside/blob/main/docs/guide.md#where-your-data-lives">Privacy</a> · <a href="https://github.com/pranavdulepet/beside">GitHub</a></small>
+      <p class="tagline">An assistant for any app on your Mac. It helps when you ask, steps in when useful, and builds personal context over time that you can take anywhere.</p>
+      <div class="actions">
+        <a class="cta" href="https://github.com/pranavdulepet/beside/releases/latest/download/Beside-macOS.zip" download>Download for Mac ↓</a>
+        <nav class="links" aria-label="Resources">
+          <a class="pill" href="https://github.com/pranavdulepet/beside#try-beside">Install guide</a>
+          <a class="pill" href="https://github.com/pranavdulepet/beside/blob/main/docs/guide.md#where-your-data-lives">Privacy</a>
+          <a class="pill" href="https://github.com/pranavdulepet/beside">GitHub</a>
+        </nav>
+      </div>
       <section id="demo" aria-label="Beside on a Mac">
         <div class="picker" role="tablist" aria-label="Choose a walkthrough">
-          <button id="tab-writing" role="tab" aria-controls="demo-panel" aria-selected="true" data-take="11" data-caption="Who counted the 64 gates? Check two sources while writing about Chandragupta Maurya.">Writing</button>
-          <button id="tab-flight" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-file="baggage" data-ratio="90 / 49" data-take="10" data-caption="At Ryanair checkout, Beside checks the Athens packing list and forecast before recommending you skip the £41.49 extra bag.">Flight</button>
-          <button id="tab-guidance" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-take="2" data-caption="Ask where to turn on Dark Mode. Beside highlights Appearance in System Settings, then points to Dark on the next step.">Guidance</button>
-          <button id="tab-agents" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-take="2" data-caption="Scope local MCP access to “How you decide” so ChatGPT Work mode plans a Lisbon weekend around your preferences—keeping People off-limits and logging every read.">Agents</button>
+          <button id="tab-writing" role="tab" aria-controls="demo-panel" aria-selected="true" data-take="11" data-caption="Check a line in TextEdit against two saved notes, read both passages, and update the sentence.">Writing</button>
+          <button id="tab-flight" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-file="baggage" data-ratio="90 / 49" data-take="10" data-caption="At airline checkout, Beside checks your packing list and arrival weather before telling you to skip the £41.49 extra bag.">Flight</button>
+          <button id="tab-guidance" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-take="2" data-caption="Ask where Dark Mode is in System Settings. Beside highlights Appearance first, then points right to Dark.">Guidance</button>
+          <button id="tab-agents" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-take="2" data-caption="Let ChatGPT read just your travel preferences to plan a Lisbon weekend. Personal notes stay private and every read is logged.">Agents</button>
         </div>
         <figure id="demo-panel" role="tabpanel" aria-labelledby="tab-writing">
           <div class="player">
@@ -235,30 +339,31 @@
             </button>
           </div>
           <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="https://github.com/pranavdulepet/beside/raw/refs/heads/main/website/media/writing.mp4" download>Download the MP4</a></p>
-          <figcaption id="caption">Who counted the 64 gates? Check two sources while writing about Chandragupta Maurya.</figcaption>
+          <figcaption id="caption">Check a line in TextEdit against two saved notes, read both passages, and update the sentence.</figcaption>
           <noscript><p>Open a recording in your media player.</p><p>
             <a href="media/writing.mp4">Writing</a> · <a href="media/baggage.mp4">Flight</a> · <a href="media/guidance.mp4">Guidance</a> · <a href="media/agents.mp4">Agents</a>
           </p></noscript>
         </figure>
       </section>
       <section class="highlights" aria-label="What Beside does">
-        <div>
-          <h2>Recalls what’s closed</h2>
-          <p>Searches recent windows, Apple Notes, exported Mail, and approved folders on your Mac so you don’t hunt for a line you saw earlier.</p>
-        </div>
-        <div>
-          <h2>Guides you in place</h2>
-          <p>Tap ⌥⇧Space to type or hold to speak, ask where to click for step-by-step on-screen pointers, or listen to a reply with Speak.</p>
-        </div>
-        <div>
-          <h2>Quietly proactive</h2>
-          <p>Surfaces a matching note, visible error, or upcoming Calendar meeting brief during a pause in typing—and backs off when you dismiss it.</p>
-        </div>
-        <div>
-          <h2>Private and portable</h2>
-          <p>Encrypted SQLCipher notebook with in-place forgetting, optional alias masking or attested Tinfoil, and scoped local MCP for Claude Code, Codex, and Cursor.</p>
-        </div>
+        <article>
+          <h2>Finds what you closed</h2>
+          <p>Searches recent screens, Notes, Mail, and folders you pick so you don’t hunt for something you read earlier.</p>
+        </article>
+        <article>
+          <h2>Helps in any app</h2>
+          <p>Tap ⌥⇧Space to type, hold to speak, ask where to click on screen, or have a reply read aloud.</p>
+        </article>
+        <article>
+          <h2>Steps in quietly</h2>
+          <p>Spots a related note, an error, or an upcoming meeting when you pause typing, and backs off when you dismiss it.</p>
+        </article>
+        <article>
+          <h2>Context you own</h2>
+          <p>Saves what you teach it on your Mac in plain files you can inspect, delete anytime, or share selectively with other tools.</p>
+        </article>
       </section>
+      <footer>Apple silicon · macOS 14 or later · Runs on your Mac</footer>
     </main>
     <dialog class="cinema" aria-label="Expanded walkthrough"></dialog>
     <script type="module">
@@ -330,7 +435,6 @@
             reveal(film.querySelector('.toggle'));
           } catch {
             if (signal.aborted) return;
-            // A plain image can also play when a browser blocks fetch or scripts.
             direct.onload = () => {
               video.hidden = true;
               direct.hidden = false;
@@ -424,75 +528,209 @@
       const readAddress = () => selectDemo(tabs.find(tab => tab.id === 'tab-' + location.hash.slice(1)) || tabs[0], false);
       addEventListener('hashchange', readAddress);
       readAddress();
-      const canvas = document.querySelector('canvas');
-      const ink = canvas.getContext('2d');
-      const dark = matchMedia('(prefers-color-scheme: dark)');
-      const still = matchMedia('(prefers-reduced-motion: reduce)');
-      const strokes = [];
-      let active, pointer, frame;
 
-      function paint(from, to, spread) {
-        ink.beginPath();
-        ink.moveTo(from.x, from.y);
-        ink.lineTo(to.x + 0.01, to.y + 0.01);
-        ink.lineCap = 'round';
-        ink.strokeStyle = dark.matches ? '#a2cccd' : '#34656d';
-        ink.lineWidth = (from.w + to.w) / 2 + spread;
-        ink.globalAlpha = spread ? 0.09 : 0.85;
-        ink.stroke();
+      // Zero-latency calligraphic brush canvas (direct incremental nib stamping, coalesced high-Hz input)
+      const canvas = document.querySelector('body > canvas');
+      const clearBtn = document.querySelector('#clear-ink');
+      const ctx = canvas.getContext('2d', {desynchronized: true}) || canvas.getContext('2d');
+      const dark = matchMedia('(prefers-color-scheme: dark)');
+      const NIB_ANGLE = -0.66; // ~-38 deg traditional calligraphic brush slant
+      const TWO_PI = Math.PI * 2;
+      const strokes = [];
+      let active = null;
+      let pointerId = null;
+
+      function setInkStyle() {
+        ctx.fillStyle = dark.matches ? '#a2cccd' : '#264d54';
       }
-      function render(time) {
-        ink.clearRect(0, 0, innerWidth, innerHeight);
-        let wet = false;
-        for (const stroke of strokes) {
-          const age = still.matches ? 1 : Math.min(1, (time - stroke.at) / 650);
-          const bleed = 0.2 + 2.2 * Math.max(0, age);
-          wet ||= age < 1;
-          stroke.points.forEach((point, i) => {
-            const previous = stroke.points[Math.max(0, i - 1)];
-            paint(previous, point, bleed);
-            paint(previous, point, 0);
-          });
+
+      function stampDab(x, y, width, angle, speed) {
+        const rx = Math.max(0.6, width * 0.54);
+        const ry = Math.max(0.38, width * 0.28);
+        const dryness = Math.min(1, Math.max(0, (speed - 1.35) / 2.4));
+        const coreAlpha = 0.92 - dryness * 0.36;
+
+        // Soft ink absorption halo on slow, heavy strokes
+        if (speed < 1.1 && width > 3.2) {
+          ctx.globalAlpha = (1 - speed / 1.1) * 0.048;
+          ctx.beginPath();
+          ctx.ellipse(x, y, rx * 1.24, ry * 1.28, angle, 0, TWO_PI);
+          ctx.fill();
         }
-        frame = wet ? requestAnimationFrame(render) : null;
+
+        // Core calligraphic brush body
+        ctx.globalAlpha = coreAlpha;
+        ctx.beginPath();
+        ctx.ellipse(x, y, rx, ry, angle, 0, TWO_PI);
+        ctx.fill();
+
+        // Dry-brush feathered bristles on fast flicks
+        if (dryness > 0.25 && width > 1.8) {
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+          const off = rx * 0.44;
+          ctx.globalAlpha = coreAlpha * 0.42;
+          ctx.beginPath();
+          ctx.ellipse(x + cos * off, y + sin * off, rx * 0.28, ry * 0.62, angle, 0, TWO_PI);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.ellipse(x - cos * off * 0.82, y - sin * off * 0.82, rx * 0.22, ry * 0.54, angle, 0, TWO_PI);
+          ctx.fill();
+        }
       }
-      function schedule() {
-        if (!frame) frame = requestAnimationFrame(render);
+
+      function paintCurve(x0, y0, cx, cy, x1, y1, w0, w1, s0, s1, a0, a1) {
+        const dist = Math.hypot(x1 - x0, y1 - y0) + Math.hypot(cx - x0, cy - y0) * 0.3;
+        const stepPx = Math.max(0.65, Math.min(1.6, (w0 + w1) * 0.09));
+        const steps = Math.max(1, Math.ceil(dist / stepPx));
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          const u = 1 - t;
+          const x = u * u * x0 + 2 * u * t * cx + t * t * x1;
+          const y = u * u * y0 + 2 * u * t * cy + t * t * y1;
+          stampDab(x, y, w0 + (w1 - w0) * t, a0 + (a1 - a0) * t, s0 + (s1 - s0) * t);
+        }
       }
+
+      function brushWidth(speed, pressure, strokeAngle, travel) {
+        // Expressive fude brush physics: lush slow downstrokes, razor-clean fast hairlines
+        const speedFactor = 1 / (1 + Math.pow(speed * 0.58, 1.35));
+        const hasRealPressure = pressure > 0 && Math.abs(pressure - 0.5) > 0.015;
+        const press = hasRealPressure ? 0.38 + 1.08 * pressure : 1;
+        // Directional calligraphic contrast (thick cross-nib downstrokes, thin along-nib upstrokes)
+        const angleContrast = Math.abs(Math.sin(strokeAngle - NIB_ANGLE));
+        const angleFactor = 0.28 + 0.72 * Math.pow(angleContrast, 0.85);
+        // Natural brush landing swell over the first 16px
+        const entry = Math.min(1, 0.45 + (travel / 16) * 0.55);
+        const base = 1.6 + 15.5 * speedFactor * press;
+        return Math.max(0.95, Math.min(18, base * angleFactor * entry));
+      }
+
+      function addSample(stroke, x, y, t, pressure) {
+        const prev = stroke.last;
+        const dx = x - prev.x;
+        const dy = y - prev.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 0.75) return;
+        const dt = Math.max(1, t - prev.t);
+        const speed = prev.speed * 0.62 + (dist / dt) * 0.38;
+        const strokeAngle = Math.atan2(dy, dx);
+        const travel = prev.travel + dist;
+        const targetW = brushWidth(speed, pressure, strokeAngle, travel);
+        const w = prev.w * 0.48 + targetW * 0.52;
+        const nibAngle = NIB_ANGLE + Math.sin(strokeAngle - NIB_ANGLE) * 0.2;
+
+        const mx = (prev.x + x) * 0.5;
+        const my = (prev.y + y) * 0.5;
+        paintCurve(stroke.mx, stroke.my, prev.x, prev.y, mx, my, stroke.mw, w, stroke.ms, speed, stroke.ma, nibAngle);
+        stroke.segs.push([stroke.mx, stroke.my, prev.x, prev.y, mx, my, stroke.mw, w, stroke.ms, speed, stroke.ma, nibAngle]);
+        stroke.mx = mx;
+        stroke.my = my;
+        stroke.mw = w;
+        stroke.ms = speed;
+        stroke.ma = nibAngle;
+        stroke.last = {x, y, t, speed, w, travel, dx, dy};
+      }
+
+      function finishTail(stroke) {
+        const last = stroke.last;
+        if (stroke.segs.length === 0) return;
+        const len = Math.hypot(last.dx, last.dy) || 1;
+        const ux = last.dx / len;
+        const uy = last.dy / len;
+        const tailLen = Math.min(24, Math.max(5, last.speed * 10));
+        const tx = last.x + ux * tailLen;
+        const ty = last.y + uy * tailLen;
+        const endW = Math.max(0.45, last.w * 0.1);
+        const endS = Math.max(2.1, last.speed * 1.45);
+        paintCurve(stroke.mx, stroke.my, last.x, last.y, tx, ty, stroke.mw, endW, stroke.ms, endS, stroke.ma, stroke.ma);
+        stroke.segs.push([stroke.mx, stroke.my, last.x, last.y, tx, ty, stroke.mw, endW, stroke.ms, endS, stroke.ma, stroke.ma]);
+      }
+
+      function replayAll() {
+        ctx.clearRect(0, 0, innerWidth, innerHeight);
+        setInkStyle();
+        for (const stroke of strokes) {
+          stampDab(stroke.sx, stroke.sy, stroke.sw, NIB_ANGLE, 0.2);
+          for (const s of stroke.segs) {
+            paintCurve(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11]);
+          }
+        }
+      }
+
       function resize() {
-        const scale = Math.min(devicePixelRatio, 3);
+        const scale = Math.min(devicePixelRatio || 1, 2);
         canvas.width = Math.round(innerWidth * scale);
         canvas.height = Math.round(innerHeight * scale);
-        ink.setTransform(scale, 0, 0, scale, 0, 0);
-        schedule();
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+        replayAll();
       }
-      function point(e) {
-        return {x: e.clientX, y: e.clientY, w: 0.8 + 5 * (e.pressure || 0.45)};
-      }
-      canvas.onpointerdown = e => {
+
+      canvas.addEventListener('pointerdown', e => {
         if (!e.isPrimary || e.button !== 0) return;
-        pointer = e.pointerId;
-        canvas.setPointerCapture(pointer);
-        active = {at: performance.now(), points: [point(e)]};
+        pointerId = e.pointerId;
+        canvas.setPointerCapture(pointerId);
+        setInkStyle();
+        const startW = e.pointerType === 'pen' && e.pressure > 0 ? 1.8 + 7.5 * e.pressure : 4.2;
+        const x = e.clientX;
+        const y = e.clientY;
+        const t = e.timeStamp || performance.now();
+        active = {
+          sx: x, sy: y, sw: startW,
+          mx: x, my: y, mw: startW, ms: 0.2, ma: NIB_ANGLE,
+          last: {x, y, t, speed: 0.2, w: startW, travel: 0, dx: 0, dy: 0},
+          segs: [],
+        };
         strokes.push(active);
-        schedule();
-      };
-      canvas.onpointermove = e => {
-        if (!active || e.pointerId !== pointer) return;
-        active.points.push(point(e));
-        active.at = performance.now();
-        schedule();
-      };
-      canvas.onpointercancel = e => {
-        if (active && e.pointerId === pointer) {
-          strokes.pop();
-          active = null;
-          schedule();
+        stampDab(x, y, startW, NIB_ANGLE, 0.2);
+        clearBtn.hidden = false;
+      });
+
+      function handleMove(e) {
+        if (!active || e.pointerId !== pointerId) return;
+        const samples = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+        if (samples && samples.length) {
+          for (let i = 0; i < samples.length; i++) {
+            const s = samples[i];
+            addSample(active, s.clientX, s.clientY, s.timeStamp || performance.now(), s.pressure);
+          }
+        } else {
+          addSample(active, e.clientX, e.clientY, e.timeStamp || performance.now(), e.pressure);
         }
+      }
+      const moveEvent = (window.isSecureContext && 'onpointerrawupdate' in window) ? 'pointerrawupdate' : 'pointermove';
+      canvas.addEventListener(moveEvent, handleMove, {passive: true});
+
+      function endStroke(e) {
+        if (!active || (e && e.pointerId !== pointerId)) return;
+        finishTail(active);
+        active = null;
+        pointerId = null;
+      }
+      canvas.addEventListener('pointerup', endStroke);
+      canvas.addEventListener('pointercancel', e => {
+        if (!active || e.pointerId !== pointerId) return;
+        strokes.pop();
+        active = null;
+        pointerId = null;
+        clearBtn.hidden = strokes.length === 0;
+        replayAll();
+      });
+      canvas.addEventListener('lostpointercapture', () => {
+        if (!active) return;
+        finishTail(active);
+        active = null;
+        pointerId = null;
+      });
+
+      clearBtn.onclick = () => {
+        strokes.length = 0;
+        active = null;
+        clearBtn.hidden = true;
+        ctx.clearRect(0, 0, innerWidth, innerHeight);
       };
-      canvas.onlostpointercapture = () => { active = null; };
-      dark.addEventListener('change', schedule);
-      still.addEventListener('change', schedule);
+
+      dark.addEventListener('change', replayAll);
       addEventListener('resize', resize);
       resize();
     </script>
