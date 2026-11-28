@@ -1528,6 +1528,9 @@ export function ActivitySheet({
     setSelection('');
     notify(message || '');
     sequence.current++;
+    if (busyRef.current) {
+      void call('cancelAsk').catch(() => {});
+    }
     resetStream();
     pending('');
     set([]);
@@ -2135,7 +2138,7 @@ export function ActivitySheet({
         ]);
       }
     } catch (e) {
-      if (n === sequence.current) {
+      if (n === sequence.current && !/Cancelled\.?$/i.test(String(e))) {
         fail(String(e));
         write(draft => draft || q);
       }
@@ -2432,7 +2435,6 @@ export function ActivitySheet({
         )}
 
         <div className="sheet-tools">
-          {isCloudBrain && <button className="brain-pill" data-mode="cloud" onClick={() => select('brain')}>{activeBrain.providerLabel || 'Cloud'}</button>}
           {!close && <button type="button" className="bar-link" onClick={() => void call('openNotebook').then(dropOneTimeWindow).catch(e => fail(String(e)))}>Notebook</button>}
         </div>
         {!close && (
@@ -3087,7 +3089,6 @@ export function ActivitySheet({
             void submitTyped();
           }}
         >
-          {close && providerControl}
           {provider && (
             <small>Only this typed question goes to {provider}.</small>
           )}
@@ -3179,18 +3180,38 @@ export function ActivitySheet({
                 }}
               />
             </label>
-            <button
-              className="send-question"
-              aria-label={
-                provider || isCloudBrain
-                  ? 'Ask ' + (provider || activeBrain.providerLabel)
-                  : 'Ask on this Mac'
-              }
-              title="Send · Return"
-              disabled={!text.trim() || busy}
-            >
-              <span aria-hidden="true">↑</span>
-            </button>
+            {busy ? (
+              <button
+                type="button"
+                className="send-question stop-question"
+                aria-label="Stop generating"
+                title="Stop generating"
+                onClick={() => {
+                  sequence.current++;
+                  resetStream();
+                  setPhase('idle');
+                  setPreview(null);
+                  pending('');
+                  void call('cancelAsk').catch(() => {});
+                  field.current?.focus();
+                }}
+              >
+                <span aria-hidden="true">■</span>
+              </button>
+            ) : (
+              <button
+                className="send-question"
+                aria-label={
+                  provider || isCloudBrain
+                    ? 'Ask ' + (provider || activeBrain.providerLabel)
+                    : 'Ask on this Mac'
+                }
+                title="Send · Return"
+                disabled={!text.trim()}
+              >
+                <span aria-hidden="true">↑</span>
+              </button>
+            )}
           </div>
         </form>
       )}

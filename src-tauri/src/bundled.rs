@@ -14,6 +14,7 @@ struct Running {
     port: u16,
     token: String,
     last: Instant,
+    prewarmed: bool,
 }
 // Serialize model switches and requests. Keep ownership of the child available
 // to the quit handler while the model loads or an HTTP response is pending.
@@ -176,7 +177,29 @@ pub fn inkling_text(
     sink: &mut dyn FnMut(&str),
 ) -> Res<String> {
     let constraint = grammar.map(|rule| ("grammar", json!(rule)));
-    inkling_completion(cfg, instruction, input, limit, single_line, constraint, sink)
+    inkling_completion(
+        cfg,
+        instruction,
+        &[],
+        input,
+        limit,
+        crate::brain::ThinkingEffort::Fast,
+        single_line,
+        constraint,
+        sink,
+    )
+}
+
+pub(crate) fn inkling_chat(
+    cfg: &Value,
+    instruction: &str,
+    turns: &[crate::brain::ChatTurn],
+    input: &Value,
+    limit: u32,
+    effort: crate::brain::ThinkingEffort,
+    sink: &mut dyn FnMut(&str),
+) -> Res<String> {
+    inkling_completion(cfg, instruction, turns, input, limit, effort, false, None, sink)
 }
 
 pub(crate) fn inkling_reply(
@@ -193,27 +216,68 @@ pub(crate) fn inkling_reply(
     inkling_completion(
         cfg,
         instruction,
+        &[],
         &fields,
         limit,
+        crate::brain::ThinkingEffort::Fast,
         false,
         constraint,
         sink.unwrap_or(&mut discard),
     )
 }
 
+pub(crate) fn format_inkling_prompt(
+    instruction: &str,
+    turns: &[crate::brain::ChatTurn],
+    input: &Value,
+    effort: crate::brain::ThinkingEffort,
+) -> String {
+    let escape = |s: &str| s.replace('<', "\\u003c");
+    // Keep follow-up turns on level 0 so the cached KV prefix stays valid across turns;
+    // scale effort on fresh analytical/deep questions for Inkling's looped layers.
+    let effort_str = if !turns.is_empty() {
+        "0"
+    } else {
+        match effort {
+            crate::brain::ThinkingEffort::Fast => "0",
+            crate::brain::ThinkingEffort::Balanced => "0.25",
+            crate::brain::ThinkingEffort::Deep => "0.5",
+        }
+    };
+    let mut prompt = format!(
+        "<|message_system|><|content_text|>{instruction}<|end_message|><|message_system|><|content_text|>Thinking effort level: {effort_str}<|end_message|>"
+    );
+    for turn in turns {
+        let u = escape(&turn.user);
+        let a = escape(&turn.assistant);
+        prompt.push_str(&format!(
+            "<|message_user|><|content_text|>{u}<|end_message|><|message_model|><|content_text|>{a}<|end_message|><|content_model_end_sampling|>"
+        ));
+    }
+    let quoted = escape(&input.to_string());
+    prompt.push_str(&format!(
+        "<|message_user|><|content_text|>{quoted}<|end_message|><|message_model|><|content_text|>"
+    ));
+    prompt
+}
+
 fn inkling_completion(
     cfg: &Value,
     instruction: &str,
+    turns: &[crate::brain::ChatTurn],
     input: &Value,
     limit: u32,
+    effort: crate::brain::ThinkingEffort,
     single_line: bool,
     constraint: Option<(&str, Value)>,
     sink: &mut dyn FnMut(&str),
 ) -> Res<String> {
     use std::io::{BufRead, BufReader};
-    let quoted = input.to_string().replace('<', "\\u003c");
-    let prompt=format!("<|message_system|><|content_text|>{instruction}<|end_message|><|message_system|><|content_text|>Thinking effort level: 0<|end_message|><|message_user|><|content_text|>{quoted}<|end_message|><|message_model|><|content_text|>");
+    let prompt = format_inkling_prompt(instruction, turns, input, effort);
     with_server(cfg, |http, port, token| {
+        if crate::brain::turn_cancelled() {
+            return Err("Cancelled.".into());
+        }
         let mut body = json!({"prompt":prompt,"stream":true,"temperature":0,"n_predict":limit,"cache_prompt":true,"stop":["<|end_message|>","<|content_model_end_sampling|>"]});
         if single_line {
             body["stop"].as_array_mut().unwrap().push(json!("\n"));
@@ -228,6 +292,9 @@ fn inkling_completion(
             .msg()?;
         let mut answer = String::new();
         for line in BufReader::new(response.into_reader().take(1_048_576)).lines() {
+            if crate::brain::turn_cancelled() {
+                return Err("Cancelled.".into());
+            }
             let line = line.msg()?;
             let Some(raw) = line.strip_prefix("data:").map(str::trim) else {
                 continue;
@@ -286,6 +353,38 @@ pub fn read_screen(cfg: &Value, prompt: &str, count: usize) -> Res<String> {
 
 pub fn warm(cfg: &Value) -> Res<()> {
     with_server(cfg, |_, _, _| Ok(()))
+}
+
+/// Start `llama-server` and prefill the static companion system prompt into its KV cache
+/// while the user is typing, so pressing Enter hits a 100% cached system prefix immediately.
+pub fn warm_prefix(cfg: &Value, system_prefix: &str) -> Res<()> {
+    if !is_inkling(cfg) {
+        return warm(cfg);
+    }
+    let already_warm = RUNNING.lock().unwrap().as_ref().is_some_and(|r| r.prewarmed);
+    if already_warm {
+        return warm(cfg);
+    }
+    let prompt = format!(
+        "<|message_system|><|content_text|>{system_prefix}<|end_message|><|message_system|><|content_text|>Thinking effort level: 0<|end_message|>"
+    );
+    with_server(cfg, |http, port, token| {
+        let body = json!({
+            "prompt": prompt,
+            "stream": false,
+            "n_predict": 1,
+            "temperature": 0,
+            "cache_prompt": true
+        });
+        let _ = http
+            .post(&format!("http://127.0.0.1:{port}/completion"))
+            .set("Authorization", &format!("Bearer {token}"))
+            .send_json(body);
+        if let Some(r) = RUNNING.lock().unwrap().as_mut() {
+            r.prewarmed = true;
+        }
+        Ok(())
+    })
 }
 
 pub(crate) fn embedding_ready(path: &Path) -> bool {
@@ -347,11 +446,14 @@ fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> 
             && (r.projector == projector || (projector.is_none() && r.projector.is_some()))
             && r.child.try_wait().ok() == Some(None)
     });
-    let h = ureq::AgentBuilder::new()
-        .redirects(0)
-        .try_proxy_from_env(false)
-        .timeout_read(Duration::from_secs(120))
-        .build();
+    static LOCAL_POOL: std::sync::LazyLock<ureq::Agent> = std::sync::LazyLock::new(|| {
+        ureq::AgentBuilder::new()
+            .redirects(0)
+            .try_proxy_from_env(false)
+            .timeout_read(Duration::from_secs(120))
+            .build()
+    });
+    let h = &*LOCAL_POOL;
     if !live && warm_only {
         return Err("The embedding model is cold.".into());
     }
@@ -396,14 +498,22 @@ fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> 
             .port();
         let token = id() + &id();
         atomic(&keyfile, token.as_bytes())?;
-        let child = Command::new(server)
-            .args([
+        let spawn_server = |optimized: bool| -> Res<Child> {
+            let ctx = if embedding {
+                "4096"
+            } else if optimized {
+                "16384"
+            } else {
+                "8192"
+            };
+            let mut cmd = Command::new(&server);
+            cmd.args([
                 "--host",
                 "127.0.0.1",
                 "--port",
                 &port.to_string(),
                 "-c",
-                "4096",
+                ctx,
                 "--parallel",
                 "1",
                 // Short classification and readiness requests need their budget for visible output.
@@ -415,13 +525,15 @@ fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> 
             ])
             .arg(&keyfile)
             .arg("-m")
-            .arg(&path)
-            .args(if embedding {
-                &["--embedding", "--pooling", "mean"][..]
-            } else {
-                &[][..]
-            })
-            .args(
+            .arg(&path);
+            if embedding {
+                cmd.args(["--embedding", "--pooling", "mean"]);
+            } else if optimized {
+                // Keep native f16 KV cache (faster on Apple Silicon Metal and required for
+                // Inkling's hybrid SSM/gated-delta-net checkpoint caching) with 16K context.
+                cmd.args(["-fa", "auto"]);
+            }
+            cmd.args(
                 projector
                     .iter()
                     .flat_map(|p| [std::ffi::OsStr::new("--mmproj"), p.as_os_str()]),
@@ -430,35 +542,55 @@ fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> 
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .msg()?;
+            .msg()
+        };
+        let mut child = spawn_server(!embedding)?;
         let _ = atomic(&pidfile, child.id().to_string().as_bytes());
         *state = Some(Running {
             child,
-            projector,
+            projector: projector.clone(),
             path: path.clone(),
             port,
-            token,
+            token: token.clone(),
             last: Instant::now(),
+            prewarmed: false,
         });
-    }
-    let r = state.as_mut().unwrap();
-    r.last = Instant::now();
-    let port = r.port;
-    let token = r.token.clone();
-    drop(state);
-    if !live {
+        drop(state);
+        // Wait for readiness; if optimized KV flags are unsupported by a custom runtime
+        // binary and the server exits immediately, transparently fall back to baseline flags.
+        let mut retried_baseline = embedding;
         let start = Instant::now();
         loop {
-            {
+            if crate::brain::turn_cancelled() {
+                return Err("Cancelled.".into());
+            }
+            let exited = {
                 let mut state = running.lock().unwrap();
                 let r = state.as_mut().ok_or("The local runtime stopped.")?;
-                if r.child.try_wait().msg()?.is_some() {
-                    return Err("The local runtime could not load this model.".into());
-                }
                 if start.elapsed() > Duration::from_secs(80) {
                     stop(&mut state);
                     return Err("Model loading timed out.".into());
                 }
+                r.child.try_wait().msg()?.is_some()
+            };
+            if exited {
+                if !retried_baseline {
+                    retried_baseline = true;
+                    child = spawn_server(false)?;
+                    let _ = atomic(&pidfile, child.id().to_string().as_bytes());
+                    let mut state = running.lock().unwrap();
+                    *state = Some(Running {
+                        child,
+                        projector: projector.clone(),
+                        path: path.clone(),
+                        port,
+                        token: token.clone(),
+                        last: Instant::now(),
+                        prewarmed: false,
+                    });
+                    continue;
+                }
+                return Err("The local runtime could not load this model.".into());
             }
             if h.get(&format!("http://127.0.0.1:{port}/health"))
                 .call()
@@ -466,8 +598,14 @@ fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> 
             {
                 break;
             }
-            std::thread::sleep(Duration::from_millis(150));
+            std::thread::sleep(Duration::from_millis(120));
         }
+        return request(&h, port, &token);
     }
+    let r = state.as_mut().unwrap();
+    r.last = Instant::now();
+    let port = r.port;
+    let token = r.token.clone();
+    drop(state);
     request(&h, port, &token)
 }

@@ -6,9 +6,10 @@ use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-const KINDS: [&str; 8] = [
+const KINDS: [&str; 9] = [
     "ChatGPT",
     "OpenRouter",
+    "OpenCode",
     "OpenAI",
     "Anthropic",
     "Gemini",
@@ -16,11 +17,14 @@ const KINDS: [&str; 8] = [
     "Compatible",
     "Tinfoil",
 ];
-pub(crate) fn http() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .redirects(0)
-        .timeout(Duration::from_secs(65))
-        .build()
+pub(crate) fn http() -> &'static ureq::Agent {
+    static POOL: std::sync::LazyLock<ureq::Agent> = std::sync::LazyLock::new(|| {
+        ureq::AgentBuilder::new()
+            .redirects(0)
+            .timeout(Duration::from_secs(65))
+            .build()
+    });
+    &POOL
 }
 fn account(s: &Store, k: &str) -> String {
     format!("{}-{k}", &hash(&s.root.to_string_lossy())[..24])
@@ -179,7 +183,7 @@ fn reflection_provider(p: &Value) -> bool {
     p["enabled"] == true
         && matches!(
             p["id"].as_str(),
-            Some("ChatGPT" | "OpenAI" | "Anthropic" | "Gemini" | "OpenRouter" | "Compatible")
+            Some("ChatGPT" | "OpenAI" | "Anthropic" | "Gemini" | "OpenRouter" | "OpenCode" | "Compatible")
         )
 }
 
@@ -226,7 +230,7 @@ pub fn reflect(s: &Store, sys: &str, batch: &[Value]) -> Res<Option<String>> {
 pub(crate) fn allows_question(p: &Value) -> bool {
     match p["id"].as_str() {
         Some("ChatGPT") => p["primary"] == true || p["standalone"] == true,
-        Some("OpenAI" | "Anthropic" | "OpenRouter" | "Gemini" | "Compatible") => {
+        Some("OpenAI" | "Anthropic" | "OpenRouter" | "OpenCode" | "Gemini" | "Compatible") => {
             p["cap"].as_u64().unwrap_or(0) > 0 && p["typedQuestions"] == true
         }
         _ => false,
@@ -282,7 +286,15 @@ pub(crate) fn send_approved_question(s: &Store, name: &str, input: &str) -> Res<
 }
 fn send_text(s: &Store, p: &Value, sys: &str, input: &str, job: &str, items: usize) -> Res<String> {
     let k = p["id"].as_str().unwrap();
-    let model = p["model"].as_str().unwrap();
+    let configured = p["model"].as_str().unwrap_or("auto");
+    let resolved = crate::brain::resolve_cloud_model(
+        s,
+        k,
+        configured,
+        &[],
+        crate::brain::ThinkingEffort::Balanced,
+    );
+    let model = resolved.as_str();
     let h = http();
     let (router_base, key) = if k == "OpenRouter" {
         router_session(s)?
@@ -329,9 +341,11 @@ fn send_text(s: &Store, p: &Value, sys: &str, input: &str, job: &str, items: usi
                     .set("x-goog-api-key",&key),
                     json!({"systemInstruction":{"parts":[{"text":sys}]},"contents":[{"parts":[{"text":input}]}],"generationConfig":{"maxOutputTokens":limit}}))
             }
-            "OpenRouter" | "Compatible" => {
+            "OpenRouter" | "OpenCode" | "Compatible" => {
                 let base = if k == "OpenRouter" {
                     router_base.as_str()
+                } else if k == "OpenCode" {
+                    "https://opencode.ai/zen/v1"
                 } else {
                     p["endpoint"].as_str().ok_or("Missing endpoint")?
                 };

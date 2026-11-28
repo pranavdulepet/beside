@@ -18,7 +18,7 @@ struct Tier {
     size: u64,
     sha: &'static str,
 }
-const TIERS: [Tier; 2] = [
+const TIERS: [Tier; 3] = [
     Tier {
         ram: 32,
         label: "Inkling 2 Mini",
@@ -27,6 +27,15 @@ const TIERS: [Tier; 2] = [
         file: "Inkling-2-Mini-UD-IQ3_XXS.gguf",
         size: 11663310784,
         sha: "fd9ccedae17c1bb89744612fbb46730b5275f2a342133d0419776bd1ae311657",
+    },
+    Tier {
+        ram: 32,
+        label: "Inkling 2 Mini (4-bit)",
+        repo: "unsloth/Inkling-2-Mini-GGUF",
+        revision: "45fd08764f2b0bf16b03a5483a80e5c7aaec8772",
+        file: "Inkling-2-Mini-UD-Q4_K_M.gguf",
+        size: 16610544608,
+        sha: "78fcedcf93c5d1bfe83e225513b71392bb52259be0eaa5f8899c856a2e5834ae",
     },
     Tier {
         ram: 16,
@@ -269,14 +278,58 @@ pub fn vision(s: &Store) -> Res<Value> {
     file.acquire(crate::local::free_bytes(&s.root))?;
     Ok(json!(true))
 }
+const EMBEDDING: Tier = Tier {
+    ram: 8,
+    label: "EmbeddingGemma 300M",
+    repo: "ggml-org/embeddinggemma-300M-GGUF",
+    revision: "0f741b5a6585bd53aeb15cd1372c56f2a0f65e12",
+    file: "embeddinggemma-300M-Q8_0.gguf",
+    size: 333590944,
+    sha: "b5ce9d77a3fc4b3b39ccb5643c36777911cc4eb46a66962eadfa3f5f60490d63",
+};
+
+pub fn embedding_installed(s: &Store) -> Option<(PathBuf, String)> {
+    let dest = spec(s, &EMBEDDING, "").dest;
+    let candidate = if dest.metadata().is_ok_and(|m| m.is_file() && m.len() == EMBEDDING.size) {
+        Some(dest)
+    } else {
+        installed_copy(&s.root, &crate::sources::home(), &EMBEDDING)
+    }?;
+    Some((candidate, format!("beside-jl1-{}", EMBEDDING.sha)))
+}
+
+pub fn install_embedding(s: &Store) -> Res<Value> {
+    if let Some((existing, _)) = embedding_installed(s) {
+        let dest = spec(s, &EMBEDDING, "").dest;
+        if existing == dest && spec(s, &EMBEDDING, "").valid(&dest)? {
+            return Ok(json!({"installed": true, "label": EMBEDDING.label}));
+        }
+    }
+    let url = format!(
+        "https://huggingface.co/{}/resolve/{}/{}",
+        EMBEDDING.repo, EMBEDDING.revision, EMBEDDING.file
+    );
+    let file = spec(s, &EMBEDDING, &url);
+    file.acquire(crate::local::free_bytes(&s.root))?;
+    Ok(json!({"installed": true, "label": EMBEDDING.label}))
+}
+
 pub fn status(s: &Store) -> Value {
     let items = choices(s);
     let mut primary = items
         .iter()
         .find(|m| m["fits"] == true)
-        .unwrap_or(&items[1])
+        .or_else(|| items.last())
+        .unwrap()
         .clone();
     primary["choices"] = json!(items);
+    let emb = spec(s, &EMBEDDING, "");
+    primary["embedding"] = json!({
+        "label": EMBEDDING.label,
+        "bytes": emb.saved(),
+        "total": EMBEDDING.size,
+        "installed": embedding_installed(s).is_some(),
+    });
     primary
 }
 pub fn download(s: &Store, label: Option<&str>) -> Res<Value> {

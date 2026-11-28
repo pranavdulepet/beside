@@ -350,6 +350,7 @@ fn answer_window(
         requires_image,
         job: "point",
         allow_cloud: false,
+        ..Default::default()
     };
     let mut streamed = false;
     let mut denied = None;

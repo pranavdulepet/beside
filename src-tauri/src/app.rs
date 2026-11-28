@@ -198,6 +198,7 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
         "meetingReveal" => crate::meetings::reveal(s),
         "meetingNotes" => crate::meetings::notes(s),
         "activityVision" => crate::weights::vision(s),
+        "installEmbedding" => crate::weights::install_embedding(s),
         "activityAsk" => crate::activity::ask(s, a),
         "activitySource" if a["id"].as_str().is_some_and(|v| v.starts_with("apple-note:") || v.starts_with("apple-mail:")) => crate::activity::imported::source(s,text(a,"id")?),
         "activitySource" => crate::activity::source(s, text(a, "id")?),

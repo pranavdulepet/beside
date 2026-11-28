@@ -2,6 +2,7 @@ mod activity;
 mod activity_documents;
 mod activity_files;
 mod agent_link;
+mod agent_loop;
 mod app;
 mod attachments;
 mod brain;
@@ -136,7 +137,12 @@ async fn notebook(
             shutdown();
             window.app_handle().restart();
         }
+        if operation == "cancelAsk" {
+            brain::cancel_turns();
+            return Ok(serde_json::Value::Null);
+        }
         if operation == "activityAsk" {
+            let _turn = brain::TurnGuard::start();
             let answer = activity::ask_with_phases(
                 &s,
                 &args,
@@ -255,6 +261,7 @@ fn reveal_activity_sheet(window: &tauri::WebviewWindow, id: u64) -> Res<()> {
 }
 fn dismiss_activity_sheet(window: &tauri::WebviewWindow) -> Res<()> {
     extern "C" { fn beside_dismiss_panel(window: *mut std::ffi::c_void); }
+    brain::cancel_turns();
     PANEL_PRESENTATION.lock().unwrap().take();
     point::dismiss();
     overlay::clear();
@@ -275,11 +282,11 @@ fn present_activity_sheet_with_origin(app: &tauri::AppHandle, anchor: serde_json
     unsafe { beside_prepare_panel(i32::from(from_service)) };
     let store = app.state::<Arc<Store>>().inner().clone();
     let _ = store.set("activityAnchor", &anchor["id"]);
-    // Warm the bundled local runtime in the background while the user types.
+    // Warm the bundled local runtime and prefill the static system prompt into KV cache while the user types.
     tauri::async_runtime::spawn_blocking(move || {
         if brain::status(&store).is_ok_and(|s| s["mode"] == "local") {
             if let Some(cfg) = activity::private_model(&store).filter(|cfg| cfg["runtime"] == "Beside") {
-                let _ = bundled::warm(&cfg);
+                let _ = bundled::warm_prefix(&cfg, activity::COMPANION_SYSTEM);
             }
         }
     });

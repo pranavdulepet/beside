@@ -117,6 +117,10 @@ fn dense_model() -> Option<(PathBuf, String)> {
     Some((path, format!("ollama-jl1-{digest}")))
 }
 
+fn dense_model_for(s: &Store) -> Option<(PathBuf, String)> {
+    dense_model().or_else(|| crate::weights::embedding_installed(s))
+}
+
 // A local manifest can change independently of Ollama's model tag. Check the
 // content-addressed bytes before admitting a new file into an embedding space.
 fn verified_blob(path: &std::path::Path, space: &str, may_hash: bool) -> bool {
@@ -128,7 +132,10 @@ fn verified_blob(path: &std::path::Path, space: &str, may_hash: bool) -> bool {
     };
     type Stamp = (u64, u64, u64, i64, i64, String);
     static VERIFIED: LazyLock<Mutex<Option<Stamp>>> = LazyLock::new(|| Mutex::new(None));
-    let Some(expected) = space.strip_prefix("ollama-jl1-") else {
+    let Some(expected) = space
+        .strip_prefix("ollama-jl1-")
+        .or_else(|| space.strip_prefix("beside-jl1-"))
+    else {
         return false;
     };
     let Ok(mut file) = std::fs::File::open(path) else {
@@ -196,7 +203,7 @@ fn dense(s: &Store, text: &str, path: PathBuf, space: String, warm_only: bool) -
 }
 
 pub(super) fn embed(s: &Store, text: &str) -> Vector {
-    let dense_index = dense_model().filter(|(_, space)| {
+    let dense_index = dense_model_for(s).filter(|(_, space)| {
         s.db.lock()
             .unwrap()
             .query_row(
@@ -233,7 +240,7 @@ pub(super) fn passage_text(title: &str, body: &str) -> String {
 }
 
 pub(crate) fn backfill(s: &Store, limit: usize, idle: impl Fn() -> bool) -> Res<()> {
-    let model = dense_model();
+    let model = dense_model_for(s);
     let target = model
         .as_ref()
         .map(|m| m.1.clone())
@@ -267,7 +274,7 @@ pub(crate) fn backfill(s: &Store, limit: usize, idle: impl Fn() -> bool) -> Res<
             },
             None => native(&text),
         };
-        if vector.space != target && target.starts_with("ollama-") {
+        if vector.space != target && (target.starts_with("ollama-") || target.starts_with("beside-")) {
             break;
         }
         let mut db = s.db.lock().unwrap();

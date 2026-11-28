@@ -117,6 +117,43 @@ export function Models({
         );
       })}
 
+      {download?.embedding && (
+        <div className="row">
+          <span className="model-meta">
+            <span className="perm-name">Semantic memory · {download.embedding.label}</span>
+            <small>
+              {download.embedding.installed
+                ? 'Active on this Mac · dense vector recall'
+                : `${Math.round(download.embedding.total / 1e6)} MB download · sharper recall`}
+            </small>
+          </span>
+          {download.embedding.installed ? (
+            <span className="perm-badge granted">✓ Active</span>
+          ) : (
+            <button
+              type="button"
+              className="btn-sm"
+              disabled={!!working}
+              onClick={async () => {
+                setDownloading(download.embedding.label);
+                busy('gguf');
+                note('');
+                try {
+                  await act('installEmbedding');
+                  note('Semantic memory upgraded. Past notes and screens will re-index while idle.');
+                } catch (e) {
+                  note(String(e));
+                } finally {
+                  busy('');
+                }
+              }}
+            >
+              {working === 'gguf' && downloading === download.embedding.label ? 'Installing…' : 'Install'}
+            </button>
+          )}
+        </div>
+      )}
+
       {externalModels.filter(m => current === m.name).map(m => (
         <div className="row" key={m.name}>
           <span className="model-meta">

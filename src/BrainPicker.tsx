@@ -5,7 +5,15 @@ import {Models} from './Models';
 
 const CLOUD_PRESETS: Record<
   string,
-  {label: string; defaultModel: string; placeholder: string; hint: string}
+  {
+    label: string;
+    defaultModel: string;
+    models?: string[];
+    placeholder: string;
+    hint: string;
+    needsEndpoint?: boolean;
+    endpointPlaceholder?: string;
+  }
 > = {
   ChatGPT: {
     label: 'ChatGPT',
@@ -15,31 +23,52 @@ const CLOUD_PRESETS: Record<
   },
   Anthropic: {
     label: 'Claude',
-    defaultModel: 'claude-sonnet-4-5',
+    defaultModel: 'auto',
+    models: ['auto', 'claude-haiku-4-5', 'claude-sonnet-4-5', 'claude-opus-4-5'],
     placeholder: 'sk-ant-…',
-    hint: 'Anthropic API key stored locally in macOS Keychain.',
+    hint: 'Anthropic API key stored in macOS Keychain. Automatically balances speed and depth with prompt caching.',
   },
   Gemini: {
     label: 'Gemini',
-    defaultModel: 'gemini-2.5-flash',
+    defaultModel: 'auto',
+    models: ['auto', 'gemini-2.5-flash', 'gemini-2.5-pro'],
     placeholder: 'AIza…',
-    hint: 'Google AI Studio key stored locally in macOS Keychain.',
+    hint: 'Google AI Studio key stored in macOS Keychain. Automatically uses Flash for quick asks and Pro for deep reasoning.',
   },
   OpenAI: {
     label: 'OpenAI',
-    defaultModel: 'gpt-4.1-mini',
+    defaultModel: 'auto',
+    models: ['auto', 'gpt-4.1-mini', 'gpt-4.1', 'o4-mini'],
     placeholder: 'sk-…',
-    hint: 'OpenAI API key stored locally in macOS Keychain.',
+    hint: 'OpenAI API key stored in macOS Keychain. Automatically balances speed and depth via Responses API.',
   },
-  Tinfoil: {
-    label: 'Tinfoil', defaultModel: '', placeholder: 'Tinfoil API key',
-    hint: 'Enter a model ID from your Tinfoil account. Beside verifies the confidential router before sharing text.',
+  OpenCode: {
+    label: 'OpenCode',
+    defaultModel: 'auto',
+    models: ['auto', 'claude-sonnet-4-5', 'gpt-5.5', 'deepseek-v4.1-flash'],
+    placeholder: 'oc-…',
+    hint: 'OpenCode Zen key (opencode.ai/zen) stored in macOS Keychain.',
   },
   OpenRouter: {
     label: 'OpenRouter',
-    defaultModel: 'anthropic/claude-sonnet-4.5',
+    defaultModel: 'auto',
+    models: ['auto', 'anthropic/claude-sonnet-4.5', 'openai/gpt-4.1-mini', 'google/gemini-2.5-flash'],
     placeholder: 'sk-or-…',
-    hint: 'Access Claude, GPT, and Gemini with one OpenRouter key.',
+    hint: 'One OpenRouter key for Claude, GPT, Gemini, and OSS models.',
+  },
+  Compatible: {
+    label: 'Custom API',
+    defaultModel: 'deepseek-chat',
+    placeholder: 'API key',
+    hint: 'Any HTTPS OpenAI-compatible endpoint (DeepSeek, Groq, Together, OpenCode Go, vLLM, etc.).',
+    needsEndpoint: true,
+    endpointPlaceholder: 'https://api.deepseek.com/v1',
+  },
+  Tinfoil: {
+    label: 'Tinfoil',
+    defaultModel: '',
+    placeholder: 'Tinfoil API key',
+    hint: 'Enter a model ID from your Tinfoil account. Beside verifies the confidential router before sharing text.',
   },
 };
 
@@ -72,6 +101,7 @@ export function BrainPicker({
   );
   const [apiKey, setApiKey] = useState('');
   const [modelId, setModelId] = useState(CLOUD_PRESETS.Anthropic.defaultModel);
+  const [endpoint, setEndpoint] = useState('');
   const [consentChecked, setConsentChecked] = useState(
     !!initialBrain?.cloudConsent,
   );
@@ -101,10 +131,13 @@ export function BrainPicker({
     }
   }, [initialBrain]);
 
-  const savedModel = brain?.availableCloud?.find((p: Row) => p.id === selectedCloud)?.model;
+  const savedProvider = brain?.availableCloud?.find((p: Row) => p.id === selectedCloud);
+  const savedModel = savedProvider?.model;
+  const savedEndpoint = savedProvider?.endpoint;
   useEffect(() => {
     setModelId(savedModel || CLOUD_PRESETS[selectedCloud]?.defaultModel || '');
-  }, [selectedCloud, savedModel]);
+    setEndpoint(savedEndpoint || '');
+  }, [selectedCloud, savedModel, savedEndpoint]);
 
   function chooseProvider(id: string) {
     if (id === selectedCloud) return;
@@ -177,7 +210,8 @@ export function BrainPicker({
     try {
       await call('provider', {
         provider: selectedCloud,
-        model: modelId.trim(),
+        model: modelId.trim() || CLOUD_PRESETS[selectedCloud]?.defaultModel || 'auto',
+        endpoint: CLOUD_PRESETS[selectedCloud]?.needsEndpoint ? endpoint.trim() : undefined,
         key: apiKey.trim() || undefined,
         cap: 5000,
         enabled: true,
@@ -351,14 +385,16 @@ export function BrainPicker({
           ) : (
             <div className="field-stack">
               <small>{CLOUD_PRESETS[selectedCloud]?.hint}</small>
-              <label className="field">
-                <span>Model ID</span>
-                <input
-                  value={modelId}
-                  onChange={e => setModelId(e.target.value)}
-                  placeholder={CLOUD_PRESETS[selectedCloud]?.defaultModel}
-                />
-              </label>
+              {CLOUD_PRESETS[selectedCloud]?.needsEndpoint && (
+                <label className="field">
+                  <span>Base URL</span>
+                  <input
+                    value={endpoint}
+                    onChange={e => setEndpoint(e.target.value)}
+                    placeholder={CLOUD_PRESETS[selectedCloud]?.endpointPlaceholder}
+                  />
+                </label>
+              )}
               <label className="field">
                 <span>API key</span>
                 <input
@@ -373,13 +409,56 @@ export function BrainPicker({
                   }
                 />
               </label>
+              {CLOUD_PRESETS[selectedCloud]?.needsEndpoint || selectedCloud === 'Tinfoil' ? (
+                <label className="field">
+                  <span>Model ID</span>
+                  <input
+                    value={modelId}
+                    onChange={e => setModelId(e.target.value)}
+                    placeholder={CLOUD_PRESETS[selectedCloud]?.defaultModel}
+                  />
+                </label>
+              ) : (
+                <details className="advanced-model">
+                  <summary>
+                    Advanced · {modelId.trim() === 'auto' || !modelId.trim() ? 'Automatic model' : modelId}
+                  </summary>
+                  <div className="field-stack">
+                    <label className="field">
+                      <span>Model override</span>
+                      <input
+                        value={modelId}
+                        onChange={e => setModelId(e.target.value)}
+                        placeholder="auto"
+                      />
+                    </label>
+                    {!!CLOUD_PRESETS[selectedCloud]?.models?.length && (
+                      <div className="provider-pills" role="group" aria-label="Model presets">
+                        {CLOUD_PRESETS[selectedCloud].models!.map(preset => (
+                          <button
+                            key={preset}
+                            type="button"
+                            className={'pill-choice' + (modelId.trim() === preset ? ' selected' : '')}
+                            disabled={!!busy}
+                            onClick={() => setModelId(preset)}
+                          >
+                            {preset === 'auto' ? 'Auto' : preset}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </details>
+              )}
               <div className="inline">
                 <button
                   type="button"
                   className="primary"
                   disabled={
                     !!busy ||
-                    !modelId.trim() ||
+                    ((CLOUD_PRESETS[selectedCloud]?.needsEndpoint || selectedCloud === 'Tinfoil') &&
+                      !modelId.trim()) ||
+                    (CLOUD_PRESETS[selectedCloud]?.needsEndpoint && !endpoint.trim()) ||
                     (!selectedConnected && !apiKey.trim())
                   }
                   onClick={() => void saveCloudKey()}

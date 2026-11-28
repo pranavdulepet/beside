@@ -270,18 +270,111 @@ pub(crate) fn complete_with(
     sink: Option<&mut dyn FnMut(&str)>,
     photos: &[Value],
 ) -> Res<String> {
-    // Plan usage rejects max_output_tokens. Give the model a length instruction
-    // and independently bound the output our client accepts.
-    let mut body = json!({"model":model,"instructions":format!("{system}\nKeep your answer within {limit} tokens."),
-        "input":[{"role":"user","content":input}],"stream":true,"store":false});
-    if !photos.is_empty() {
+    complete_messages(api, token, model, system, &[], input, limit, schema, sink, photos)
+}
+
+pub(crate) fn complete_messages(
+    api: &str,
+    token: &str,
+    model: &str,
+    system: &str,
+    turns: &[crate::brain::ChatTurn],
+    input: &str,
+    limit: u32,
+    schema: Option<&Value>,
+    sink: Option<&mut dyn FnMut(&str)>,
+    photos: &[Value],
+) -> Res<String> {
+    match complete_messages_tools(
+        api,
+        token,
+        model,
+        system,
+        turns,
+        &[],
+        input,
+        limit,
+        schema,
+        None,
+        sink,
+        photos,
+    )? {
+        crate::brain::InferOutcome::Text(text) => Ok(text),
+        crate::brain::InferOutcome::ToolCalls { text, .. } if !text.trim().is_empty() => {
+            Ok(text.trim().to_owned())
+        }
+        crate::brain::InferOutcome::ToolCalls { .. } => {
+            Err("ChatGPT stopped before finishing the reply.".into())
+        }
+    }
+}
+
+pub(crate) fn complete_messages_tools(
+    api: &str,
+    token: &str,
+    model: &str,
+    system: &str,
+    turns: &[crate::brain::ChatTurn],
+    tool_turns: &[crate::brain::NativeToolTurn],
+    input: &str,
+    limit: u32,
+    schema: Option<&Value>,
+    tools: Option<&[crate::brain::NativeToolSpec]>,
+    sink: Option<&mut dyn FnMut(&str)>,
+    photos: &[Value],
+) -> Res<crate::brain::InferOutcome> {
+    let mut items = Vec::with_capacity(turns.len() * 2 + tool_turns.len() * 3 + 1);
+    for turn in turns {
+        items.push(json!({"role":"user","content":turn.user}));
+        items.push(json!({"role":"assistant","content":turn.assistant}));
+    }
+    let last_content = if photos.is_empty() {
+        json!(input)
+    } else {
         let mut parts = vec![json!({"type":"input_text","text":input})];
         for photo in photos.iter().filter_map(Value::as_str) {
             parts.push(
                 json!({"type":"input_image","image_url":format!("data:image/jpeg;base64,{photo}")}),
             );
         }
-        body["input"][0]["content"] = json!(parts);
+        json!(parts)
+    };
+    items.push(json!({"role":"user","content":last_content}));
+    for tt in tool_turns {
+        for call in &tt.calls {
+            items.push(json!({
+                "type": "function_call",
+                "call_id": call.id,
+                "name": call.name,
+                "arguments": call.arguments.to_string()
+            }));
+        }
+        for (call_id, _name, output) in &tt.results {
+            items.push(json!({
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": output
+            }));
+        }
+    }
+    // Plan usage rejects max_output_tokens. Give the model a length instruction
+    // and independently bound the output our client accepts.
+    let mut body = json!({"model":model,"instructions":format!("{system}\nKeep your answer within {limit} tokens."),
+        "input":items,"stream":true,"store":false});
+    if let Some(specs) = tools.filter(|s| !s.is_empty()) {
+        body["tools"] = json!(specs.iter().map(|t| json!({
+            "type": "function",
+            "name": t.name,
+            "description": t.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    t.param_name: {"type": "string", "description": t.param_description}
+                },
+                "required": [t.param_name],
+                "additionalProperties": false
+            }
+        })).collect::<Vec<_>>());
     }
     if let Some(schema) = schema {
         body["text"] =
@@ -292,23 +385,30 @@ pub(crate) fn complete_with(
         .set("Authorization", &format!("Bearer {token}"))
         .send_json(body)
         .map_err(failure)?;
-    consume_with(response.into_reader(), (limit as usize * 12).max(256), sink)
+    consume_with_tools(response.into_reader(), (limit as usize * 12).max(256), sink)
 }
 
 #[cfg(test)]
 fn consume(reader: impl Read, max: usize) -> Res<String> {
-    consume_with(reader, max, None)
+    match consume_with_tools(reader, max, None)? {
+        crate::brain::InferOutcome::Text(t) => Ok(t),
+        crate::brain::InferOutcome::ToolCalls { text, .. } => Ok(text),
+    }
 }
-fn consume_with(
+fn consume_with_tools(
     reader: impl Read,
     max: usize,
     mut sink: Option<&mut dyn FnMut(&str)>,
-) -> Res<String> {
+) -> Res<crate::brain::InferOutcome> {
     let mut answer = String::new();
+    let mut tool_calls: Vec<crate::brain::NativeToolCall> = Vec::new();
     // Include headroom for lifecycle events and a repeated copy of the final output.
     let stream = BufReader::new(reader.take(2 * 1024 * 1024));
     let mut data = Vec::new();
     for line in stream.lines() {
+        if crate::brain::turn_cancelled() {
+            return Err("Cancelled.".into());
+        }
         let line = line.msg()?;
         if let Some(payload) = line.strip_prefix("data:") {
             data.push(payload.trim_start().to_owned());
@@ -331,8 +431,35 @@ fn consume_with(
                         f(delta)
                     }
                 }
-                Some("response.completed") if !answer.trim().is_empty() => {
-                    return Ok(answer.trim().to_owned())
+                Some("response.output_item.done") => {
+                    let item = &event["item"];
+                    if item["type"] == "function_call" {
+                        if let Some(name) = item["name"].as_str().filter(|s| !s.is_empty()) {
+                            let id = item["call_id"]
+                                .as_str()
+                                .or_else(|| item["id"].as_str())
+                                .unwrap_or("call_0")
+                                .to_owned();
+                            let args_raw = item["arguments"].as_str().unwrap_or("{}");
+                            let arguments = serde_json::from_str(args_raw).unwrap_or_else(|_| json!({}));
+                            tool_calls.push(crate::brain::NativeToolCall {
+                                id,
+                                name: name.to_owned(),
+                                arguments,
+                            });
+                        }
+                    }
+                }
+                Some("response.completed") => {
+                    if !tool_calls.is_empty() {
+                        return Ok(crate::brain::InferOutcome::ToolCalls {
+                            text: answer.trim().to_owned(),
+                            calls: tool_calls,
+                        });
+                    }
+                    if !answer.trim().is_empty() {
+                        return Ok(crate::brain::InferOutcome::Text(answer.trim().to_owned()));
+                    }
                 }
                 Some("response.failed" | "error") => {
                     let code = event

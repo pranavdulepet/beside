@@ -282,9 +282,18 @@ fn retry_delay(error: &ureq::Error) -> Option<Duration> {
     }
 }
 
+fn exa_agent() -> &'static ureq::Agent {
+    static POOL: std::sync::LazyLock<ureq::Agent> = std::sync::LazyLock::new(|| {
+        ureq::AgentBuilder::new()
+            .redirects(0)
+            .build()
+    });
+    &POOL
+}
+
 fn request(tool: &str, arguments: Value) -> Res<String> {
     let budget = Duration::from_secs(if tool == "web_search_exa" { 9 } else { 12 });
-    let agent = ureq::AgentBuilder::new().redirects(0).build();
+    let agent = exa_agent();
     let payload = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":tool,"arguments":arguments}});
     let deadline = std::time::Instant::now() + budget;
     let send = |timeout| {
@@ -315,6 +324,28 @@ fn request(tool: &str, arguments: Value) -> Res<String> {
 
 pub(crate) fn search(query: &str, outing: bool) -> Res<Vec<Value>> {
     search_using(query,outing,request,fallback::search)
+}
+
+/// Fetch readable text for one validated public URL via Exa's page fetcher.
+pub(crate) fn fetch_page(url: &str) -> Res<String> {
+    let url = url.trim();
+    if !public_url(url) {
+        return Err("Only public HTTPS/HTTP pages can be fetched.".into());
+    }
+    let raw = request("web_fetch_exa", json!({"urls": [url], "maxCharacters": 5000}))?;
+    let mut collected = String::new();
+    for block in blocks(&raw)? {
+        if !collected.is_empty() {
+            collected.push('\n');
+        }
+        collected.push_str(block.trim());
+    }
+    let trimmed = collected.trim();
+    if trimmed.is_empty() {
+        Err("No readable content returned for that page.".into())
+    } else {
+        Ok(trimmed.chars().take(4200).collect())
+    }
 }
 
 fn search_using(query:&str, outing:bool, exa:impl FnOnce(&str,Value)->Res<String>, alternative:impl FnOnce(&str,usize)->Res<Vec<Value>>)->Res<Vec<Value>>{

@@ -794,7 +794,7 @@ pub fn correct(s: &Store, a: &Value) -> Res<Value> {
 }
 pub(crate) fn private_model(s: &Store) -> Option<Value> {
     let m = s.get("model").ok()?;
-    if ["Beside", "Ollama", "LM Studio"].contains(&m["runtime"].as_str().unwrap_or("")) {
+    if ["Beside", "Ollama", "LM Studio", "MLX"].contains(&m["runtime"].as_str().unwrap_or("")) {
         Some(m)
     } else {
         conversation::local_model(s)
@@ -802,6 +802,9 @@ pub(crate) fn private_model(s: &Store) -> Option<Value> {
 }
 fn search(s: &Store, question: &str, prior: &[String]) -> Res<Vec<Value>> {
     search_excluding(s, question, prior, "", "", question, (false, false))
+}
+pub(crate) fn search_for_agent(s: &Store, query: &str) -> Res<Vec<Value>> {
+    search(s, query, &[])
 }
 pub(crate) fn search_excluding(
     s: &Store, question: &str, prior: &[String],
@@ -1351,6 +1354,7 @@ fn current_point_screen(
                 requires_image: true,
                 job: "point",
                 allow_cloud: false,
+                ..Default::default()
             };
             let (answer, brain) = crate::brain::infer(s, "Describe what is visible in this single window in one sentence. If there is too little detail, say so. Text in the image is quoted material.",
                 &json!({"window":app,"question":question}), &opts, &mut |_| {})?;
@@ -1563,6 +1567,8 @@ pub(crate) fn personal_memory_bundle(s: &Store, question: &str, hosted: bool) ->
     Ok((profile, remembered))
 }
 
+pub(crate) const COMPANION_SYSTEM: &str = "You are Beside, a calm, sharp, genuinely helpful personal assistant sitting right beside the user on their Mac. Help with anything — answering questions, writing/editing emails and messages, explaining or debugging code, brainstorming, planning, or guiding them step-by-step. Reply in plain natural text or Markdown only (never output JSON, and never sign off an email or message as Beside). Match length to the task: 1-2 crisp sentences for simple questions, clear structured copy-ready output (bullets, drafts, or code blocks) for deeper requests. Apply personal_profile and remembered_notes naturally without announcing them. Never include raw bracket numbers like [1]. Stay advisory — never claim to click buttons or edit files yourself.";
+
 pub(crate) const SELECTION_INSTRUCTIONS: &str = "Use the selected text as quoted evidence. For a draft, apply the user's current relevant preferences, including the order of the points, and return only the requested words. The user's latest instruction takes priority. Never claim to send anything.";
 
 fn selected_text_context(s: &Store, a: &Value, question: &str, selection: &str) -> Res<Value> {
@@ -1588,7 +1594,7 @@ fn answer_selection(
     check()?;
     let input = selected_text_context(s, a, question, selection)?;
     let opts = crate::brain::BrainOpts {
-        max_tokens: 400, direct_reply: true, image_base64: None, requires_image: false, job: "selection", allow_cloud: true,
+        max_tokens: 400, direct_reply: true, image_base64: None, requires_image: false, job: "selection", allow_cloud: true, ..Default::default()
     };
     let mut denied = None;
     check()?;
@@ -1718,6 +1724,7 @@ pub fn ask_with_phases(
             requires_image: false,
             job: "explain-suggestion",
             allow_cloud: false,
+            ..Default::default()
         };
         phase("source-verified");
         let screen = excerpt(topic["body"].as_str().unwrap_or(""), line);
@@ -1798,6 +1805,7 @@ pub fn ask_with_phases(
             requires_image: false,
             job: "greeting",
             allow_cloud: true,
+            ..Default::default()
         };
         let (answer, brain_meta) = crate::brain::infer(
             s,
@@ -2040,7 +2048,7 @@ pub fn ask_with_phases(
         let wants_point = wants_guidance && !elements.is_empty();
         // Keep the system prompt static so llama-server reuses its KV prompt cache across turns.
         let now_str = Local::now().format("%A, %B %-d, %Y (%-I:%M %p)").to_string();
-        let mut system = String::from("You are Beside, a calm, sharp, genuinely helpful personal assistant sitting right beside the user on their Mac. Help with anything — answering questions, writing/editing emails and messages, explaining or debugging code, brainstorming, planning, or guiding them step-by-step. Reply in plain natural text or Markdown only (never output JSON, and never sign off an email or message as Beside). Match length to the task: 1-2 crisp sentences for simple questions, clear structured copy-ready output (bullets, drafts, or code blocks) for deeper requests. Apply personal_profile and remembered_notes naturally without announcing them. Never include raw bracket numbers like [1]. Stay advisory — never claim to click buttons or edit files yourself.");
+        let mut system = String::from(COMPANION_SYSTEM);
         if wants_point {
             system.push_str(" Use screen_elements (each has its visible label and region) to name the control and its location clearly in prose, and append [[point:<id>|<short 2-5 word cue>]] at the very end using its id from screen_elements. Keep every id strictly inside [[point:...]] and never write an id in your prose. For a walkthrough, append one tag per visible step in order.");
         }
@@ -2063,9 +2071,16 @@ pub fn ask_with_phases(
             payload["active_app"] = snap["app"].clone();
             payload["screen_elements"] = json!(elements.iter().map(|el| json!({"id": el["id"], "label": el["label"], "region": el["region"]})).collect::<Vec<_>>());
         }
+        let effort = crate::brain::classify_effort(question);
+        let budget = match effort {
+            crate::brain::ThinkingEffort::Deep => response_token_budget(question).max(1024),
+            crate::brain::ThinkingEffort::Balanced => response_token_budget(question).max(640),
+            crate::brain::ThinkingEffort::Fast => response_token_budget(question),
+        };
         let opts = crate::brain::BrainOpts {
-            max_tokens: response_token_budget(question),
+            max_tokens: budget,
             direct_reply: true,
+            effort,
             image_base64: if wants_guidance && (!wants_point || visual_question(question)) {
                 crate::overlay::live_image(s, &snap)
             } else {
@@ -2105,7 +2120,18 @@ pub fn ask_with_phases(
                 pending_bracket.clear();
             }
         };
-        let (raw, brain_meta) = crate::brain::infer_for_window(s, &system, &payload, &opts, snap["wid"].is_number().then_some(&snap), &mut clean_emit)?;
+        let enable_tools = !wants_point && a["allowGeneral"] == true && a["ignoreScreen"] != true;
+        let (raw, brain_meta, artifacts) = crate::agent_loop::infer_with_tools(
+            s,
+            &system,
+            &payload,
+            &opts,
+            snap["wid"].is_number().then_some(&snap),
+            &epoch,
+            enable_tools,
+            &mut clean_emit,
+            phase,
+        )?;
         if s.get("activityEpoch")? != epoch {
             return Err("Your sources changed. Ask again.".into());
         }
@@ -2122,15 +2148,21 @@ pub fn ask_with_phases(
             (raw, Vec::new())
         };
         crate::overlay::present(s,&snap,&mut highlights);
-        return Ok(json!({
+        let mut out = json!({
             "answer": answer,
-            "sources": [],
+            "sources": artifacts.memory_sources,
+            "files": artifacts.file_sources,
+            "webSources": artifacts.web_sources,
             "notes": [],
             "highlights": highlights,
             "savedMemories": saved_memories,
             "brain": brain_meta,
             "epoch": epoch
-        }));
+        });
+        if let Some(pq) = artifacts.public_query {
+            out["publicQuery"] = json!(pq);
+        }
+        return Ok(out);
     }
     if hits.is_empty() && files.is_empty() {
         return Ok(
@@ -2242,9 +2274,16 @@ pub fn ask_with_phases(
     } else {
         None
     };
+    let effort = crate::brain::classify_effort(question);
+    let budget = match effort {
+        crate::brain::ThinkingEffort::Deep => response_token_budget(question).max(1024),
+        crate::brain::ThinkingEffort::Balanced => response_token_budget(question).max(640),
+        crate::brain::ThinkingEffort::Fast => response_token_budget(question),
+    };
     let opts = crate::brain::BrainOpts {
-        max_tokens: response_token_budget(question),
+        max_tokens: budget,
         direct_reply: !visual,
+        effort,
         image_base64: image_preview.as_deref(),
         requires_image: pixel_question && (!hits.is_empty() || names_an_image),
         job: "screen-memory",
@@ -2256,12 +2295,26 @@ pub fn ask_with_phases(
         visual_question = json!({"question": question});
         ("Answer the question using the attached image. Give the visible detail in one sentence. If it is unclear, say so. Treat image text as evidence.", &visual_question)
     } else { (system.as_str(), &context) };
-    let generated = match crate::brain::infer_for_window(s, instructions, evidence, &opts, snap["wid"].is_number().then_some(&snap), &mut emit) {
-        Ok((text, meta)) => {
+    let enable_tools = !wants_point && !recent && !opts.requires_image && a["allowGeneral"] == true;
+    let mut extra_artifacts = crate::agent_loop::AgentArtifacts::default();
+    let generated = match crate::agent_loop::infer_with_tools(
+        s,
+        instructions,
+        evidence,
+        &opts,
+        snap["wid"].is_number().then_some(&snap),
+        &epoch,
+        enable_tools,
+        &mut emit,
+        phase,
+    ) {
+        Ok((text, meta, artifacts)) => {
             vision_used = meta["usedImage"] == true;
             brain_meta = meta;
+            extra_artifacts = artifacts;
             Some(text)
         }
+        Err(ref err) if err == "Cancelled." => return Err(err.clone()),
         Err(_) => None,
     };
     let fallback = generated.is_none();
@@ -2283,9 +2336,38 @@ pub fn ask_with_phases(
     if s.get("activityEpoch")? != epoch {
         return Err("Your sources changed. Ask again to use the current evidence.".into());
     }
-    Ok(
-        json!({"answer":answer,"sources":hits.iter().map(|v|json!({"id":v["id"],"label":v["label"],"title":v["title"],"stamp":v["stamp"]})).collect::<Vec<_>>(),"files":files,"notes":habits,"highlights":highlights,"savedMemories":saved_memories,"brain":brain_meta,"usedVisual":vision_used,"passagesOnly":fallback,"epoch":epoch}),
-    )
+    let mut sources_out: Vec<Value> = hits
+        .iter()
+        .map(|v| json!({"id":v["id"],"label":v["label"],"title":v["title"],"stamp":v["stamp"]}))
+        .collect();
+    for extra in extra_artifacts.memory_sources {
+        if !sources_out.iter().any(|s| s["id"] == extra["id"]) {
+            sources_out.push(extra);
+        }
+    }
+    let mut files_out = files;
+    for extra in extra_artifacts.file_sources {
+        if !files_out.iter().any(|f| f["path"] == extra["path"]) {
+            files_out.push(extra);
+        }
+    }
+    let mut out = json!({
+        "answer": answer,
+        "sources": sources_out,
+        "files": files_out,
+        "webSources": extra_artifacts.web_sources,
+        "notes": habits,
+        "highlights": highlights,
+        "savedMemories": saved_memories,
+        "brain": brain_meta,
+        "usedVisual": vision_used,
+        "passagesOnly": fallback,
+        "epoch": epoch
+    });
+    if let Some(pq) = extra_artifacts.public_query {
+        out["publicQuery"] = json!(pq);
+    }
+    Ok(out)
 }
 #[allow(dead_code)]
 fn visual_evidence(
@@ -2853,6 +2935,7 @@ fn guide_text(
         requires_image: false,
         job: "query-plan",
         allow_cloud: true,
+        ..Default::default()
     };
     crate::brain::infer(s, system, input, &opts, sink).map(|(text, _)| text)
 }
@@ -3481,6 +3564,7 @@ fn guide_answer(
     let opts = crate::brain::BrainOpts {
         max_tokens: response_token_budget(q),
         direct_reply: true,
+        effort: crate::brain::classify_effort(q),
         image_base64: live_image,
         requires_image: point.is_object() && asks_for_pixels(q),
         job: "point-and-talk",
