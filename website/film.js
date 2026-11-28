@@ -56,7 +56,7 @@ export function playFilm(film, bytes, {label, startAt, signal}) {
     cancelAnimationFrame(animation);
     playing = value;
     toggle.setAttribute('aria-label', value ? 'Pause recording' : 'Play recording');
-    toggle.querySelector('path').setAttribute('d', value ? 'M4 3h4v14H4zm8 0h4v14h-4z' : 'M5 2.5l12 7.5-12 7.5z');
+    toggle.querySelector('path').setAttribute('d', value ? 'M6 3h3a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm9 0h3a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z' : 'M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z');
     if (value) {
       if (position >= duration) draw(0);
       origin = performance.now() - position * 1000;
