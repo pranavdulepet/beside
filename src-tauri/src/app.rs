@@ -204,6 +204,7 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
         "activityCorrect" => crate::activity::correct(s, a),
         "activityForget" => crate::activity::forget(s, a),
         "floatingChats" => crate::floating_chats::list(s),
+        "floatingChatSnapshot" => crate::floating_chats::snapshot(s,a),
         "saveFloatingChat" => crate::floating_chats::save(s,a,false),
         "importFloatingChats" => crate::floating_chats::save(s,a,true),
         "deleteFloatingChat" => crate::floating_chats::delete(s,a),

@@ -162,7 +162,7 @@ function Evidence({
   }
   const heading = cleanTitle(row?.title, row?.label);
   const lines = cleanScreenText(row?.body, heading);
-  if (row?.kind === 'note') return <article className="evidence-card">
+  if (row?.kind === 'note' || row?.kind === 'mail') return <article className="evidence-card">
     <strong>{row.title}</strong>
     <p className="evidence-raw-body">{row.body}</p>
     {onClose && <button className="bar-link" onClick={onClose}>Close source</button>}
@@ -346,9 +346,11 @@ function Evidence({
 export function ActivityControls({
   initialForget = false,
   changed,
+  importsChanged,
 }: {
   initialForget?: boolean;
   changed?: () => void;
+  importsChanged?: () => Promise<void>;
 }) {
   const [config, set] = useState<Row | null>(null),
     [site, write] = useState(''),
@@ -388,7 +390,8 @@ export function ActivityControls({
   async function run(op: string, args: Row, key = op, successMsg?: string) {
     if (writing.current) return false;
     writing.current = true;
-    changed?.();
+    const changesImports = ['refreshAppleNotes', 'importMailExport', 'removeAppleNotes', 'removeMailInbox'].includes(op);
+    if (!changesImports) changed?.();
     ++revision.current;
     setPendingKey(key);
     fail('');
@@ -401,6 +404,7 @@ export function ActivityControls({
     }
     try {
       const result = await call(op, args);
+      if (changesImports && (op !== 'importMailExport' || result)) await importsChanged?.();
       const latest = await refresh();
       if (op === 'activityPermission') {
         const granted =
@@ -742,7 +746,7 @@ export function ActivityControls({
                 <button className="btn-sm" disabled={pending} onClick={() => void run(library.refresh, {}, library.refresh, `${library.label} refreshed.`)}>
                   {pendingKey === library.refresh ? 'Importing…' : `${library.count ? 'Refresh' : 'Import'} ${library.label}`}
                 </button>
-                {!!library.count && <button className="btn-sm" disabled={pending} onClick={() => void run(library.remove, {}, library.remove, `Imported ${library.unit} removed.`)}>Remove imported {library.unit}</button>}
+                {!!library.count && <button className="btn-sm" disabled={pending} onClick={() => void run(library.remove, {}, library.remove, `Removed imported ${library.unit} and their saved quotes.`)}>Remove imported {library.unit}</button>}
               </div>
             </section>
           ))}
@@ -1429,6 +1433,8 @@ export function ActivitySheet({
     activeChatId = useRef(chatId);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
   const savedTurns = useRef<Row[] | null>(null);
+  const transientTurns = useRef<Row[]>([]);
+  if (close && turns.length) transientTurns.current = turns;
   const presentation = useRef(0);
   const awaitingContext = useRef(false);
   function persist(op: string, args: Row) {
@@ -1477,6 +1483,7 @@ export function ActivitySheet({
     }
   }
   function startNewChat(message?: string) {
+    transientTurns.current = [];
     awaitingContext.current = false;
     showFirstSummon(false);
     route('');
@@ -1512,10 +1519,44 @@ export function ActivitySheet({
       void refreshChats().catch(e => fail(String(e)));
     }
   }
+  async function reloadAfterSourceChange() {
+    const id = activeChatId.current;
+    const revision = ++sequence.current;
+    set([]);
+    setChats([]);
+    stream('');
+    pending('');
+    setPreview(null);
+    setNudge(null);
+    showProfile(null);
+    setCorrecting(null);
+    setCorrection('');
+    setAnchor(null);
+    setGesture(null);
+    setMessageIntent(null);
+    setSelection('');
+    inspect(null);
+    open('');
+    void call('stopSpeaking').catch(() => {});
+    setSpoken(null);
+    await writes.current.catch(() => {});
+    const snapshot = await call('floatingChatSnapshot', close ? {transient:compactTurnsForStorage(transientTurns.current)} : {});
+    if (revision !== sequence.current || id !== activeChatId.current) return;
+    if (!snapshot.importChanged) {
+      invalidate();
+      return;
+    }
+    const rows: SavedChat[] = snapshot.chats;
+    setChats(rows);
+    const current: Row[] = (close ? snapshot.transient : rows.find(row => row.id === id)?.turns) || [];
+    const restored = current.map(t => ({...t, epoch: snapshot.epoch}));
+    if (close) transientTurns.current = restored;
+    savedTurns.current = restored;
+    set(restored);
+  }
   async function reopenChat(selected: SavedChat) {
     const requestedAt = sequence.current;
-    const epoch = await call('activityEpoch');
-    const rows: SavedChat[] = await call('floatingChats');
+    const {epoch, chats: rows}: {epoch: unknown; chats: SavedChat[]} = await call('floatingChatSnapshot');
     if (requestedAt !== sequence.current) return;
     const chat = rows.find(c => c.id === selected.id);
     if (!chat) {setChats(rows);return;}
@@ -1863,6 +1904,12 @@ export function ActivitySheet({
     };
   }, []);
   useEffect(() => {
+    const off = listen('imports-changed', () => {
+      void reloadAfterSourceChange().catch(e => fail(String(e)));
+    }).catch(() => () => {});
+    return () => { void off.then(f => f()); };
+  }, [close]);
+  useEffect(() => {
     if (!turns.length && !preview) return;
     const expected = preview ? preview.epoch : turns[0].epoch;
     let live = true;
@@ -1871,7 +1918,7 @@ export function ActivitySheet({
       if (checking) return;
       checking = true;
       try {
-        if ((await call('activityEpoch')) !== expected && live) invalidate();
+        if ((await call('activityEpoch')) !== expected && live) await reloadAfterSourceChange();
       } catch {
         if (live && preview) invalidate();
       } finally {
@@ -2523,7 +2570,7 @@ export function ActivitySheet({
             </section>
           ) : tab === 'sources' ? (
             <div className="card-stack">
-              <ActivityControls initialForget={forget} changed={invalidate} />
+              <ActivityControls initialForget={forget} changed={invalidate} importsChanged={reloadAfterSourceChange} />
               <Meeting
                 status={meeting}
                 refresh={setMeeting}

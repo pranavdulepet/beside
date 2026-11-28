@@ -1,6 +1,7 @@
 import {expect, test, type Page} from '@playwright/test';
 import {once} from 'node:events';
-import {rm} from 'node:fs/promises';
+import {rm, writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
 import {fixtureNotebook} from './fixture';
 import type {Row} from '../src/api';
 
@@ -27,6 +28,73 @@ async function closeNotebook(book: Awaited<ReturnType<typeof fixtureNotebook>>) 
 }
 
 const nativeWindow = new Set(['activitySize', 'activityIntent', 'activityAnchor', 'takeSelection']);
+
+test('forgetting Notes and Mail removes their quotes from the current chat and keeps the rest after relaunch', async ({page}) => {
+  let book = await fixtureNotebook();
+  const menu = 'Peas and mint.';
+  const arrival = 'Use the orchard entrance.';
+  const keep = 'I will bring my blue pencil.';
+  const nav = page.getByRole('navigation', {name: 'Beside menu'});
+  const earlier = async () => {
+    await page.getByRole('button', {name:'What Beside knows'}).click();
+    await nav.getByRole('button', {name:'Sources'}).click();
+    await page.getByText('Earlier notes and mail', {exact:true}).click();
+  };
+  try {
+    await book.rpc('companionSetup', {step:'ready'});
+    await writeFile(join(book.folder,'apple-notes.json'), JSON.stringify([['n','Picnic','Menu: '+menu]]));
+    await writeFile(join(book.folder,'example.mbox'), 'From robin@example.org Sat Jan  1 00:00:00 2025\nSubject: Arrival\nMessage-ID: <r@example.org>\n\n'+arrival+'\n');
+    await openCompanion(page, (op,args) => nativeWindow.has(op) ? Promise.resolve(null) : book.rpc(op,args));
+    await earlier();
+    await page.getByRole('button', {name:'Import Apple Notes'}).click();
+    await expect(page.getByRole('button', {name:'Remove imported notes'})).toBeEnabled();
+    await page.getByRole('button', {name:'Import Mail export'}).click();
+    await expect(page.getByRole('button', {name:'Remove imported messages'})).toBeEnabled();
+    const epoch = await book.rpc('activityEpoch');
+    const id = 'b9159123-e1ed-4ea3-9e80-64d2562eb294';
+    const chat = {id,title:'Picnic planning',updatedAt:123,epoch,turns:[
+      {id:'own',question:'Picnic planning',answer:keep,sources:[],epoch},
+      {id:'mail',question:'Which entrance?',answer:arrival,quote:arrival,quoteTitle:'Arrival',sources:[],workKind:'passage',epoch},
+    ]};
+    await page.evaluate(old => localStorage.setItem('sumi.floating.chats',JSON.stringify([old])), chat);
+    await page.reload();
+    await page.getByRole('button', {name:'What Beside knows'}).click();
+    await nav.getByRole('button', {name:'History'}).click();
+    await page.getByRole('button', {name:'Import earlier chats'}).click();
+    await page.getByRole('button', {name:/Picnic planning/}).click();
+    const field = page.getByRole('textbox', {name:'Follow up'});
+    await field.fill('Give me the exact line from that email');
+    await field.press('Enter');
+    await expect(page.locator('.activity-turn .reply').nth(2)).toHaveText(arrival);
+    await field.fill('What was on the menu in my note “Picnic”?');
+    await field.press('Enter');
+    await expect(page.locator('.activity-turn .reply').nth(3)).toHaveText(menu);
+    await expect.poll(async () => (await book.rpc('floatingChats'))[0].turns.length).toBe(4);
+    await earlier();
+    await page.getByRole('button',{name:'Remove imported notes'}).click();
+    await expect(page.getByRole('button',{name:'Remove imported notes'})).toHaveCount(0);
+    await nav.getByRole('button',{name:'Ask Beside'}).click();
+    await expect(page.locator('.activity-turn')).toHaveCount(4);
+    await expect(page.locator('.activity-turn .reply').last()).toHaveText('Quoted passage removed.');
+    await expect(page.locator('main')).not.toContainText(menu);
+    await expect(page.locator('.activity-turn .reply').nth(2)).toHaveText(arrival);
+    await earlier();
+    await page.getByRole('button',{name:'Remove imported messages'}).click();
+    await expect(page.getByRole('button',{name:'Remove imported messages'})).toHaveCount(0);
+    const closed = once(book.core,'close');
+    book.core.stdin.end();
+    await closed;
+    book = await fixtureNotebook(false,undefined,book.folder);
+    await page.reload();
+    await page.getByRole('button',{name:'Chats', exact:true}).click();
+    await page.getByRole('button',{name:/Picnic planning/}).click();
+    await expect(page.locator('.activity-turn')).toHaveCount(4);
+    await expect(page.locator('.activity-turn .reply').first()).toHaveText(keep);
+    await expect(page.locator('main')).not.toContainText(arrival);
+    await expect(page.locator('main')).not.toContainText(menu);
+    expect(await book.rpc('floatingChats')).toMatchObject([{id,title:'Picnic planning'}]);
+  } finally { await closeNotebook(book); }
+});
 
 test('an empty notebook can start quietly and keeps the decision after a relaunch', async ({page}, info) => {
   const book = await fixtureNotebook();

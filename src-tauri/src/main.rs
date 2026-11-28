@@ -63,7 +63,9 @@ async fn notebook(
         let chosen = rfd::AsyncFileDialog::new().set_parent(&window)
             .set_title("Choose a Mail export folder").pick_folder().await;
         let Some(folder) = chosen else { return Ok(serde_json::Value::Null) };
-        return tauri::async_runtime::spawn_blocking(move || activity::mail_archive::import(&s, folder.path())).await.msg()?;
+        let result = tauri::async_runtime::spawn_blocking(move || activity::mail_archive::import(&s, folder.path())).await.msg()??;
+        let _ = window.app_handle().emit("imports-changed", ());
+        return Ok(result);
     }
     tauri::async_runtime::spawn_blocking(move || {
         if operation == "voiceIntent" && window.label()=="activity" { return point::intent(&s); }
@@ -177,7 +179,11 @@ async fn notebook(
                 );
             });
         }
-        dispatch(&s, &operation, &args)
+        let result = dispatch(&s, &operation, &args)?;
+        if matches!(operation.as_str(), "refreshAppleNotes" | "removeAppleNotes" | "removeMailInbox") {
+            let _ = window.app_handle().emit("imports-changed", ());
+        }
+        Ok(result)
     })
     .await
     .msg()?
@@ -845,6 +851,11 @@ fn fixture_rpc(root: std::path::PathBuf, agents: bool) -> Res<()> {
                 chrono::Utc::now().timestamp() - row["age"].as_i64().unwrap_or(0),
             )
             .map(|_| serde_json::Value::Null)
+        } else if op == "refreshAppleNotes" {
+            let file = std::fs::File::open(s.root.join("apple-notes.json")).msg()?;
+            activity::imported::import_notes(&s, file, &s.get("activityEpoch")?)
+        } else if op == "importMailExport" {
+            activity::mail_archive::import(&s, &s.root.join("example.mbox"))
         } else if op == "fixtureDocumentFolder" {
             let folder = s.root.join("example-documents").canonicalize().msg()?;
             s.set("activityFolders", &serde_json::json!([folder]))

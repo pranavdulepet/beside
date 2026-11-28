@@ -120,9 +120,9 @@ pub(super) fn quoted_followup(s: &Store, a: &Value, q: &str, epoch: &Value) -> R
         } else {
             line
         };
-        return Ok(Some(
-            json!({"answer":wording,"sources":task["sources"],"workKind":"passage","supportingLine":wording,"epoch":epoch}),
-        ));
+        let mut sources = task["sources"].clone();
+        if key.starts_with("apple-") { sources[0]["quote"] = json!(wording); }
+        return Ok(Some(json!({"answer":wording,"sources":sources,"workKind":"passage","supportingLine":wording,"epoch":epoch})));
     }
     Ok(Some(
         json!({"answer":"I can’t verify that wording in the saved source anymore. Check the passage again before quoting it.","sources":[],"epoch":epoch}),
@@ -538,6 +538,9 @@ fn cite_connection(reply: &mut Value, candidate: &Candidate, quote: &str, exact:
     } else {
         reply["workKind"] = json!("passage");
         reply["sources"] = json!([{"id":row["id"],"label":row["label"],"title":row["title"],"stamp":row["stamp"]}]);
+        if row["kind"] == "note" || row["kind"] == "mail" {
+            reply["sources"][0]["quote"] = json!(quote);
+        }
     }
 }
 

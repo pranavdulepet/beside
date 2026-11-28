@@ -31,6 +31,7 @@ const APPS: &[&str] = &["com.apple.mail", "com.apple.MobileSMS", "com.openai.cha
 const DAY: i64 = 86400;
 pub fn init(s: &Store) -> Res<()> {
     vectors::init(s)?;
+    crate::floating_chats::import_quotes::upgrade(s)?;
     prune(s)?;
     crate::activity_files::sync(s)
 }
@@ -1412,11 +1413,10 @@ fn menu_from_note(s: &Store, args: &Value, question: &str, epoch: &Value) -> Res
     let cutoff = Utc::now().timestamp() - 30 * DAY;
     let db = s.db.lock().unwrap();
     // A deliberately imported note remains available when its window is closed.
-    // Keep imported IDs out of the screen-passage viewer, which accepts observation IDs.
     let imported = if let Some(name) = named.as_deref() {
-        let mut stmt = db.prepare("SELECT title,body FROM imported_passages WHERE kind='note' AND title=? COLLATE NOCASE LIMIT 2").msg()?;
+        let mut stmt = db.prepare("SELECT title,body,id FROM imported_passages WHERE kind='note' AND title=? COLLATE NOCASE LIMIT 2").msg()?;
         let matches = stmt.query_map([name], |row| Ok(json!({
-            "title":row.get::<_,String>(0)?, "body":row.get::<_,String>(1)?
+            "title":row.get::<_,String>(0)?, "body":row.get::<_,String>(1)?, "id":row.get::<_,String>(2)?, "label":"Notes"
         }))).msg()?.collect::<rusqlite::Result<Vec<_>>>().msg()?;
         if matches.len() > 1 { return Ok(None); }
         matches.into_iter().next()
@@ -1464,9 +1464,9 @@ fn menu_from_note(s: &Store, args: &Value, question: &str, epoch: &Value) -> Res
     if &s.get("activityEpoch")? != epoch {
         return Err("Your sources changed. Ask again.".into());
     }
-    Ok(Some(
-        json!({"answer":dishes,"quote":quote,"quoteTitle":note["title"],"sources":if from_import { json!([]) } else { json!([{"id":note["id"],"label":note["label"],"title":note["title"],"stamp":note["stamp"]}]) },"epoch":epoch,"notes":[]}),
-    ))
+    let mut citation = json!({"id":note["id"],"label":note["label"],"title":note["title"],"stamp":note["stamp"]});
+    if from_import { citation["quote"] = json!(quote); }
+    Ok(Some(json!({"answer":dishes,"quote":quote,"quoteTitle":note["title"],"sources":[citation],"epoch":epoch,"notes":[]})))
 }
 
 pub fn ask(s: &Store, a: &Value) -> Res<Value> {
@@ -1616,6 +1616,10 @@ pub fn ask_with_phases(
         return Err("Ask a question under 3,000 characters.".into());
     }
     let epoch = s.get("activityEpoch")?;
+    if (a["previousTurn"].is_string() || a["history"].as_array().is_some_and(|h| !h.is_empty()))
+        && a["epoch"] != epoch {
+        return Err("Your sources changed. Reopen the chat to continue.".into());
+    }
     let public_topic = if a["forceWeb"] == true {
         if !crate::web_search::public_typed_lookup(question) {
             return Ok(json!({"answer":"What public topic should I search for?","awaitingSearchTopic":true,"manualWebClarification":true,"sources":[],"notes":[],"epoch":epoch}));
@@ -1748,9 +1752,13 @@ pub fn ask_with_phases(
             sink(complete);
             complete.to_owned()
         });
-        return Ok(
-            json!({"answer":answer,"quote":line,"quoteTitle":row["title"],"epoch":epoch,"brain":brain,"sources":if live || imported {json!([])} else {json!([{"id":id,"title":row["title"],"label":row["label"],"stamp":row["stamp"]}])}}),
-        );
+        let mut citation = json!({"id":id,"title":row["title"],"label":row["label"],"stamp":row["stamp"]});
+        if imported {
+            citation["label"] = json!(if row["kind"] == "mail" { "Mail" } else { "Notes" });
+            citation["quote"] = json!(line);
+        }
+        return Ok(json!({"answer":answer,"quote":line,"quoteTitle":row["title"],"epoch":epoch,"brain":brain,
+            "sources":if live {json!([])} else {json!([citation])}}));
     }
     if a["publicQuery"].is_null() && a["selection"].is_null() {
         if let Some(answer) = menu_from_note(s, a, question, &epoch)? {

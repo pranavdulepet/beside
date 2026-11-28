@@ -52,6 +52,7 @@ New notebooks use `~/Beside`. Upgrades keep using the existing notebook folder a
 | Data | What to expect on disk |
 | --- | --- |
 | Floating conversations | Saved in the encrypted database. |
+| Notes and Mail imports | The encrypted database holds the imported text and its citations. Removing an import also clears its quotes from saved chat replies. |
 | Workspace conversations, dated memories and skills | Readable Markdown copies in the notebook. Anyone with access to those files can read them. |
 | Saved screen passages and optional previews | Stored in the encrypted database. **Keep daily Markdown copies** also writes readable copies in the notebook’s hidden activity-journal folder. Turning this off removes the managed daily files. They are excluded from notebook exports and the agent interface. |
 | Meeting recordings | Standard MP4 files in the notebook’s hidden meetings folder, outside the encrypted database. Use **Show recording in Finder** to manage them. |
@@ -125,8 +126,10 @@ Use **Correct this reply** to teach Beside a preference. A red memory mark opens
 
 ### Use Notes and Mail in proactive suggestions
 
-Under **What Beside knows → Sources → Earlier notes and mail**, choose **Import Apple Notes**. macOS may ask for Automation access to Notes. Beside copies unlocked note titles and text into the encrypted notebook. It can then find a passage under a matching heading while Notes is closed. Choose **Refresh Apple Notes** after editing or locking notes to replace the snapshot. **Remove imported notes** clears the index. A passage you already accepted can also appear in your saved conversation. Inkling explains these suggestions locally.
+Under **What Beside knows → Sources → Earlier notes and mail**, choose **Import Apple Notes**. macOS may ask for Automation access to Notes. Beside copies unlocked note titles and text into the encrypted notebook. It can then find a passage under a matching heading while Notes is closed. Choose **Refresh Apple Notes** after editing or locking notes to replace the snapshot.
 
-In Apple Mail choose **Mailbox → Export Mailbox**, then open **Earlier notes and mail**, choose **Import Mail export** in Beside and select the export folder. Beside streams the mbox files locally and replaces its previous Mail snapshot. It keeps up to 12,000 characters of message text, preferring plain text and extracting readable text from HTML locally. It skips attachments and raw messages over 24 MiB. The import reports how many messages it kept and skipped. Apple Notes and Mail each have a removal control.
+In Apple Mail choose **Mailbox → Export Mailbox**, then open **Earlier notes and mail**, choose **Import Mail export** in Beside and select the export folder. Beside streams the mbox files locally and replaces its previous Mail snapshot. It keeps up to 12,000 characters of message text, preferring plain text and extracting readable text from HTML locally. It skips attachments and raw messages over 24 MiB. The import reports how many messages it kept and skipped.
+
+Choose **Remove imported notes** or **Remove imported messages** to forget that collection. Beside removes its search entries and its quoted passages from saved chats. If a reply quoted both a note and an email, removing Notes keeps the email quote, your question and the surrounding reply. New notebook exports reflect the edit. Archives you exported earlier are separate copies.
 
 In cloud model settings, **Mask identifying text** hides recognized identifiers in companion prompts and keeps images on your Mac. Choosing **Tinfoil** verifies its confidential router before sending any text. Its **Verify confidential connection** button checks the connection without submitting a question.

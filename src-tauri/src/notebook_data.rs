@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::{collections::BTreeMap, ffi::CString, fs, io::Write, path::Path};
 
 pub fn export(s: &Store, dest: &Path) -> Res<()> {
+    let _activity = s.activity_edit.lock().unwrap();
     let _guard = s.edit.lock().unwrap();
     let parent = dest.parent().ok_or("Choose a destination folder.")?;
     if parent

@@ -1,7 +1,8 @@
 // Floating conversations live in the notebook's SQLCipher database.
 use crate::store::*;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 use serde_json::{json, Value};
+pub(crate) mod import_quotes;
 pub mod task_context;
 
 const KIND: &str = "floatingChat";
@@ -30,10 +31,40 @@ pub fn last_task(s: &Store, a: &Value, epoch: &Value, kind: &str) -> Res<Option<
         .cloned())
 }
 
+fn records(db: &rusqlite::Connection) -> Res<Value> {
+    let mut stmt = db.prepare("SELECT v FROM docs WHERE kind=? ORDER BY coalesce(json_extract(v,'$.updatedAt'),0) DESC,rowid DESC").msg()?;
+    let mut rows = Vec::new();
+    for raw in stmt.query_map([KIND], |r| r.get::<_, String>(0)).msg()? {
+        rows.push(serde_json::from_str(&raw.msg()?).msg()?);
+    }
+    Ok(Value::Array(rows))
+}
+
 pub fn list(s: &Store) -> Res<Value> {
-    let mut rows = s.list(KIND)?;
-    rows.sort_by_key(|row| std::cmp::Reverse(row["updatedAt"].as_i64().unwrap_or_default()));
-    Ok(json!(rows))
+    records(&s.db.lock().unwrap())
+}
+
+pub fn snapshot(s: &Store, args: &Value) -> Res<Value> {
+    let mut db = s.db.lock().unwrap();
+    let tx = db.transaction().msg()?;
+    let epoch = Store::get_from(&tx, "activityEpoch")?;
+    let import_changed = epoch.is_string() && epoch == Store::get_from(&tx, "lastImportEpoch")?;
+    let mut result = json!({"chats":records(&tx)?,"epoch":epoch,"importChanged":import_changed});
+    // The notebook's temporary activity sheet has no saved record. Clean that
+    // view in memory only, and never revive a turn across an earlier privacy change.
+    if let Some(turns) = args["transient"].as_array().filter(|_| import_changed) {
+        let old = Store::get_from(&tx, "previousImportEpoch")?;
+        if turns
+            .iter()
+            .all(|t| t["epoch"] == old || t["epoch"] == epoch)
+        {
+            let mut chat = json!({"turns":turns});
+            import_quotes::reconcile(&tx, &mut chat, None)?;
+            result["transient"] = chat["turns"].take();
+        }
+    }
+    tx.commit().msg()?;
+    Ok(result)
 }
 
 fn chat_id(row: &Value) -> Res<&str> {
@@ -60,11 +91,7 @@ pub fn save(s: &Store, args: &Value, migrating: bool) -> Res<Value> {
     }
     let mut db = s.db.lock().unwrap();
     let tx = db.transaction().msg()?;
-    let epoch: Option<String> = tx
-        .query_row("SELECT v FROM kv WHERE k='activityEpoch'", [], |r| r.get(0))
-        .optional()
-        .msg()?;
-    let epoch: Value = serde_json::from_str(epoch.as_deref().unwrap_or("null")).msg()?;
+    let epoch = Store::get_from(&tx, "activityEpoch")?;
     for row in rows {
         let id = chat_id(row)?;
         let turns = row["turns"]
@@ -77,7 +104,11 @@ pub fn save(s: &Store, args: &Value, migrating: bool) -> Res<Value> {
         {
             return Err("Unreadable conversation.".into());
         }
-        if row["epoch"] != epoch {
+        if row["epoch"] != epoch
+            || turns
+                .iter()
+                .any(|turn| turn.get("epoch").is_some_and(|e| e != &epoch))
+        {
             if migrating {
                 return Err("These older chats belong to a different notebook or include forgotten context. The earlier copy is still on this Mac.".into());
             }
@@ -88,7 +119,10 @@ pub fn save(s: &Store, args: &Value, migrating: bool) -> Res<Value> {
         } else {
             "INSERT INTO docs VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET v=excluded.v"
         };
-        tx.execute(sql, params![KIND, id, row.to_string()]).msg()?;
+        let mut saved = row.clone();
+        import_quotes::reconcile(&tx, &mut saved, None)?;
+        tx.execute(sql, params![KIND, id, saved.to_string()])
+            .msg()?;
     }
     tx.commit().msg()?;
     Ok(Value::Null)

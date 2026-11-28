@@ -142,10 +142,10 @@ impl Store {
         })
     }
     pub fn get(&self, k: &str) -> Res<Value> {
-        let s: Option<String> = self
-            .db
-            .lock()
-            .unwrap()
+        Self::get_from(&self.db.lock().unwrap(), k)
+    }
+    pub fn get_from(db: &Connection, k: &str) -> Res<Value> {
+        let s: Option<String> = db
             .query_row("SELECT v FROM kv WHERE k=?", [k], |r| r.get(0))
             .optional()
             .msg()?;
