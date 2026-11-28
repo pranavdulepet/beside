@@ -26,7 +26,7 @@ Beside is a private, local-first floating assistant for your Mac. Press **⌥⇧
 
 - Check a disputed claim in TextEdit against two research notes, inspect both passages, and paste the revision. [Writing](https://pranavdulepet.github.io/beside/#writing)
 - At Ryanair’s checked-bag offer, Beside checks the Athens packing list and arrival forecast before recommending you skip the £41.49 extra bag. [Flight](https://pranavdulepet.github.io/beside/#flight)
-- Ask where to turn on FileVault. Beside highlights Privacy & Security, then advances automatically to FileVault as you click. [Guidance](https://pranavdulepet.github.io/beside/#guidance)
-- Give Codex read access to “How you write” over local MCP so it reviews code in your style while personal notes stay off-limits and every read is logged. [Agents](https://pranavdulepet.github.io/beside/#agents)
+- Ask where to turn on Dark Mode. Beside highlights Appearance in System Settings, then points to Dark on the next step. [Guidance](https://pranavdulepet.github.io/beside/#guidance)
+- Scope local MCP access to “How you decide” so ChatGPT Work mode plans a Lisbon weekend around your travel preferences while People stays off-limits and every read is logged. [Agents](https://pranavdulepet.github.io/beside/#agents)
 
 [User guide](docs/guide.md) · [Walkthroughs](docs/walkthroughs.md) · [Architecture](docs/architecture.md) · [Storage and sharing](docs/guide.md#where-your-data-lives) · [Security](SECURITY.md) · [Build from source](docs/development.md) · [Contribute](CONTRIBUTING.md) · [License](LICENSE) · [Third-party credits](licenses/)
