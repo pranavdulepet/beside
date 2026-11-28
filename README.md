@@ -1,6 +1,6 @@
 # Beside
 
-Beside is a private, local-first floating assistant for your Mac. Press **⌥⇧Space** beside whatever’s open to check a closed note, revise a draft from your own sources, ask where to click on screen, or share scoped preferences with your coding agents.
+Beside is a private, local-first floating assistant for your Mac. Press **⌥⇧Space** beside whatever’s open to check a closed note, revise a draft from your own sources, ask where to click on screen, or share scoped preferences with your agents.
 
 [Download Beside for Mac](https://github.com/pranavdulepet/beside/releases/latest/download/Beside-macOS.zip) · [Watch Beside on a Mac](https://pranavdulepet.github.io/beside/#demo)
 
