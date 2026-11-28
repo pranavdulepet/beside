@@ -544,10 +544,7 @@ test.describe('website walkthroughs', () => {
     const player = page.locator('video');
     for (const [title, file] of demos) {
       await choose(page, title);
-      await expect(player.locator('track')).toHaveAttribute(
-        'src',
-        new RegExp(`^media/${file}\\.vtt(?:\\?|$)`),
-      );
+      await expect(player.locator('track')).toHaveCount(0);
       await page
         .getByRole('button', {name: `Play ${title} walkthrough`})
         .click();
@@ -644,7 +641,7 @@ test.describe('website walkthroughs', () => {
       viewport: {width: 393, height: 852},
     });
 
-    test('every full recording still plays, seeks and shows captions when the native video fails', async ({
+    test('every full recording still plays and seeks when the native video fails', async ({
       page,
     }) => {
       let videoRequests = 0;
@@ -663,23 +660,12 @@ test.describe('website walkthroughs', () => {
           .poll(() => seek.inputValue().then(Number))
           .toBeGreaterThan(0.15);
         await page.getByRole('button', {name: 'Pause recording'}).tap();
+        await expect(page.getByRole('button', {name: 'Captions'})).toHaveCount(0);
         const image = page.getByRole('img', {name: title + ' walkthrough'});
         const start = await image.evaluate((c: HTMLCanvasElement) =>
           c.toDataURL(),
         );
         const end = Number(await seek.getAttribute('max'));
-        const captionsUrl = await page
-          .locator('video track')
-          .evaluate((track: HTMLTrackElement) => track.src);
-        const captions = await (await page.request.get(captionsUrl)).text();
-        const lastCue = [
-          ...captions.matchAll(/--> (\d\d):(\d\d):([\d.]+)/g),
-        ].at(-1);
-        expect(lastCue).toBeDefined();
-        const [, hours, minutes, seconds] = lastCue!;
-        expect(
-          Math.abs(end - (+hours * 3600 + +minutes * 60 + +seconds)),
-        ).toBeLessThan(0.15);
         await seek.click();
         const middle = await image.evaluate((c: HTMLCanvasElement) =>
           c.toDataURL(),
@@ -693,9 +679,7 @@ test.describe('website walkthroughs', () => {
         );
         expect(new Set([start, middle, last]).size).toBeGreaterThan(1);
         await page.keyboard.press('Home');
-        await page.getByRole('button', {name: 'Captions'}).tap();
         await page.getByRole('button', {name: 'Play recording'}).tap();
-        await expect(page.locator('.film-cue')).toBeVisible();
       }
       expect(videoRequests).toBeGreaterThanOrEqual(demos.length);
       await page.getByRole('button', {name: 'Expand recording'}).tap();

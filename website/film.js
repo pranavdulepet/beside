@@ -6,24 +6,9 @@ function clock(seconds) {
   return Math.floor(whole / 60) + ':' + String(whole % 60).padStart(2, '0');
 }
 
-async function readCaptions(url, signal) {
-  const response = await fetch(url, {signal});
-  if (!response.ok) throw new Error('Captions unavailable');
-  const text = (await response.text()).replace(/\r/g, '');
-  const seconds = stamp => stamp.trim().split(':').reduce((v, part) => v * 60 + Number(part), 0);
-  return text.trim().split(/\n\s*\n/).slice(1).flatMap(block => {
-    const lines = block.split('\n');
-    if (/^NOTE(?:\s|$)/.test(lines[0])) return [];
-    const timing = lines[0].includes('-->') ? 0 : 1;
-    const stamps = lines[timing]?.match(/^((?:\d{2,}:)?\d{2}:\d{2}\.\d{3})\s+-->\s+((?:\d{2,}:)?\d{2}:\d{2}\.\d{3})(?:\s|$)/);
-    if (!stamps) return [];
-    return [{start: seconds(stamps[1]), end: seconds(stamps[2]), text: lines.slice(timing + 1).join(' ')}];
-  });
-}
-
 // Each recording is an opaque first image followed by retained GIF patches.
 // Other GIF disposal modes can still be played by the browser's image element.
-export function playFilm(film, bytes, {label, captionsUrl, startAt, signal}) {
+export function playFilm(film, bytes, {label, startAt, signal}) {
   const reader = new GifReader(new Uint8Array(bytes));
   let duration = 0;
   const ends = Array.from({length: reader.numFrames()}, (_, i) => {
@@ -42,20 +27,10 @@ export function playFilm(film, bytes, {label, captionsUrl, startAt, signal}) {
   const toggle = film.querySelector('.toggle');
   const seek = film.querySelector('input');
   const time = film.querySelector('.film-time');
-  const cc = film.querySelector('.captions');
-  const cue = film.querySelector('.film-cue');
   const expand = film.querySelector('.expand');
   const dialog = document.querySelector('.cinema');
   const slot = film.parentElement;
   let position = 0, nextFrame = 0, playing = false, origin = 0, animation;
-  let captions;
-
-  function updateCue() {
-    const current = cc.getAttribute('aria-pressed') === 'true'
-      && captions?.find(item => item.start <= position && position < item.end);
-    cue.textContent = current?.text || '';
-    cue.hidden = !current;
-  }
 
   function draw(seconds) {
     position = Math.max(0, Math.min(duration, seconds));
@@ -75,7 +50,6 @@ export function playFilm(film, bytes, {label, captionsUrl, startAt, signal}) {
       time.textContent = text;
       seek.setAttribute('aria-valuetext', text);
     }
-    updateCue();
   }
 
   function setPlaying(value) {
@@ -120,16 +94,6 @@ export function playFilm(film, bytes, {label, captionsUrl, startAt, signal}) {
     origin = performance.now() - position * 1000;
   }, {signal});
 
-  cc.setAttribute('aria-pressed', 'false');
-  cc.addEventListener('click', async () => {
-    const on = cc.getAttribute('aria-pressed') !== 'true';
-    cc.setAttribute('aria-pressed', String(on));
-    if (on && !captions) {
-      try { captions = await readCaptions(captionsUrl, signal); }
-      catch { captions = [{start: 0, end: duration, text: 'Captions unavailable.'}]; }
-    }
-    if (!signal.aborted) updateCue();
-  }, {signal});
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && playing) setPlaying(false);
   }, {signal});

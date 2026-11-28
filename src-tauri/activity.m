@@ -1556,7 +1556,7 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
                         if (dx<220 && nearby.count<16) [nearby addObject:candidate.string];
                     }
                     NSData *jpeg=[[[NSBitmapImageRep alloc] initWithCGImage:patch] representationUsingType:NSBitmapImageFileTypeJPEG properties:@{NSImageCompressionFactor:@0.72}];
-                    // Also produce a compact full-window screenshot (Clicky-style visual context)
+                    // Also produce a compact full-window screenshot for visual context
                     // scaled cleanly to max 1280px wide so multimodal models see the full layout.
                     NSString *fullB64 = @"";
                     CGFloat iw = CGImageGetWidth(image), ih = CGImageGetHeight(image);

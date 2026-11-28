@@ -149,10 +149,6 @@
       .film { border-radius: 10px; overflow: hidden; background: #1c2929; color: #faf8f1; }
       .film-screen { position: relative; }
       .film canvas { display: block; width: 100%; height: auto; }
-      .film-cue {
-        position: absolute; inset: auto 4% 4%; margin: 0 auto; width: fit-content; max-width: 92%;
-        background: #142120eb; border-radius: 4px; padding: 3px 8px; font: 500 14px/1.35 Geist, sans-serif;
-      }
       .transport { display: flex; align-items: center; gap: 4px; padding: 0 4px; }
       .transport button {
         display: grid; place-items: center; width: 44px; height: 44px; flex: none;
@@ -216,13 +212,10 @@
         </div>
         <figure id="demo-panel" role="tabpanel" aria-labelledby="tab-writing">
           <div class="player">
-            <video controls playsinline muted preload="none" poster="media/writing.png?take=11" aria-describedby="caption" aria-label="Writing walkthrough">
-              <track kind="captions" srclang="en" label="English" src="media/writing.vtt?take=11" />
-            </video>
+            <video controls playsinline muted preload="none" poster="media/writing.png?take=11" aria-describedby="caption" aria-label="Writing walkthrough"></video>
             <div class="film" hidden>
               <div class="film-screen">
                 <canvas width="1024" height="640" role="img" aria-label="Writing walkthrough"></canvas>
-                <p class="film-cue" hidden></p>
               </div>
               <div class="transport" role="group" aria-label="Recording controls">
                 <button type="button" class="toggle" aria-label="Pause recording">
@@ -230,7 +223,6 @@
                 </button>
                 <input type="range" min="0" step="0.01" value="0" aria-label="Recording position" />
                 <span class="film-time">0:00</span>
-                <button type="button" class="captions" aria-label="Captions" aria-pressed="false">CC</button>
                 <button type="button" class="expand" aria-label="Expand recording">
                   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 8V3h5m4 0h5v5m0 4v5h-5m-4 0H3v-5"/></svg>
                 </button>
@@ -298,7 +290,6 @@
         video.tabIndex = -1;
         video.poster = media('png');
         video.setAttribute('aria-label', label);
-        video.querySelector('track').src = media('vtt');
         direct.alt = label;
         cover.querySelector('img').src = video.poster;
         cover.setAttribute('aria-label', 'Play ' + label);
@@ -329,12 +320,12 @@
           cover.setAttribute('aria-busy', 'true');
           try {
             const [module, response] = await Promise.all([
-              import('./film.js?take=8'), fetch(animationUrl, {signal}),
+              import('./film.js?take=9'), fetch(animationUrl, {signal}),
             ]);
             if (!response.ok) throw new Error('Recording unavailable');
             const bytes = await response.arrayBuffer();
             if (signal.aborted) return;
-            module.playFilm(film, bytes, {label, captionsUrl: media('vtt'), startAt, signal});
+            module.playFilm(film, bytes, {label, startAt, signal});
             video.hidden = true;
             reveal(film.querySelector('.toggle'));
           } catch {
