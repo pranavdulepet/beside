@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:01.650
+Tap ⌥⇧Space to open Beside over System Settings.
+
+00:00:01.650 --> 00:00:05.350
+Ask, “Where do I turn on FileVault?” Beside checks the active window on-device.
+
+00:00:05.350 --> 00:00:08.950
+Step 1 of 2 highlights Privacy & Security in the left sidebar.
+
+00:00:08.950 --> 00:00:13.450
+Click Privacy & Security. The pointer glides automatically to Step 2: FileVault’s Turn On button.
+
+00:00:13.450 --> 00:00:16.000
+Click Turn On to enable disk encryption. The overlay clears automatically.

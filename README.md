@@ -22,10 +22,11 @@ Beside is a private, local-first floating assistant for your Mac. Press **⌥⇧
 
 ## See it in use
 
-[![A sentence selected in the TextEdit essay “Who counted the gates?”](website/media/writing.png)](https://pranavdulepet.github.io/beside/#writing)
+[![Beside checking two research notes while revising an essay about Chandragupta Maurya](website/media/writing.png)](https://pranavdulepet.github.io/beside/#writing)
 
-- An essay credits archaeologists with finding 64 gates. Ask Beside to check the research notes, inspect the two passages, and revise the sentence in TextEdit. [Writing](https://pranavdulepet.github.io/beside/#writing)
-- Add two dinner guests, check what’s in the pantry, and paste the revised Trader Joe’s list into Notes. [Groceries](https://pranavdulepet.github.io/beside/#groceries)
-- At an airline’s checked-bag selector, ask “Should I add a bag?” See how Beside finds the packing note for the right trip, checks the arrival forecast and explains whether the extra fee is worth paying. [Flight](https://pranavdulepet.github.io/beside/#flight)
+- Check a disputed claim in TextEdit against two research notes, inspect both passages, and paste the revision. [Writing](https://pranavdulepet.github.io/beside/#writing)
+- At Ryanair’s checked-bag offer, Beside checks the Athens packing list and arrival forecast before recommending you skip the £41.49 extra bag. [Flight](https://pranavdulepet.github.io/beside/#flight)
+- Ask where to turn on FileVault. Beside highlights Privacy & Security, then advances automatically to FileVault as you click. [Guidance](https://pranavdulepet.github.io/beside/#guidance)
+- Give Codex read access to “How you write” over local MCP so it reviews code in your style while personal notes stay off-limits and every read is logged. [Agents](https://pranavdulepet.github.io/beside/#agents)
 
 [User guide](docs/guide.md) · [Walkthroughs](docs/walkthroughs.md) · [Architecture](docs/architecture.md) · [Storage and sharing](docs/guide.md#where-your-data-lives) · [Security](SECURITY.md) · [Build from source](docs/development.md) · [Contribute](CONTRIBUTING.md) · [License](LICENSE) · [Third-party credits](licenses/)

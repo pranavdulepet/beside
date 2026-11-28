@@ -502,8 +502,9 @@ test('a requested export arrives after reopening and waits for consent', async (
 test.describe('website walkthroughs', () => {
   const demos = [
     ['Writing', 'writing'],
-    ['Groceries', 'groceries'],
     ['Flight', 'baggage'],
+    ['Guidance', 'guidance'],
+    ['Agents', 'agents'],
   ];
   async function choose(page: import('@playwright/test').Page, title: string) {
     const tab = page.getByRole('tab', {name: title, exact: true});
@@ -527,13 +528,13 @@ test.describe('website walkthroughs', () => {
     const first = page.getByRole('tab', {name: 'Writing'});
     await first.focus();
     await page.keyboard.press('End');
-    await expect(page.getByRole('tab', {name: 'Flight'})).toBeFocused();
+    await expect(page.getByRole('tab', {name: 'Agents'})).toBeFocused();
     await page.keyboard.press('ArrowRight');
     await expect(first).toBeFocused();
     await page.keyboard.press('ArrowLeft');
-    await expect(page).toHaveURL(/#flight$/);
+    await expect(page).toHaveURL(/#agents$/);
     await page.reload();
-    await expect(page.getByRole('button', {name: 'Play Flight walkthrough'})).toBeVisible();
+    await expect(page.getByRole('button', {name: 'Play Agents walkthrough'})).toBeVisible();
   });
 
   test('desktop recordings play, seek and reopen the selected tab', async ({
@@ -596,7 +597,7 @@ test.describe('website walkthroughs', () => {
     await page.reload();
     await expect(
       page.getByRole('button', {
-        name: 'Play Flight walkthrough',
+        name: 'Play Agents walkthrough',
       }),
     ).toBeVisible();
   });
@@ -608,15 +609,15 @@ test.describe('website walkthroughs', () => {
       HTMLMediaElement.prototype.play = () =>
         Promise.reject(new DOMException('Media blocked', 'NotAllowedError'));
     });
-    await page.goto('/website/index.html#groceries');
-    const play = page.getByRole('button', {name: 'Play Groceries walkthrough'});
+    await page.goto('/website/index.html#guidance');
+    const play = page.getByRole('button', {name: 'Play Guidance walkthrough'});
     await play.focus();
     await page.keyboard.press('Enter');
     await expect(
       page.getByRole('button', {name: 'Pause recording'}),
     ).toBeFocused();
     await expect(
-      page.getByRole('img', {name: 'Groceries walkthrough'}),
+      page.getByRole('img', {name: 'Guidance walkthrough'}),
     ).toBeVisible();
     await expect
       .poll(() => page.getByRole('slider').inputValue().then(Number))
@@ -706,7 +707,7 @@ test.describe('website walkthroughs', () => {
       await page.reload();
       await expect(
         page.getByRole('button', {
-          name: 'Play Flight walkthrough',
+          name: 'Play Agents walkthrough',
         }),
       ).toBeVisible();
     });
@@ -742,14 +743,14 @@ test.describe('website walkthroughs', () => {
           ? route.abort()
           : route.continue(),
       );
-      await page.goto('/website/index.html?player=images#groceries');
-      await page.getByRole('button', {name: 'Play Groceries walkthrough'}).tap();
+      await page.goto('/website/index.html?player=images#guidance');
+      await page.getByRole('button', {name: 'Play Guidance walkthrough'}).tap();
       const animation = page.locator('img.direct-recording');
       await expect(animation).toBeVisible();
       expect(videoRequests).toBe(0);
       await expect(animation).toHaveAttribute(
         'src',
-        /^media\/groceries\.gif(?:\?|$)/,
+        /^media\/guidance\.gif(?:\?|$)/,
       );
       expect(
         await animation.evaluate((img: HTMLImageElement) => img.naturalWidth),

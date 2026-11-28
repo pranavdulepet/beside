@@ -113,6 +113,9 @@
         border: 0; border-radius: 7px; cursor: pointer; background: transparent;
         color: inherit; font: 500 15px/1.25 "Söhne", Geist, sans-serif;
       }
+      @media (max-width: 380px) {
+        [role="tab"] { padding: 8px 8px; font-size: 14px; }
+      }
       [role="tab"]:hover { background: var(--hover); }
       [role="tab"][aria-selected="true"] { background: var(--selection); color: var(--selection-ink); }
       .picker [role="tab"]:focus-visible { outline-offset: -3px; }
@@ -206,14 +209,15 @@
       <small>Apple silicon · macOS 14+ · Runs on-device · <a href="https://github.com/pranavdulepet/beside#try-beside">Install guide</a> · <a href="https://github.com/pranavdulepet/beside/blob/main/docs/guide.md#where-your-data-lives">Privacy</a> · <a href="https://github.com/pranavdulepet/beside">GitHub</a></small>
       <section id="demo" aria-label="Beside on a Mac">
         <div class="picker" role="tablist" aria-label="Choose a walkthrough">
-          <button id="tab-writing" role="tab" aria-controls="demo-panel" aria-selected="true" data-take="10" data-caption="Who counted the 64 gates? Check two sources while writing about Chandragupta Maurya.">Writing</button>
-          <button id="tab-groceries" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-take="8" data-caption="Two more people are coming. Buy 8 tortillas, skip the beans, and paste the list into Notes.">Groceries</button>
-          <button id="tab-flight" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-file="baggage" data-ratio="90 / 49" data-take="9" data-caption="At Ryanair checkout, Beside checks the Athens packing list and forecast before recommending you skip the £41.49 extra bag.">Flight</button>
+          <button id="tab-writing" role="tab" aria-controls="demo-panel" aria-selected="true" data-take="11" data-caption="Who counted the 64 gates? Check two sources while writing about Chandragupta Maurya.">Writing</button>
+          <button id="tab-flight" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-file="baggage" data-ratio="90 / 49" data-take="10" data-caption="At Ryanair checkout, Beside checks the Athens packing list and forecast before recommending you skip the £41.49 extra bag.">Flight</button>
+          <button id="tab-guidance" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-take="1" data-caption="Ask where to turn on FileVault. Beside highlights each control in System Settings and advances as you click.">Guidance</button>
+          <button id="tab-agents" role="tab" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-take="1" data-caption="Scope Codex to your writing preferences over local MCP—keeping personal notes off-limits and logging every read.">Agents</button>
         </div>
         <figure id="demo-panel" role="tabpanel" aria-labelledby="tab-writing">
           <div class="player">
-            <video controls playsinline muted preload="none" poster="media/writing.png?take=10" aria-describedby="caption" aria-label="Writing walkthrough">
-              <track kind="captions" srclang="en" label="English" src="media/writing.vtt?take=10" />
+            <video controls playsinline muted preload="none" poster="media/writing.png?take=11" aria-describedby="caption" aria-label="Writing walkthrough">
+              <track kind="captions" srclang="en" label="English" src="media/writing.vtt?take=11" />
             </video>
             <div class="film" hidden>
               <div class="film-screen">
@@ -234,14 +238,14 @@
             </div>
             <img class="direct-recording" alt="Writing walkthrough" tabindex="-1" hidden />
             <button type="button" class="cover" aria-label="Play Writing walkthrough" hidden>
-              <img src="media/writing.png?take=10" width="1536" height="960" alt="" />
+              <img src="media/writing.png?take=11" width="1536" height="960" alt="" />
               <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 3.6a1 1 0 0 1 1.5-.86l14 8.4a1 1 0 0 1 0 1.72l-14 8.4A1 1 0 0 1 6 20.4z"/></svg>
             </button>
           </div>
           <p class="player-message" role="status" hidden>Couldn’t load the recording. <a href="https://github.com/pranavdulepet/beside/raw/refs/heads/main/website/media/writing.mp4" download>Download the MP4</a></p>
           <figcaption id="caption">Who counted the 64 gates? Check two sources while writing about Chandragupta Maurya.</figcaption>
           <noscript><p>Open a recording in your media player.</p><p>
-            <a href="media/writing.mp4">Writing</a> · <a href="media/groceries.mp4">Groceries</a> · <a href="media/baggage.mp4">Flight</a>
+            <a href="media/writing.mp4">Writing</a> · <a href="media/baggage.mp4">Flight</a> · <a href="media/guidance.mp4">Guidance</a> · <a href="media/agents.mp4">Agents</a>
           </p></noscript>
         </figure>
       </section>
