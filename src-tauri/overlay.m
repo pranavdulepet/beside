@@ -257,7 +257,26 @@ static NSString *collect_vision_elements(
                                   completionHandler:^(CGImageRef image, NSError *issue) {
             if (image && !issue) {
                 run_vision_ocr_on_cgimage(image, frame, observed);
-                NSBitmapImageRep *rep=[[NSBitmapImageRep alloc] initWithCGImage:image];
+                CGImageRef visionImg = image;
+                CGImageRef scaled = NULL;
+                size_t iw = CGImageGetWidth(image), ih = CGImageGetHeight(image);
+                if (iw > 1024 || ih > 1024) {
+                    CGFloat s = 1024.0 / (CGFloat)MAX(iw, ih);
+                    size_t tw = MAX(1, (size_t)llround(iw * s));
+                    size_t th = MAX(1, (size_t)llround(ih * s));
+                    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+                    CGContextRef ctx = CGBitmapContextCreate(NULL, tw, th, 8, 0, cs, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
+                    CGColorSpaceRelease(cs);
+                    if (ctx) {
+                        CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
+                        CGContextDrawImage(ctx, CGRectMake(0, 0, tw, th), image);
+                        scaled = CGBitmapContextCreateImage(ctx);
+                        CGContextRelease(ctx);
+                        if (scaled) visionImg = scaled;
+                    }
+                }
+                NSBitmapImageRep *rep=[[NSBitmapImageRep alloc] initWithCGImage:visionImg];
+                if (scaled) CGImageRelease(scaled);
                 NSData *jpeg=[rep representationUsingType:NSBitmapImageFileTypeJPEG properties:@{NSImageCompressionFactor:@0.70}];
                 if (jpeg.length<=1600000) pixels=[jpeg base64EncodedStringWithOptions:0];
             }
@@ -560,16 +579,18 @@ static void render_step_main(
     // Outer soft luminous halo
     CAShapeLayer *halo = [CAShapeLayer layer];
     NSRect haloRect = NSInsetRect(padded, -4, -4);
-    halo.path = CGPathCreateWithRoundedRect(haloRect, radius + 3, radius + 3, NULL);
+    CGPathRef haloPath = CGPathCreateWithRoundedRect(haloRect, radius + 3, radius + 3, NULL);
+    halo.path = haloPath;
     halo.fillColor = NSColor.clearColor.CGColor;
     halo.strokeColor = [NSColor colorWithRed:0.43 green:0.16 blue:0.29 alpha:0.35].CGColor;
     halo.lineWidth = 4.0;
     [canvas.layer addSublayer:halo];
-    CGPathRelease(halo.path);
+    CGPathRelease(haloPath);
 
     // Crisp focus ring around the target UI element
     CAShapeLayer *ring = [CAShapeLayer layer];
-    ring.path = CGPathCreateWithRoundedRect(padded, radius, radius, NULL);
+    CGPathRef ringPath = CGPathCreateWithRoundedRect(padded, radius, radius, NULL);
+    ring.path = ringPath;
     ring.fillColor = [NSColor colorWithRed:0.43 green:0.16 blue:0.29 alpha:0.14].CGColor;
     ring.strokeColor = [NSColor colorWithRed:0.62 green:0.81 blue:0.80 alpha:0.98].CGColor;
     ring.lineWidth = 2.5;
@@ -578,7 +599,7 @@ static void render_step_main(
     ring.shadowOpacity = 0.85;
     ring.shadowOffset = CGSizeZero;
     [canvas.layer addSublayer:ring];
-    CGPathRelease(ring.path);
+    CGPathRelease(ringPath);
 
     // Curve toward the control while keeping the target visible.
     NSPoint originGlobal = hasLastPointer ? lastPointerGlobal : NSEvent.mouseLocation;
