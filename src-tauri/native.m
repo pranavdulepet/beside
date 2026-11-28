@@ -6,10 +6,10 @@
 #import <UserNotifications/UserNotifications.h>
 #include <stdlib.h>
 #include <pthread/qos.h>
-void sumi_background_thread(void) {
+void beside_background_thread(void) {
     pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0);
 }
-int sumi_quiet_power(double seconds) {
+int beside_quiet_power(double seconds) {
  @autoreleasepool {
    if ([NSProcessInfo processInfo].thermalState >= NSProcessInfoThermalStateSerious) return 0;
    CFTypeRef info=IOPSCopyPowerSourcesInfo();
@@ -23,8 +23,8 @@ int sumi_quiet_power(double seconds) {
 double beside_keyboard_idle_seconds(void) {
     return CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateCombinedSessionState, kCGEventKeyDown);
 }
-int sumi_heavy_allowed(void) {return sumi_quiet_power(90.);}
-char *sumi_entities(const char *input) {
+int beside_heavy_allowed(void) {return beside_quiet_power(90.);}
+char *beside_entities(const char *input) {
  @autoreleasepool {
   NSString *s=[NSString stringWithUTF8String:input];
   if(!s)return strdup("[]");
@@ -37,7 +37,7 @@ char *sumi_entities(const char *input) {
   return strdup([[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding] UTF8String]);
  }
 }
-void sumi_free(char *p){free(p);}
+void beside_free(char *p){free(p);}
 static int semantic_vector(const char *input, float *result, int length, BOOL project) {
     @autoreleasepool {
         static NLEmbedding *embedding;
@@ -66,22 +66,22 @@ static int semantic_vector(const char *input, float *result, int length, BOOL pr
         return (int)embedding.revision + 1;
     }
 }
-int sumi_semantic(const char *input, float *result, int length) {
+int beside_semantic(const char *input, float *result, int length) {
     return semantic_vector(input, result, length, NO);
 }
 int beside_passage_vector(const char *input, float *result, int length) {
     return semantic_vector(input, result, length, YES);
 }
 
-static dispatch_group_t sumi_notification_permission(void) {
+static dispatch_group_t beside_notification_permission(void) {
     static dispatch_group_t group;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ group = dispatch_group_create(); });
     return group;
 }
-void sumi_request_notifications(void) {
+void beside_request_notifications(void) {
     @autoreleasepool {
-        dispatch_group_t group = sumi_notification_permission();
+        dispatch_group_t group = beside_notification_permission();
         dispatch_group_enter(group);
         [[UNUserNotificationCenter currentNotificationCenter]
             requestAuthorizationWithOptions:UNAuthorizationOptionAlert
@@ -92,9 +92,9 @@ void sumi_request_notifications(void) {
             }];
     }
 }
-void sumi_notify_when_ready(void) {
+void beside_notify_when_ready(void) {
     // A small notebook can finish before the person answers the permission sheet.
-    dispatch_group_notify(sumi_notification_permission(), dispatch_get_main_queue(), ^{
+    dispatch_group_notify(beside_notification_permission(), dispatch_get_main_queue(), ^{
         UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
         [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings *settings) {
             if (settings.authorizationStatus != UNAuthorizationStatusAuthorized &&
@@ -132,7 +132,7 @@ static NSString *readImage(CGImageRef image) {
     return [lines componentsJoinedByString:@"\n"];
 }
 
-char *sumi_read_document(const unsigned char *bytes, size_t length, const char *kind) {
+char *beside_read_document(const unsigned char *bytes, size_t length, const char *kind) {
     @autoreleasepool {
         NSData *data=[NSData dataWithBytes:bytes length:length];
         NSString *ext=[NSString stringWithUTF8String:kind];
@@ -166,14 +166,14 @@ char *sumi_read_document(const unsigned char *bytes, size_t length, const char *
         return value.length ? strdup(value.UTF8String) : NULL;
     }
 }
-int sumi_trash(const char *path) {
+int beside_trash(const char *path) {
     @autoreleasepool {
         NSURL *url=[NSURL fileURLWithPath:[NSString stringWithUTF8String:path] isDirectory:YES];
         return [[NSFileManager defaultManager] trashItemAtURL:url resultingItemURL:nil error:nil] ? 1 : 0;
     }
 }
 
-char *sumi_image_preview(const unsigned char *bytes,size_t length) {
+char *beside_image_preview(const unsigned char *bytes,size_t length) {
     @autoreleasepool {
         NSData *input=[NSData dataWithBytes:bytes length:length];
         CGImageSourceRef source=CGImageSourceCreateWithData((__bridge CFDataRef)input,NULL);

@@ -213,7 +213,7 @@ pub(super) fn embed(s: &Store, text: &str) -> Vector {
         use std::sync::atomic::{AtomicBool, Ordering};
         static WARMING: AtomicBool = AtomicBool::new(false);
         if !WARMING.swap(true, Ordering::AcqRel) {
-            let base = s.root.join(".sumi");
+            let base = s.root.join(".beside");
             std::thread::spawn(move || {
                 if verified_blob(&path, &space, true) {
                     let _ = crate::bundled::warm(
@@ -309,7 +309,7 @@ mod tests {
         let unused_model = dir.path().join("cold.gguf");
         let result = crate::bundled::passage_embedding(&s, &unused_model, "question", true);
         assert_eq!(result.unwrap_err(), "The embedding model is cold.");
-        assert!(!s.root.join(".sumi/embedding.pid").exists());
+        assert!(!s.root.join(".beside/embedding.pid").exists());
     }
 
     #[test]

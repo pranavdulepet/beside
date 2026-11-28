@@ -4,8 +4,8 @@ use ring::signature::{UnparsedPublicKey, ED25519};
 use serde_json::{json, Value};
 use std::{io::Read, time::Duration};
 
-const URL: Option<&str> = match option_env!("BESIDE_CATALOG_URL") { Some(value) => Some(value), None => option_env!("SUMI_CATALOG_URL") };
-const KEY: Option<&str> = match option_env!("BESIDE_CATALOG_PUBLIC_KEY") { Some(value) => Some(value), None => option_env!("SUMI_CATALOG_PUBLIC_KEY") };
+const URL: Option<&str> = option_env!("BESIDE_CATALOG_URL");
+const KEY: Option<&str> = option_env!("BESIDE_CATALOG_PUBLIC_KEY");
 pub fn configured() -> bool {
     URL.is_some() == KEY.is_some()
 }

@@ -193,7 +193,7 @@ fn mcp_scope_revocation_and_delegation() {
         &s,
         "Claude Code",
         tmp.path(),
-        Path::new("/Applications/Beside.app/Contents/MacOS/sumi"),
+        Path::new("/Applications/Beside.app/Contents/MacOS/beside"),
     )
     .unwrap();
     let config: Value =
@@ -201,29 +201,29 @@ fn mcp_scope_revocation_and_delegation() {
     assert_eq!(config["keepMe"], true);
     assert_eq!(config["mcpServers"]["existing"]["command"], "other");
     let token =
-        std::fs::read_to_string(config["mcpServers"]["sumi"]["args"][4].as_str().unwrap()).unwrap();
-    let result = seal::call(&s, &token, "sumi_context", &json!({"task":"writing"})).unwrap();
+        std::fs::read_to_string(config["mcpServers"]["beside"]["args"][4].as_str().unwrap()).unwrap();
+    let result = seal::call(&s, &token, "beside_recall", &json!({"task":"writing"})).unwrap();
     assert!(result.to_string().contains("short answers"));
     assert!(!result.to_string().contains("relationship"));
-    assert!(seal::call(&s, &token, "sumi_answer", &json!({"question":"Send now?"})).is_err());
+    assert!(seal::call(&s, &token, "beside_answer", &json!({"question":"Send now?"})).is_err());
     let mut a = s.list("agent").unwrap().remove(0);
     a["permission"] = json!("Answer for me");
     seal::policy(&s, &a).unwrap();
     let q = json!({"question":"Send the message?","options":["Yes","No"]});
-    let wait = seal::call(&s, &token, "sumi_answer", &q).unwrap();
+    let wait = seal::call(&s, &token, "beside_answer", &q).unwrap();
     assert_eq!(wait["queued"], true);
     app::action(&s, "respond", &json!({"id":wait["id"],"answer":"No"})).unwrap();
     let delivered = seal::call(
         &s,
         &token,
-        "sumi_answer",
+        "beside_answer",
         &json!({"question":"Check my request","ticket":wait["id"]}),
     )
     .unwrap();
     assert_eq!(delivered["answer"], "No");
     app::action(&s, "disconnect", &a).unwrap();
     assert!(!seal::authorized(&s, &token));
-    assert!(seal::call(&s, &token, "sumi_context", &json!({"task":"work"})).is_err());
+    assert!(seal::call(&s, &token, "beside_recall", &json!({"task":"work"})).is_err());
 }
 use std::path::Path;
 #[test]
@@ -815,7 +815,7 @@ fn quitting_a_reading_reaps_the_bundled_model() {
     let s = Store::with_key(root.clone(), &[19; 32]).unwrap();
     app::setup(&s).unwrap();
     app::action(&s, "mark", &json!({"points":[[0,0],[1,1]]})).unwrap();
-    s.set("model",&json!({"runtime":"Sumi","name":"local-gguf","path":installed_gguf(),"private":root.join(".sumi")})).unwrap();
+    s.set("model",&json!({"runtime":"Beside","name":"local-gguf","path":installed_gguf(),"private":root.join(".beside")})).unwrap();
     let group = (0..100)
         .map(|i| format!("paper-{i}"))
         .find(|g| u8::from_str_radix(&store::hash(g)[..2], 16).unwrap() < 26)
@@ -836,8 +836,8 @@ fn quitting_a_reading_reaps_the_bundled_model() {
     let runtime = target.join("release/bundle/macos/Beside.app/Contents/Resources/runtime");
     assert!(runtime.join("llama-server").is_file());
     symlink(runtime, contents.join("Resources/runtime")).unwrap();
-    let driver = contents.join("MacOS/sumi");
-    fs::copy(target.join("debug/sumi"), &driver).unwrap();
+    let driver = contents.join("MacOS/beside");
+    fs::copy(target.join("debug/beside"), &driver).unwrap();
     let mut child = Command::new(driver)
         .arg("--fixture-rpc")
         .arg("--notebook")
@@ -883,7 +883,7 @@ fn quitting_a_reading_reaps_the_bundled_model() {
         .unwrap();
     if check.status.success() {
         let command = String::from_utf8_lossy(&check.stdout);
-        if command.contains(root.join(".sumi/runtime.key").to_str().unwrap()) {
+        if command.contains(root.join(".beside/runtime.key").to_str().unwrap()) {
             let _ = Command::new("/bin/kill").args(["-TERM", &pid]).status();
         }
         panic!("The owned model process survived Quit");
@@ -901,12 +901,12 @@ fn agent_over_http() {
         &s,
         "Codex",
         tmp.path(),
-        Path::new("/Applications/Beside.app/Contents/MacOS/sumi"),
+        Path::new("/Applications/Beside.app/Contents/MacOS/beside"),
     )
     .unwrap();
     let raw = std::fs::read_to_string(tmp.path().join(".codex/config.toml")).unwrap();
     let cfg: toml_edit::DocumentMut = raw.parse().unwrap();
-    let credential = cfg["mcp_servers"]["sumi"]["args"]
+    let credential = cfg["mcp_servers"]["beside"]["args"]
         .as_array()
         .unwrap()
         .get(4)
@@ -928,7 +928,7 @@ fn agent_over_http() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|t| t["name"] == "sumi_context"));
+        .any(|t| t["name"] == "beside_recall"));
     app::action(&s, "disconnect", &s.list("agent").unwrap()[0]).unwrap();
     let denied = agent
         .post(endpoint)
@@ -945,7 +945,7 @@ fn installed_stdio_round_trip() {
         process::{Command, Stdio},
     };
     let app = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("target/release/bundle/macos/Beside.app/Contents/MacOS/sumi");
+        .join("target/release/bundle/macos/Beside.app/Contents/MacOS/beside");
     let tmp = tempdir().unwrap();
     let s = std::sync::Arc::new(Store::open(tmp.path().join("notebook")).unwrap());
     transport::start_socket(s.clone()).unwrap();
@@ -965,7 +965,7 @@ fn installed_stdio_round_trip() {
         .unwrap(),
     )
     .unwrap();
-    let server = &config["mcpServers"]["sumi"];
+    let server = &config["mcpServers"]["beside"];
     let mut child = Command::new(server["command"].as_str().unwrap())
         .args(
             server["args"]
@@ -987,7 +987,7 @@ fn installed_stdio_round_trip() {
         serde_json::from_str::<Value>(&line).unwrap()
     };
     let init = request(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}));
-    let query = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sumi_context","arguments":{"task":"writing a guide"}}});
+    let query = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"beside_recall","arguments":{"task":"writing a guide"}}});
     let permitted = request(query.clone());
     let client = s.list("agent").unwrap().remove(0);
     seal::disconnect(&s, client["id"].as_str().unwrap()).unwrap();
@@ -995,7 +995,7 @@ fn installed_stdio_round_trip() {
     drop(input);
     let exit = child.wait().unwrap();
     let account = store::hash(&s.root.to_string_lossy());
-    security_framework::passwords::delete_generic_password("studio.sumi.memory", &account).unwrap();
+    security_framework::passwords::delete_generic_password("studio.beside.memory", &account).unwrap();
     assert!(exit.success());
     assert!(init["result"]["protocolVersion"].is_string());
     assert!(permitted["result"]["content"][0]["text"]
@@ -1049,7 +1049,7 @@ fn auto_answers_require_reviewed_predictions_and_can_be_corrected() {
         &s,
         "Cursor",
         tmp.path(),
-        Path::new("/Applications/Beside.app/Contents/MacOS/sumi"),
+        Path::new("/Applications/Beside.app/Contents/MacOS/beside"),
     )
     .unwrap();
     let mut agent = s.list("agent").unwrap().remove(0);
@@ -1059,11 +1059,11 @@ fn auto_answers_require_reviewed_predictions_and_can_be_corrected() {
         serde_json::from_slice(&std::fs::read(tmp.path().join(".cursor/mcp.json")).unwrap())
             .unwrap();
     let token =
-        std::fs::read_to_string(config["mcpServers"]["sumi"]["args"][4].as_str().unwrap()).unwrap();
+        std::fs::read_to_string(config["mcpServers"]["beside"]["args"][4].as_str().unwrap()).unwrap();
     let request = json!({"question":"Which format do you prefer?","options":["Bullets","Prose"]});
     let mut first = None;
     for _ in 0..35 {
-        let reply = seal::call(&s, &token, "sumi_answer", &request).unwrap();
+        let reply = seal::call(&s, &token, "beside_answer", &request).unwrap();
         if reply["answer"].is_string() {
             first = Some(reply);
             break;
@@ -1081,7 +1081,7 @@ fn auto_answers_require_reviewed_predictions_and_can_be_corrected() {
         .find(|r| r["status"] == "answered")
         .unwrap();
     assert_eq!(
-        seal::call(&s, &token, "sumi_answer", &json!({"ticket":last["id"]})).unwrap()["answer"],
+        seal::call(&s, &token, "beside_answer", &json!({"ticket":last["id"]})).unwrap()["answer"],
         "Bullets"
     );
     let check = s
@@ -1093,13 +1093,13 @@ fn auto_answers_require_reviewed_predictions_and_can_be_corrected() {
     assert!(app::action(&s, "respond", &json!({"id":check["id"],"answer":"Prose"})).is_err());
     app::action(&s, "respond", &json!({"id":last["id"],"answer":"Prose"})).unwrap();
     assert_eq!(
-        seal::call(&s, &token, "sumi_answer", &request).unwrap()["queued"],
+        seal::call(&s, &token, "beside_answer", &request).unwrap()["queued"],
         true
     );
     let decision = seal::call(
         &s,
         &token,
-        "sumi_answer",
+        "beside_answer",
         &json!({"question":"Publish this document?","options":["Yes","No"]}),
     )
     .unwrap();
@@ -1150,7 +1150,7 @@ fn two_people_same_questions() {
         .find(|v| v["name"] == "llama3.2:3b")
         .unwrap();
     s.set("model", &model).unwrap();
-    let agent = json!({"id":store::id(),"name":"Synthetic reader","permission":"Ask","sections":["deciding","writing"],"tokenHash":store::hash("sumi-seal/fixture-token")});
+    let agent = json!({"id":store::id(),"name":"Synthetic reader","permission":"Ask","sections":["deciding","writing"],"tokenHash":store::hash("beside-seal/fixture-token")});
     s.put("agent", &agent).unwrap();
     let questions = [
         (
@@ -1180,7 +1180,7 @@ fn two_people_same_questions() {
         seal::call(
             &s,
             "fixture-token",
-            "sumi_predict",
+            "beside_predict",
             &json!({"question":q,"options":opts}),
         )
         .unwrap()["guess"]
@@ -1495,23 +1495,23 @@ fn sealed_decision_can_only_revise_a_rule_used_for_its_guess() {
 fn shared_agent_configuration_survives_connect_repair_and_removal() {
     use std::{fs, os::unix::fs::PermissionsExt};
     let (tmp, s) = notebook();
-    let exe = Path::new("/Applications/Beside.app/Contents/MacOS/sumi");
-    let relocated = tmp.path().join("Moved/Beside.app/Contents/MacOS/sumi");
+    let exe = Path::new("/Applications/Beside.app/Contents/MacOS/beside");
+    let relocated = tmp.path().join("Moved/Beside.app/Contents/MacOS/beside");
     for name in seal::AGENTS {
         let path = seal::config_path(tmp.path(), name).unwrap();
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         let target = tmp.path().join(format!("{}-dotfile", name));
         let initial = if name == "Codex" {
-            "# The owner's comment\nmodel = 'local'\nmcp_servers = { sumi = { command = 'personal' } }\n"
+            "# The owner's comment\nmodel = 'local'\nmcp_servers = { beside = { command = 'personal' } }\n"
         } else {
-            r#"{"mcpServers":{"sumi":{"command":"personal"}},"keep":"original"}"#
+            r#"{"mcpServers":{"beside":{"command":"personal"}},"keep":"original"}"#
         };
         fs::write(&target, initial).unwrap();
         fs::set_permissions(&target, fs::Permissions::from_mode(0o640)).unwrap();
         std::os::unix::fs::symlink(&target, &path).unwrap();
         seal::connect(&s, name, tmp.path(), exe).unwrap();
         let a = s.list("agent").unwrap().remove(0);
-        assert_eq!(a["link"]["slot"], "sumi-2");
+        assert_eq!(a["link"]["slot"], "beside-2");
         let key = a["id"].as_str().unwrap();
         let secret = Path::new(a["link"]["server"]["args"][4].as_str().unwrap());
         let token = fs::read_to_string(secret).unwrap();
@@ -1528,12 +1528,12 @@ fn shared_agent_configuration_survives_connect_repair_and_removal() {
                 .map(|v| v["name"].as_str().unwrap().to_owned())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(tools("Read"), vec!["beside_recall","beside_profile","sumi_context"]);
+        assert_eq!(tools("Read"), vec!["beside_recall", "beside_profile"]);
         assert_eq!(
             tools("Ask"),
-            vec!["beside_recall","beside_profile","beside_predict","beside_observe","sumi_context","sumi_predict","sumi_observe"]
+            vec!["beside_recall", "beside_profile", "beside_predict", "beside_observe"]
         );
-        assert_eq!(tools("Answer for me").len(), 9);
+        assert_eq!(tools("Answer for me").len(), 5);
         let untouched = fs::read(&target).unwrap();
         seal::connect(&s, name, tmp.path(), exe).unwrap();
         assert_eq!(fs::read(&target).unwrap(), untouched);
@@ -1545,7 +1545,7 @@ fn shared_agent_configuration_survives_connect_repair_and_removal() {
         let pending = seal::call(
             &s,
             &token,
-            "sumi_answer",
+            "beside_answer",
             &json!({"question":"Which sketch do you want?"}),
         )
         .unwrap();
@@ -1557,7 +1557,7 @@ fn shared_agent_configuration_survives_connect_repair_and_removal() {
             "closed"
         );
         let after = fs::read_to_string(&target).unwrap();
-        assert!(!after.contains("sumi-2"));
+        assert!(!after.contains("beside-2"));
         assert_eq!(
             fs::metadata(&target).unwrap().permissions().mode() & 0o777,
             0o640
@@ -1566,7 +1566,7 @@ fn shared_agent_configuration_survives_connect_repair_and_removal() {
             assert!(after.contains("# The owner's comment"));
             let doc: toml_edit::DocumentMut = after.parse().unwrap();
             assert_eq!(
-                doc["mcp_servers"]["sumi"]["command"].as_str(),
+                doc["mcp_servers"]["beside"]["command"].as_str(),
                 Some("personal")
             );
         } else {
@@ -1584,7 +1584,7 @@ fn unfinished_agent_removal_stays_revoked_and_is_retried_on_reopen() {
     use std::fs;
     let (tmp, s) = notebook();
     let path = tmp.path().join(".claude.json");
-    let exe = Path::new("/Applications/Beside.app/Contents/MacOS/sumi");
+    let exe = Path::new("/Applications/Beside.app/Contents/MacOS/beside");
     seal::connect(&s, "Claude Code", tmp.path(), exe).unwrap();
     let a = s.list("agent").unwrap().remove(0);
     let key = a["id"].as_str().unwrap();
@@ -1611,7 +1611,7 @@ fn unfinished_agent_removal_stays_revoked_and_is_retried_on_reopen() {
     assert!(!secret.exists());
     assert_eq!(b["permission"], "Read");
     let mut edited: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    edited["mcpServers"]["sumi"]["env"] = json!({"theme":"blue"});
+    edited["mcpServers"]["beside"]["env"] = json!({"theme":"blue"});
     fs::write(&path, edited.to_string()).unwrap();
     seal::disconnect(&s, key).unwrap();
     assert_eq!(fs::read_to_string(&path).unwrap(), edited.to_string());
@@ -1621,11 +1621,11 @@ fn unfinished_agent_removal_stays_revoked_and_is_retried_on_reopen() {
 fn interrupted_install_and_legacy_agent_keep_their_permissions() {
     use std::fs;
     let (tmp, s) = notebook();
-    let exe = Path::new("/Applications/Beside.app/Contents/MacOS/sumi");
+    let exe = Path::new("/Applications/Beside.app/Contents/MacOS/beside");
     let key = &store::hash("Codex")[..32];
     let path = tmp.path().join(".codex/config.toml");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let secret = s.root.join(".sumi").join(format!("agent-{key}.token"));
+    let secret = s.root.join(".beside").join(format!("agent-{key}.token"));
     let token = store::id();
     fs::write(&secret, &token).unwrap();
     let mut legacy = json!({"id":key,"name":"Codex","permission":"Ask","sections":["words"],"threshold":0.98,"tokenHash":seal::token_hash(&token)});
@@ -1640,7 +1640,7 @@ fn interrupted_install_and_legacy_agent_keep_their_permissions() {
     fs::write(
         &path,
         format!(
-            "[mcp_servers.sumi]\ncommand = '{}'\nargs = {}\n",
+            "[mcp_servers.beside]\ncommand = '{}'\nargs = {}\n",
             exe.display(),
             json!(args)
         ),
@@ -1650,7 +1650,7 @@ fn interrupted_install_and_legacy_agent_keep_their_permissions() {
     legacy = s.doc("agent", key).unwrap();
     assert_eq!(legacy["permission"], "Ask");
     assert_eq!(legacy["sections"], json!(["words"]));
-    assert_eq!(legacy["link"]["slot"], "sumi");
+    assert_eq!(legacy["link"]["slot"], "beside");
     assert!(seal::authorized(&s, &token));
     legacy["linkState"] = json!("installing");
     s.put("agent", &legacy).unwrap();
@@ -1666,7 +1666,7 @@ fn interrupted_install_and_legacy_agent_keep_their_permissions() {
     assert!(
         text.contains("# Edited while Beside was closed")
             && text.contains("my-calendar")
-            && text.contains("mcp_servers.sumi")
+            && text.contains("mcp_servers.beside")
     );
     let state = app::state(&s).unwrap();
     assert!(state["agents"][0]["link"].is_null() && state["agents"][0]["tokenHash"].is_null());
@@ -1676,7 +1676,7 @@ fn interrupted_install_and_legacy_agent_keep_their_permissions() {
 fn two_notebooks_can_share_one_agent_configuration() {
     let (home, left) = notebook();
     let (_other, right) = notebook();
-    let exe = Path::new("/Applications/Beside.app/Contents/MacOS/sumi");
+    let exe = Path::new("/Applications/Beside.app/Contents/MacOS/beside");
     let config_home = home.path();
     std::thread::scope(|scope| {
         for s in [&left, &right] {

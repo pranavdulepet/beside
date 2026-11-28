@@ -111,7 +111,6 @@ static PLACEHOLDER_RE: LazyLock<Regex> =
 
 const EXCLUDED_NAMES: &[&str] = &[
     "beside",
-    "sumi",
     "inkling",
     "apple",
     "safari",

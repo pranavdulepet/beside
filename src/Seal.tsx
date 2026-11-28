@@ -13,7 +13,7 @@ function AnswerReviews({
   const automatic = log.filter(
     row =>
       row.agent === agent.id &&
-      ['beside_answer', 'sumi_answer'].includes(row.tool) &&
+      row.tool === 'beside_answer' &&
       ['answered', 'reviewed'].includes(row.status) &&
       typeof row.shared?.answer === 'string',
   );
@@ -140,7 +140,7 @@ function Agent({a, act, log}: {a: Row; act: Action; log: Row[]}) {
           onFocus={e => e.currentTarget.select()}
         />
       </label>
-      <small>MCP server · {a.serverName || 'sumi'}</small>
+      <small>MCP server · {a.serverName || 'beside'}</small>
       <div className="action-row">
         <button
           className="btn-sm"
@@ -254,7 +254,7 @@ export function Seal({
     [justAnswered, confirmAnswer] = useState('');
   const waiting = data.log.filter((row: Row) => row.status === 'waiting');
   const isCheck = (row: Row) =>
-    ['beside_answer', 'sumi_answer'].includes(row.tool) && ['served', 'checked'].includes(row.status);
+    row.tool === 'beside_answer' && ['served', 'checked'].includes(row.status);
   const checks: Row[] = data.log.filter(isCheck);
   const recent = data.log.filter(
     (row: Row) => row.status !== 'waiting' && !isCheck(row),
@@ -307,7 +307,7 @@ export function Seal({
                 <p>Access was revoked before you answered.</p>
               )}
               {v.status === 'answered' &&
-                ['beside_answer', 'sumi_answer'].includes(v.tool) &&
+                v.tool === 'beside_answer' &&
                 !v.human &&
                 v.shared?.answer &&
                 logId !== v.id && (
@@ -320,7 +320,7 @@ export function Seal({
                     That was right
                   </button>
                 )}
-              {['beside_answer', 'sumi_answer'].includes(v.tool) &&
+              {v.tool === 'beside_answer' &&
                 ['waiting', 'answered', 'reviewed'].includes(v.status) &&
                 (logId !== v.id ? (
                   <button

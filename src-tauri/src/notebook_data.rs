@@ -14,7 +14,7 @@ pub fn export(s: &Store, dest: &Path) -> Res<()> {
     {
         return Err("Save the export outside the notebook.".into());
     }
-    let tmp = parent.join(format!(".sumi-{}.partial", id()));
+    let tmp = parent.join(format!(".beside-{}.partial", id()));
     let result = (|| {
         use std::os::unix::fs::OpenOptionsExt;
         let file = fs::OpenOptions::new()
@@ -87,7 +87,7 @@ pub fn request_removal(s: &Store, a: &Value) -> Res<()> {
     }
     let _lifecycle = s.lifecycle.write().unwrap();
     let _guard = s.edit.lock().unwrap();
-    if !s.root.join(".sumi/owned-history").is_file() {
+    if !s.root.join(".beside/owned-history").is_file() {
         return Err(
             "This folder also belongs to another repository. Choose the notebook files in Finder."
                 .into(),
@@ -105,16 +105,16 @@ pub fn request_removal(s: &Store, a: &Value) -> Res<()> {
         );
     }
     atomic(
-        &s.root.join(".sumi/trash-on-restart"),
+        &s.root.join(".beside/trash-on-restart"),
         b"Move notebook to Trash",
     )
 }
 pub fn finish_removal(root: &Path) -> Res<()> {
-    let flag = root.join(".sumi/trash-on-restart");
+    let flag = root.join(".beside/trash-on-restart");
     if !flag.is_file() {
         return Ok(());
     }
-    if !root.join(".sumi/owned-history").is_file()
+    if !root.join(".beside/owned-history").is_file()
         || fs::read(&flag).msg()? != b"Move notebook to Trash"
     {
         return Err("Unreadable notebook removal request.".into());
@@ -122,10 +122,10 @@ pub fn finish_removal(root: &Path) -> Res<()> {
     // Clear the flag before moving so restoring the notebook from Trash is safe.
     fs::remove_file(&flag).msg()?;
     extern "C" {
-        fn sumi_trash(path: *const std::ffi::c_char) -> i32;
+        fn beside_trash(path: *const std::ffi::c_char) -> i32;
     }
     let path = CString::new(root.as_os_str().as_encoded_bytes()).msg()?;
-    if unsafe { sumi_trash(path.as_ptr()) } == 0 {
+    if unsafe { beside_trash(path.as_ptr()) } == 0 {
         return Err("Could not move the notebook to Trash. The folder is still in place.".into());
     }
     Ok(())
@@ -342,10 +342,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let s = Store::with_key(temp.path().join("book"), &[1; 32]).unwrap();
         crate::app::setup(&s).unwrap();
-        fs::write(s.root.join(".sumi/runtime.key"), "private material").unwrap();
+        fs::write(s.root.join(".beside/runtime.key"), "private material").unwrap();
         fs::write(s.root.join("desk/test.md"), "My pencil sketch").unwrap();
         std::os::unix::fs::symlink(
-            s.root.join(".sumi/runtime.key"),
+            s.root.join(".beside/runtime.key"),
             s.root.join("desk/linked.md"),
         )
         .unwrap();
@@ -358,8 +358,8 @@ mod tests {
             .any(|f| f.contains("linked") || f.contains("runtime") || f.contains("key")));
         assert!(export(&s, &s.root.join("book.zip")).is_err());
         assert!(request_removal(&s, &json!({"confirm":"wrong"})).is_err());
-        assert!(!s.root.join(".sumi/trash-on-restart").exists());
+        assert!(!s.root.join(".beside/trash-on-restart").exists());
         request_removal(&s, &json!({"confirm":"Move notebook to Trash"})).unwrap();
-        assert!(s.root.join(".sumi/trash-on-restart").is_file());
+        assert!(s.root.join(".beside/trash-on-restart").is_file());
     }
 }

@@ -2,8 +2,8 @@ use super::*;
 use std::sync::Mutex;
 
 extern "C" {
-    fn sumi_workspace_windows(slot: usize) -> *mut c_char;
-    fn sumi_workspace_available() -> i32;
+    fn beside_workspace_windows(slot: usize) -> *mut c_char;
+    fn beside_workspace_available() -> i32;
 }
 
 struct Snapshot {
@@ -31,14 +31,14 @@ pub fn refresh(s: &Store, slot: usize) -> bool {
         clear();
         return false;
     }
-    let p = unsafe { sumi_workspace_windows(slot) };
+    let p = unsafe { beside_workspace_windows(slot) };
     if p.is_null() {
         clear();
         return false;
     }
     let data = unsafe {
         let data = serde_json::from_slice::<Value>(CStr::from_ptr(p).to_bytes());
-        sumi_free(p);
+        beside_free(p);
         data
     };
     let Ok(data) = data else {
@@ -92,7 +92,7 @@ pub fn refresh(s: &Store, slot: usize) -> bool {
 
 pub fn windows(s: &Store) -> Vec<Value> {
     let Ok(c) = config(s) else { return vec![] };
-    if !enabled(&c) || unsafe { sumi_workspace_available() } == 0 {
+    if !enabled(&c) || unsafe { beside_workspace_available() } == 0 {
         return vec![];
     }
     let lock = SNAPSHOT.lock().unwrap();
@@ -121,14 +121,24 @@ pub fn attach(s: &Store, input: &mut Value, question: &str) {
     if rows.is_empty() {
         return;
     }
-    rows.sort_by_cached_key(|r| {
-        let tokens = conversation::words(&format!("{} {} {}", r["app"], r["title"], r["text"]));
-        std::cmp::Reverse((terms.intersection(&tokens).count(), r["front"] == true))
-    });
-    input["open_windows_on_this_mac"] = json!(rows.iter().take(40).enumerate().map(|(i,r)| {
-        let mut w = json!({"app":r["app"],"title":r["title"],"position":if r["front"] == true {"frontmost at sample"} else {"also open"}});
-        if i < 4 {
-            w["excerpt"] = json!(r["text"].as_str().unwrap_or("").chars().take(750).collect::<String>());
+    let mut scored: Vec<(usize, Value)> = rows
+        .drain(..)
+        .map(|r| {
+            let tokens = conversation::words(&format!("{} {} {}", r["app"], r["title"], r["text"]));
+            (terms.intersection(&tokens).count(), r)
+        })
+        .collect();
+    scored.sort_by(|a, b| (b.0, b.1["front"] == true).cmp(&(a.0, a.1["front"] == true)));
+    let mut matched_excerpts = 0usize;
+    input["open_windows_on_this_mac"] = json!(scored.into_iter().take(12).map(|(overlap, r)| {
+        let front = r["front"] == true;
+        let mut w = json!({"app":r["app"],"title":r["title"],"position":if front {"frontmost at sample"} else {"also open"}});
+        let include_excerpt = front || (overlap > 0 && matched_excerpts < 2);
+        if include_excerpt {
+            if !front {
+                matched_excerpts += 1;
+            }
+            w["excerpt"] = json!(r["text"].as_str().unwrap_or("").chars().take(420).collect::<String>());
             w["readAt"] = r["readAt"].clone();
         }
         w

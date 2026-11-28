@@ -99,7 +99,8 @@ async fn notebook(
             return Ok(serde_json::Value::Null);
         }
         if operation == "activitySize" && window.label() == "activity" {
-            size_assistant(&window, args["compact"] == true, args["height"].as_i64().unwrap_or(160).clamp(120, 512) as i32, false)?;
+            let animate = args["instant"] != true;
+            size_assistant(&window, args["compact"] == true, args["height"].as_i64().unwrap_or(160).clamp(120, 512) as i32, false, animate)?;
             return Ok(serde_json::Value::Null);
         }
         if operation == "dragAssistant" && window.label() == "activity" {
@@ -211,15 +212,16 @@ fn size_assistant(
     compact: bool,
     height: i32,
     initial: bool,
+    animate: bool,
 ) -> Res<()> {
     extern "C" {
-        fn sumi_size_panel(window: *mut std::ffi::c_void, layout: i32, initial: bool);
+        fn beside_size_panel(window: *mut std::ffi::c_void, layout: i32, initial: bool, animate: bool);
     }
     let window = w.clone();
     w.run_on_main_thread(move || {
         if let Ok(ptr) = window.ns_window() {
             let layout = if compact { 0 } else { height };
-            unsafe { sumi_size_panel(ptr, layout, initial) };
+            unsafe { beside_size_panel(ptr, layout, initial, animate) };
         }
     })
     .msg()
@@ -235,8 +237,8 @@ static PANEL_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static PANEL_PRESENTATION: Mutex<Option<serde_json::Value>> = Mutex::new(None);
 fn reveal_activity_sheet(window: &tauri::WebviewWindow, id: u64) -> Res<()> {
     extern "C" {
-        fn sumi_cover_panel(window: *mut std::ffi::c_void);
-        fn sumi_reveal_after_paint(window: *mut std::ffi::c_void);
+        fn beside_cover_panel(window: *mut std::ffi::c_void);
+        fn beside_reveal_after_paint(window: *mut std::ffi::c_void);
     }
     let panel = window.clone();
     window.run_on_main_thread(move || {
@@ -244,22 +246,22 @@ fn reveal_activity_sheet(window: &tauri::WebviewWindow, id: u64) -> Res<()> {
         if pending.as_ref().and_then(|p| p["id"].as_u64()) == Some(id) {
             pending.take();
             let Ok(ptr) = panel.ns_window() else { return };
-            unsafe { sumi_cover_panel(ptr) };
+            unsafe { beside_cover_panel(ptr) };
             let _ = panel.show();
             let _ = panel.set_focus();
-            unsafe { sumi_reveal_after_paint(ptr) };
+            unsafe { beside_reveal_after_paint(ptr) };
         }
     }).msg()
 }
 fn dismiss_activity_sheet(window: &tauri::WebviewWindow) -> Res<()> {
-    extern "C" { fn sumi_dismiss_panel(window: *mut std::ffi::c_void); }
+    extern "C" { fn beside_dismiss_panel(window: *mut std::ffi::c_void); }
     PANEL_PRESENTATION.lock().unwrap().take();
     point::dismiss();
     overlay::clear();
     let panel = window.clone();
     window.run_on_main_thread(move || {
         if let Ok(ptr) = panel.ns_window() {
-            unsafe { sumi_dismiss_panel(ptr) };
+            unsafe { beside_dismiss_panel(ptr) };
         } else {
             let _ = panel.hide();
         }
@@ -269,11 +271,18 @@ fn present_activity_sheet(app: &tauri::AppHandle, anchor: serde_json::Value) {
     present_activity_sheet_with_origin(app, anchor, false);
 }
 fn present_activity_sheet_with_origin(app: &tauri::AppHandle, anchor: serde_json::Value, from_service: bool) {
-    extern "C" { fn sumi_prepare_panel(from_service: i32); }
-    unsafe { sumi_prepare_panel(i32::from(from_service)) };
-    let _ = app
-        .state::<Arc<Store>>()
-        .set("activityAnchor", &anchor["id"]);
+    extern "C" { fn beside_prepare_panel(from_service: i32); }
+    unsafe { beside_prepare_panel(i32::from(from_service)) };
+    let store = app.state::<Arc<Store>>().inner().clone();
+    let _ = store.set("activityAnchor", &anchor["id"]);
+    // Warm the bundled local runtime in the background while the user types.
+    tauri::async_runtime::spawn_blocking(move || {
+        if brain::status(&store).is_ok_and(|s| s["mode"] == "local") {
+            if let Some(cfg) = activity::private_model(&store).filter(|cfg| cfg["runtime"] == "Beside") {
+                let _ = bundled::warm(&cfg);
+            }
+        }
+    });
     let existing = app.get_webview_window("activity");
     let request = {
         let mut pending = PANEL_PRESENTATION.lock().unwrap();
@@ -303,7 +312,7 @@ fn present_activity_sheet_with_origin(app: &tauri::AppHandle, anchor: serde_json
     .center()
     .build();
     if let Ok(w) = window {
-        let _ = size_assistant(&w, false, 144, true);
+        let _ = size_assistant(&w, false, 144, true, false);
     }
 }
 fn fresh_sheet(app: &tauri::AppHandle) {
@@ -338,26 +347,22 @@ fn run() -> Res<()> {
     };
     let root = param("--notebook")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            let home = sources::home();
-            let legacy = home.join("Sumi");
-            if legacy.join(".sumi/moments.db").is_file() { legacy } else { home.join("Beside") }
-        });
+        .unwrap_or_else(|| sources::home().join("Beside"));
     if let Some(path) = param("--import-mail-export") {
-        if !root.join(".sumi/moments.db").is_file() { return Err("Open your notebook first.".into()); }
+        if !root.join(".beside/moments.db").is_file() { return Err("Open your notebook first.".into()); }
         let s = Store::open(root)?;
         println!("{}", activity::mail_archive::import(&s, std::path::Path::new(&path))?);
         return Ok(());
     }
     if let Some(topic) = param("--review-suggestion") {
-        if !root.join(".sumi/moments.db").is_file() { return Err("Open your notebook first.".into()); }
+        if !root.join(".beside/moments.db").is_file() { return Err("Open your notebook first.".into()); }
         let s = Store::open(root)?;
         let through = param("--before").map(|v| v.parse::<i64>()).transpose().msg()?.unwrap_or_else(|| chrono::Utc::now().timestamp());
         println!("{}", proactive::review_saved(&s, &topic, through)?);
         return Ok(());
     }
     if args.iter().any(|x| x == "--screen-memory-status") {
-        if !root.join(".sumi/moments.db").is_file() {
+        if !root.join(".beside/moments.db").is_file() {
             return Err("Open your notebook first.".into());
         }
         let s = Store::open(root)?;
@@ -473,7 +478,7 @@ fn run() -> Res<()> {
                     &quit,
                 ],
             )?;
-            TrayIconBuilder::with_id("sumi")
+            TrayIconBuilder::with_id("beside")
                 .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?)
                 .icon_as_template(true)
                 .tooltip("Beside")
@@ -570,7 +575,7 @@ fn run() -> Res<()> {
                         published = next_nudge.clone();
                         let _ = capture_app.emit("proactive-nudge", &next_nudge);
                         if !next_nudge["sourceId"].is_null() {
-                            if let Some(model) = activity::private_model(&capture_db).filter(|m| m["runtime"] == "Sumi") {
+                            if let Some(model) = activity::private_model(&capture_db).filter(|m| m["runtime"] == "Beside") {
                                 std::thread::spawn(move || { let _ = bundled::warm(&model); });
                             }
                         }
@@ -616,7 +621,7 @@ fn run() -> Res<()> {
                         let recording = meetings::control(&capture_db, "status", false)
                             .is_ok_and(|v| v["phase"] == "recording");
                         let _ = end_meeting.set_enabled(recording);
-                        if let Some(tray) = capture_app.tray_by_id("sumi") {
+                        if let Some(tray) = capture_app.tray_by_id("beside") {
                             let state = if suggested {
                                 "Suggestion available"
                             } else if on_demand {
@@ -910,7 +915,7 @@ fn fixture_rpc(root: std::path::PathBuf, agents: bool) -> Res<()> {
                 );
             })
         } else if op == "exportNotebook" {
-            let dest = std::env::temp_dir().join(format!("sumi-export-{}.zip", crate::store::id()));
+            let dest = std::env::temp_dir().join(format!("beside-export-{}.zip", crate::store::id()));
             crate::notebook_data::export(&s, &dest).map(|()| serde_json::json!(dest))
         } else if op == "trashNotebook" {
             Err("Fixture notebooks cannot operate on the Mac Trash.".into())

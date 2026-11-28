@@ -6,7 +6,7 @@ use rusqlite::params;
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
 pub fn directory(s: &Store) -> PathBuf {
-    s.root.join(".sumi/activity-journal")
+    s.root.join(".beside/activity-journal")
 }
 fn day_name(name: &str) -> bool {
     name.strip_suffix(".md")

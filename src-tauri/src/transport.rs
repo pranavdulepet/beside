@@ -71,7 +71,7 @@ pub fn start_socket(s: Arc<Store>) -> Res<()> {
         fs::FileTypeExt,
         net::{UnixListener, UnixStream},
     };
-    let path = s.root.join(".sumi/agent.sock");
+    let path = s.root.join(".beside/agent.sock");
     if let Ok(meta) = std::fs::symlink_metadata(&path) {
         if !meta.file_type().is_socket() {
             return Err("Unexpected file at the notebook socket path.".into());
@@ -113,7 +113,7 @@ fn handle_socket(s: &Store, mut stream: std::os::unix::net::UnixStream) -> Res<(
 pub fn relay(root: &std::path::Path, token: &str) -> Res<bool> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
-    let path = root.join(".sumi/agent.sock");
+    let path = root.join(".beside/agent.sock");
     match UnixStream::connect(&path) {
         Ok(s) => drop(s),
         Err(e)

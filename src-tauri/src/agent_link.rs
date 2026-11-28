@@ -23,7 +23,7 @@ struct Binding {
 }
 
 pub fn notebook_lock(s: &Store) -> Res<fs::File> {
-    let lock = fs::File::open(s.root.join(".sumi")).msg()?;
+    let lock = fs::File::open(s.root.join(".beside")).msg()?;
     lock.lock().msg()?;
     Ok(lock)
 }
@@ -43,7 +43,7 @@ fn server(s: &Store, exe: &Path, secret: &Path) -> Server {
 
 fn credential(s: &Store, spec: &Server) -> Res<PathBuf> {
     let path = PathBuf::from(spec.args.last().ok_or("Missing agent credential path.")?);
-    if path.parent() != Some(s.root.join(".sumi").as_path())
+    if path.parent() != Some(s.root.join(".beside").as_path())
         || !path
             .file_name()
             .and_then(|n| n.to_str())
@@ -206,11 +206,11 @@ fn get_binding(s: &Store, agent: &Value, userhome: &Path, exe: &Path) -> Res<Bin
     let id = ident(agent["id"].as_str().unwrap_or(""))?;
     Ok(Binding {
         config: seal::config_path(userhome, name)?,
-        slot: "sumi".into(),
+        slot: "beside".into(),
         server: server(
             s,
             exe,
-            &s.root.join(".sumi").join(format!("agent-{id}.token")),
+            &s.root.join(".beside").join(format!("agent-{id}.token")),
         ),
         previous: None,
     })
@@ -226,7 +226,7 @@ fn unused_slot(config: &Config, preferred: &str, binding: &Binding) -> String {
         return preferred.into();
     }
     (2..)
-        .map(|i| format!("sumi-{i}"))
+        .map(|i| format!("beside-{i}"))
         .find(|slot| available(slot))
         .unwrap()
 }
@@ -294,7 +294,7 @@ pub fn connect(s: &Store, name: &str, userhome: &Path, exe: &Path) -> Res<Value>
             old_path
         } else {
             s.root
-                .join(".sumi")
+                .join(".beside")
                 .join(format!("agent-{key}-{}.token", id()))
         };
         link.previous = (!fresh).then_some(previous);

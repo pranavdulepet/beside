@@ -12,7 +12,7 @@ guard args.count == 2 || (args.count == 3 && args.last == "--initialize") else {
     fail("Usage: swift scripts/sign-catalog.swift payload.json models.json [--initialize]")
 }
 let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-    kSecAttrService as String: "studio.sumi.release.catalog", kSecAttrAccount as String: "publisher"]
+    kSecAttrService as String: "studio.beside.release.catalog", kSecAttrAccount as String: "publisher"]
 var result: CFTypeRef?
 var lookup = base
 lookup[kSecReturnData as String] = true

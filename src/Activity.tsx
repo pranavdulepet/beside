@@ -1324,7 +1324,7 @@ function PublicLookup({
     </form>
   );
 }
-const CHAT_STORAGE_KEY = 'sumi.floating.chats';
+const CHAT_STORAGE_KEY = 'beside.floating.chats';
 type SavedChat = {
   id: string;
   title: string;
@@ -1437,6 +1437,37 @@ export function ActivitySheet({
   if (close && turns.length) transientTurns.current = turns;
   const presentation = useRef(0);
   const awaitingContext = useRef(false);
+  const streamBuffer = useRef('');
+  const streamFrame = useRef<number | null>(null);
+  const stickyBottom = useRef(true);
+  const busyRef = useRef(false);
+  busyRef.current = busy;
+  const panelHeight = useRef(0);
+  function resetStream() {
+    if (streamFrame.current !== null) {
+      window.cancelAnimationFrame(streamFrame.current);
+      streamFrame.current = null;
+    }
+    streamBuffer.current = '';
+    stream('');
+  }
+  function appendStream(delta: string) {
+    if (!delta) return;
+    streamBuffer.current += delta;
+    if (streamFrame.current !== null) return;
+    streamFrame.current = window.requestAnimationFrame(() => {
+      streamFrame.current = null;
+      const chunk = streamBuffer.current;
+      streamBuffer.current = '';
+      if (chunk) stream(v => v + chunk);
+    });
+  }
+  useEffect(() => () => {
+    if (streamFrame.current !== null) {
+      window.cancelAnimationFrame(streamFrame.current);
+      streamFrame.current = null;
+    }
+  }, []);
   function persist(op: string, args: Row) {
     const request = writes.current.catch(() => {}).then(() => call(op, args));
     writes.current = request;
@@ -1497,7 +1528,7 @@ export function ActivitySheet({
     setSelection('');
     notify(message || '');
     sequence.current++;
-    stream('');
+    resetStream();
     pending('');
     set([]);
     activeChatId.current = crypto.randomUUID();
@@ -1524,7 +1555,7 @@ export function ActivitySheet({
     const revision = ++sequence.current;
     set([]);
     setChats([]);
-    stream('');
+    resetStream();
     pending('');
     setPreview(null);
     setNudge(null);
@@ -1575,7 +1606,7 @@ export function ActivitySheet({
     fail('');
     open('');
     sequence.current++;
-    stream('');
+    resetStream();
     pending('');
     activeChatId.current = chat.id;
     setChatId(chat.id);
@@ -1723,7 +1754,7 @@ export function ActivitySheet({
           'activity-delta',
           e => {
             if (live && n === sequence.current && e.payload.turn === intent.id)
-              stream(v => v + e.payload.delta);
+              appendStream(e.payload.delta);
           },
         ).catch(() => () => {});
         const response = await call('draftMessageReply', {id: intent.id});
@@ -1737,7 +1768,7 @@ export function ActivitySheet({
         off?.();
         if (live && n === sequence.current) {
           pending('');
-          stream('');
+          resetStream();
         }
       }
     }
@@ -1949,8 +1980,14 @@ export function ActivitySheet({
   }, [turns, chatId, close]);
   useEffect(() => {
     if (!turns.length && !busy && !partial) return;
-    const scroller = sheet.current?.querySelector<HTMLElement>('.sheet-content');
-    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    if (!stickyBottom.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      const scroller = sheet.current?.querySelector<HTMLElement>('.sheet-content');
+      if (scroller && stickyBottom.current) {
+        scroller.scrollTop = scroller.scrollHeight;
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [turns.length, busy, partial]);
   const [copiedTurn, setCopiedTurn] = useState<number | null>(null);
   async function submitTyped() {
@@ -1994,7 +2031,8 @@ export function ActivitySheet({
     setPreview(null);
     setPhase(forceWeb || publicQuery ? 'web' : target ? 'capturing' : 'thinking');
     let off: (() => void) | undefined;
-    stream('');
+    stickyBottom.current = true;
+    resetStream();
     notify('');
     pending(q);
     write('');
@@ -2014,8 +2052,19 @@ export function ActivitySheet({
         }
         return;
       }
+      const needsRecallPreview =
+        seenAt !== undefined ||
+        /\b(just (?:looking at|doing|on my screen|looked at|look at|read|see|saw)|was on my screen|last screen|was just reading|what (?:am i|are we) (?:looking at|reading|viewing|working on)|what(?:'s|’s| is) (?:currently )?(?:on (?:my|the) screen|in (?:this|the current) window))\b/i.test(
+          q,
+        );
       const passage =
-        forceWeb || prior?.awaitingSearchTopic || related || selectedText || target || publicQuery
+        !needsRecallPreview ||
+        forceWeb ||
+        prior?.awaitingSearchTopic ||
+        related ||
+        selectedText ||
+        target ||
+        publicQuery
           ? null
           : await call('activityRecallPreview', {
               text: q,
@@ -2037,8 +2086,8 @@ export function ActivitySheet({
           else if (e.payload.phase === 'capturing') setPhase('capturing');
           else if (e.payload.phase === 'thinking') setPhase('thinking');
           else if (e.payload.delta) {
-            setPhase('streaming');
-            stream(v => v + e.payload.delta);
+            setPhase(p => (p === 'streaming' ? p : 'streaming'));
+            appendStream(e.payload.delta);
           }
         },
       ).catch(() => () => {});
@@ -2093,7 +2142,7 @@ export function ActivitySheet({
     } finally {
       off?.();
       if (n === sequence.current) {
-        stream('');
+        resetStream();
         setPhase('idle');
         setPreview(null);
         pending('');
@@ -2265,50 +2314,58 @@ export function ActivitySheet({
   useEffect(() => {
     if (close) return;
     if (tab !== 'ask' && tab !== 'suggestion') {
-      void call('activitySize', {compact: false, height: 512}).catch(e =>
+      panelHeight.current = 512;
+      void call('activitySize', {compact: false, height: 512, instant: false}).catch(e =>
         fail(String(e)),
       );
       return;
     }
     const root = sheet.current;
     if (!root) return;
-    let timer: number;
-    let previous = 0;
-    const measure = () => {
+    let timer = 0;
+    let frame = 0;
+    const measure = (instant: boolean) => {
       const blocks = root.querySelectorAll<HTMLElement>(
         '.assistant-bar, .recording-stop, .answer-content, .screen-composer',
       );
-      const height = Math.min(
-        512,
-        Math.max(
-          120,
-          Math.ceil(
-            Array.from(blocks).reduce(
-              (total, el) => total + el.offsetHeight,
-              16,
-            ) / 8,
-          ) * 8,
-        ),
+      const raw = Array.from(blocks).reduce(
+        (total, el) => total + el.offsetHeight,
+        16,
       );
-      if (height === previous) return;
-      previous = height;
-      void call('activitySize', {compact: false, height}).catch(e =>
+      const step = instant ? 32 : 8;
+      let height = Math.min(512, Math.max(120, Math.ceil(raw / step) * step));
+      // Never shrink mid-stream so swapping from Thinking to streamed text stays rock-steady.
+      if (busyRef.current && panelHeight.current > 0) {
+        height = Math.max(height, panelHeight.current);
+      }
+      if (height === panelHeight.current) return;
+      panelHeight.current = height;
+      void call('activitySize', {compact: false, height, instant}).catch(e =>
         fail(String(e)),
       );
     };
     const observer = new ResizeObserver(() => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(measure, 70);
+      if (busyRef.current) {
+        if (frame) return;
+        frame = window.requestAnimationFrame(() => {
+          frame = 0;
+          measure(true);
+        });
+      } else {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => measure(false), 70);
+      }
     });
     root
       .querySelectorAll(
         '.assistant-bar, .recording-stop, .answer-content, .screen-composer',
       )
       .forEach(el => observer.observe(el));
-    measure();
+    measure(busyRef.current);
     return () => {
       observer.disconnect();
       window.clearTimeout(timer);
+      if (frame) window.cancelAnimationFrame(frame);
     };
   }, [tab, close, meeting.phase, firstLaunch]);
   return (
@@ -2439,7 +2496,14 @@ export function ActivitySheet({
           </button>
         </nav>
       )}
-      <div className="sheet-content" key={tab}>
+      <div
+        className="sheet-content"
+        key={tab}
+        onScroll={e => {
+          const el = e.currentTarget;
+          stickyBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+        }}
+      >
         <div className="answer-content">
           {nudge && !firstLaunch && !busy && (tab === 'suggestion' || (tab === 'journal' && !source && inspectedTurn === null) || (tab === 'ask' && !turns.length && !text && !selection)) && (
             <aside className="nudge-banner" aria-label="Proactive suggestion">
@@ -2898,16 +2962,65 @@ export function ActivitySheet({
                   Clear conversation
                 </button>
               )}
-              {busy && !messageIntent?.incoming && (
-                <p className="pending-question asked">{pendingQuestion}</p>
+              {busy && (
+                <article className="activity-turn activity-turn-live">
+                  {!messageIntent?.incoming && (
+                    <p className="pending-question asked">{pendingQuestion}</p>
+                  )}
+                  {close && messageIntent?.incoming && (
+                    <blockquote>{messageIntent.incoming}</blockquote>
+                  )}
+                  {messageIntent?.status && (
+                    <p role="status">{messageIntent.status}</p>
+                  )}
+                  {messageIntent?.needsAccess && (
+                    <section>
+                      <p>
+                        Beside couldn’t tell who wrote the visible texts. Keep the
+                        conversation title and a received message in view, then
+                        press ⌥⇧Space. Accessibility can also provide the sender
+                        labels.
+                      </p>
+                      <button
+                        onClick={() =>
+                          call('activityPermission', {kind: 'sites'}).catch(e =>
+                            fail(String(e)),
+                          )
+                        }
+                      >
+                        Allow Messages reading in macOS
+                      </button>
+                    </section>
+                  )}
+                  {preview && (
+                    <section
+                      className="recall-preview"
+                      aria-label="Saved screen passage"
+                    >
+                      <small>
+                        {preview.title}{preview.stamp ? ` · ${when(preview.stamp)}` : ''}
+                      </small>
+                      {preview.quote && <blockquote>{preview.quote}</blockquote>}
+                    </section>
+                  )}
+                  {partial ? (
+                    <div className="assistant-stream">
+                      <Reply text={partial} />
+                    </div>
+                  ) : (
+                    <LiveStatus mark={capture?.mark}
+                      phase={phase === 'idle' ? 'thinking' : phase}
+                    />
+                  )}
+                </article>
               )}
-              {close && messageIntent?.incoming && (
+              {!busy && close && messageIntent?.incoming && (
                 <blockquote>{messageIntent.incoming}</blockquote>
               )}
-              {messageIntent?.status && (
+              {!busy && messageIntent?.status && (
                 <p role="status">{messageIntent.status}</p>
               )}
-              {messageIntent?.needsAccess && (
+              {!busy && messageIntent?.needsAccess && (
                 <section>
                   <p>
                     Beside couldn’t tell who wrote the visible texts. Keep the
@@ -2925,28 +3038,6 @@ export function ActivitySheet({
                     Allow Messages reading in macOS
                   </button>
                 </section>
-              )}
-              {busy && preview && (
-                <section
-                  className="recall-preview"
-                  aria-label="Saved screen passage"
-                >
-                  <small>
-                    {preview.title}{preview.stamp ? ` · ${when(preview.stamp)}` : ''}
-                  </small>
-                  {preview.quote && <blockquote>{preview.quote}</blockquote>}
-                </section>
-              )}
-              {busy && partial && (
-                <div className="assistant-stream">
-                  <Reply text={partial} />
-                </div>
-              )}
-
-              {busy && !partial && (
-                <LiveStatus mark={capture?.mark}
-                  phase={phase === 'idle' ? 'thinking' : phase}
-                />
               )}
               {!busy && !turns.length && selection && canReplyToSelection && !provider && (
                 <button

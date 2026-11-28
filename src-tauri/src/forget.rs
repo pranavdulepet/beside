@@ -45,7 +45,7 @@ pub fn recover(s: &Store) -> Res<()> {
 pub fn source(s: &Store, source: &str) -> Res<()> {
     let _guard = s.lifecycle.write().unwrap();
     let _edit = s.edit.lock().unwrap();
-    let state = s.root.join(".sumi");
+    let state = s.root.join(".beside");
     let backup = state.join("forget-old-git");
     let staging = state.join("forget-replacement");
     if !state.join("owned-history").is_file() {
@@ -111,7 +111,7 @@ pub fn source(s: &Store, source: &str) -> Res<()> {
         if tracked.lines().any(|name| {
             name != ".gitignore" && !known.iter().any(|p| p == std::path::Path::new(name))
         }) || scroll::git(&s.root, &["show", "-s", "--format=%ae", sha])?.trim()
-            != "local@sumi.invalid"
+            != "local@beside.invalid"
         {
             s.set("forgetPending", &Value::Null)?;
             return Err("This notebook includes separately authored Git history. Its owner must review that history before it is rewritten.".into());

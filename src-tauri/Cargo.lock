@@ -282,6 +282,41 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
+name = "beside"
+version = "1.4.15"
+dependencies = [
+ "base64 0.22.1",
+ "cc",
+ "chrono",
+ "dom_query 0.29.0",
+ "hex",
+ "mailparse",
+ "notify",
+ "quick-xml 0.41.0",
+ "rand",
+ "regex",
+ "rfd",
+ "ring",
+ "rusqlite",
+ "security-framework",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlite-vec",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-global-shortcut",
+ "tempfile",
+ "tiny_http",
+ "toml_edit 0.22.27",
+ "ureq",
+ "url",
+ "uuid",
+ "walkdir",
+ "zip",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4009,41 +4044,6 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
-
-[[package]]
-name = "sumi"
-version = "1.4.14"
-dependencies = [
- "base64 0.22.1",
- "cc",
- "chrono",
- "dom_query 0.29.0",
- "hex",
- "mailparse",
- "notify",
- "quick-xml 0.41.0",
- "rand",
- "regex",
- "rfd",
- "ring",
- "rusqlite",
- "security-framework",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sqlite-vec",
- "tauri",
- "tauri-build",
- "tauri-plugin-global-shortcut",
- "tempfile",
- "tiny_http",
- "toml_edit 0.22.27",
- "ureq",
- "url",
- "uuid",
- "walkdir",
- "zip",
-]
 
 [[package]]
 name = "swift-rs"

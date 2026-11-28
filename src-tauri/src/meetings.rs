@@ -8,9 +8,9 @@ use std::{
 };
 
 extern "C" {
-    fn sumi_meeting(operation: *const c_char, path: *const c_char, mic: i32) -> *mut c_char;
-    fn sumi_meeting_transcript(path: *const c_char) -> *mut c_char;
-    fn sumi_free(value: *mut c_char);
+    fn beside_meeting(operation: *const c_char, path: *const c_char, mic: i32) -> *mut c_char;
+    fn beside_meeting_transcript(path: *const c_char) -> *mut c_char;
+    fn beside_free(value: *mut c_char);
 }
 
 fn decoded(ptr: *mut c_char) -> Res<Value> {
@@ -19,12 +19,12 @@ fn decoded(ptr: *mut c_char) -> Res<Value> {
     }
     unsafe {
         let value = serde_json::from_slice(CStr::from_ptr(ptr).to_bytes()).msg();
-        sumi_free(ptr);
+        beside_free(ptr);
         value
     }
 }
 fn directory(s: &Store) -> PathBuf {
-    s.root.join(".sumi/meetings")
+    s.root.join(".beside/meetings")
 }
 
 pub fn control(s: &Store, op: &str, mic: bool) -> Res<Value> {
@@ -41,7 +41,7 @@ pub fn control(s: &Store, op: &str, mic: bool) -> Res<Value> {
     }
     let path = CString::new(file.as_os_str().as_encoded_bytes()).msg()?;
     let operation = CString::new(op).msg()?;
-    let mut v = decoded(unsafe { sumi_meeting(operation.as_ptr(), path.as_ptr(), mic as i32) })?;
+    let mut v = decoded(unsafe { beside_meeting(operation.as_ptr(), path.as_ptr(), mic as i32) })?;
     v["latest"] = json!(latest(s).and_then(|p| p.file_name()?.to_str().map(str::to_owned)));
     Ok(v)
 }
@@ -77,7 +77,7 @@ pub fn notes(s: &Store) -> Res<Value> {
     let model =
         crate::activity::private_model(s).ok_or("Connect a local model for meeting notes.")?;
     let path = CString::new(file.as_os_str().as_encoded_bytes()).msg()?;
-    let transcript = decoded(unsafe { sumi_meeting_transcript(path.as_ptr()) })?;
+    let transcript = decoded(unsafe { beside_meeting_transcript(path.as_ptr()) })?;
     if let Some(error) = transcript["error"].as_str() {
         return Err(error.into());
     }

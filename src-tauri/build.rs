@@ -16,7 +16,7 @@ fn main() {
         .file("overlay.m")
         .flag("-fobjc-arc")
         .flag("-Wno-incompatible-pointer-types")
-        .compile("sumi_native");
+        .compile("beside_native");
     for name in [
         "Foundation",
         "EventKit",

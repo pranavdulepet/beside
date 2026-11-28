@@ -56,7 +56,7 @@ test('forgetting Notes and Mail removes their quotes from the current chat and k
       {id:'own',question:'Picnic planning',answer:keep,sources:[],epoch},
       {id:'mail',question:'Which entrance?',answer:arrival,quote:arrival,quoteTitle:'Arrival',sources:[],workKind:'passage',epoch},
     ]};
-    await page.evaluate(old => localStorage.setItem('sumi.floating.chats',JSON.stringify([old])), chat);
+    await page.evaluate(old => localStorage.setItem('beside.floating.chats',JSON.stringify([old])), chat);
     await page.reload();
     await page.getByRole('button', {name:'What Beside knows'}).click();
     await nav.getByRole('button', {name:'History'}).click();

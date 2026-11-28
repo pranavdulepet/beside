@@ -323,7 +323,7 @@ static NSDictionary *pick_target_window(void) {
     return nil;
 }
 
-extern BOOL sumi_overlay_allowed(const char *raw, NSString *bundle);
+extern BOOL beside_overlay_allowed(const char *raw, NSString *bundle);
 
 static BOOL matches_owner(NSDictionary *owner) {
     if (![owner isKindOfClass:NSDictionary.class]) return NO;
@@ -347,7 +347,7 @@ int beside_window_current(const char *json) {
 char *beside_capture_front_elements(const char *settings) {
     @autoreleasepool {
         NSDictionary *target = pick_target_window();
-        if (!target || !sumi_overlay_allowed(settings,target[@"bundle"])) return strdup("{\"elements\":[]}");
+        if (!target || !beside_overlay_allowed(settings,target[@"bundle"])) return strdup("{\"elements\":[]}");
 
         pid_t pid = [target[@"pid"] intValue];
         CGWindowID wid = [target[@"wid"] unsignedIntValue];
@@ -395,7 +395,7 @@ char *beside_capture_front_elements(const char *settings) {
                 @"h": @(round(frame.size.height))
             }
         }];
-        if (!matches_owner(result) || !sumi_overlay_allowed(settings,bundle)) return strdup("{\"elements\":[]}");
+        if (!matches_owner(result) || !beside_overlay_allowed(settings,bundle)) return strdup("{\"elements\":[]}");
         if (pixels.length) result[@"image"]=pixels;
         if (!AXIsProcessTrusted()) result[@"needsAccessibility"] = @YES;
 
@@ -443,7 +443,7 @@ static void clear_overlay_main(void) {
     }
 }
 
-void sumi_overlay_clear(void) {
+void beside_overlay_clear(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         clear_overlay_main();
     });
@@ -468,7 +468,7 @@ static void install_click_monitor_main(uint64_t gen) {
         CGPoint clicked = CGEventGetLocation(event.CGEvent);
         dispatch_async(dispatch_get_main_queue(), ^{
             if (overlayGeneration != gen || NSIsEmptyRect(activeGlobalTarget)) return;
-            if (!matches_owner(overlayOwner) || !sumi_overlay_allowed(overlaySettings.UTF8String,overlayOwner[@"bundle"])) {clear_overlay_main(); return;}
+            if (!matches_owner(overlayOwner) || !beside_overlay_allowed(overlaySettings.UTF8String,overlayOwner[@"bundle"])) {clear_overlay_main(); return;}
             NSPoint clickLoc = NSMakePoint(clicked.x,NSScreen.screens.firstObject.frame.size.height-clicked.y);
             NSRect hitZone = activeGlobalTarget;
             if (!NSPointInRect(clickLoc, hitZone)) return;
@@ -518,7 +518,7 @@ static void render_step_main(
     NSUInteger stepNum,
     NSUInteger totalSteps
 ) {
-    if (!matches_owner(overlayOwner) || !sumi_overlay_allowed(overlaySettings.UTF8String,overlayOwner[@"bundle"])) {clear_overlay_main(); return;}
+    if (!matches_owner(overlayOwner) || !beside_overlay_allowed(overlaySettings.UTF8String,overlayOwner[@"bundle"])) {clear_overlay_main(); return;}
     CGRect safe=[pick_target_window()[@"frame"] rectValue];
     if (!CGRectContainsRect(safe,CGRectMake(qx,qy,qw,qh))) {clear_overlay_main(); return;}
     overlayGeneration++;
@@ -726,7 +726,7 @@ static void render_step_main(
     );
 }
 
-void sumi_overlay_highlight_steps(const char *stepsJson) {
+void beside_overlay_highlight_steps(const char *stepsJson) {
     if (!stepsJson) return;
     NSData *data = [NSData dataWithBytes:stepsJson length:strlen(stepsJson)];
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -739,7 +739,7 @@ void sumi_overlay_highlight_steps(const char *stepsJson) {
         overlaySettings=[[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:request[@"config"] options:0 error:nil] encoding:NSUTF8StringEncoding];
         ownerTimer=[NSTimer scheduledTimerWithTimeInterval:0.20 repeats:YES block:^(NSTimer *timer) {
             (void)timer;
-            if (!matches_owner(overlayOwner) || !sumi_overlay_allowed(overlaySettings.UTF8String,overlayOwner[@"bundle"])) clear_overlay_main();
+            if (!matches_owner(overlayOwner) || !beside_overlay_allowed(overlaySettings.UTF8String,overlayOwner[@"bundle"])) clear_overlay_main();
         }];
         walkthroughSteps = parsed;
         walkthroughIndex = 0;

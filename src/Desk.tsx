@@ -462,14 +462,14 @@ export function Desk({
               <p>
                 {t.timeline?.length
                   ? 'Quoted from your notebook'
-                  : (t.runtime === 'Sumi' ? 'Beside' : t.runtime) + ' · ' + t.model}
+                  : t.runtime + ' · ' + t.model}
               </p>
               {t.selector &&
                 (t.timeline?.length > 0 ||
                   t.selector !== t.model ||
                   t.selectorRuntime !== t.runtime) && (
                   <p>
-                    Selected by {t.selectorRuntime === 'Sumi' ? 'Beside' : t.selectorRuntime} · {t.selector}
+                    Selected by {t.selectorRuntime} · {t.selector}
                   </p>
                 )}
               {t.rules.map((r: string) => (

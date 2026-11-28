@@ -7,8 +7,8 @@ use std::{
 };
 
 extern "C" {
-    fn sumi_message_context() -> *mut c_char;
-    fn sumi_free(value: *mut c_char);
+    fn beside_message_context() -> *mut c_char;
+    fn beside_free(value: *mut c_char);
 }
 
 struct Pending {
@@ -86,13 +86,13 @@ pub fn capture(s: &Store) -> Res<bool> {
     if !permitted(s)? {
         return Ok(false);
     }
-    let pointer = unsafe { sumi_message_context() };
+    let pointer = unsafe { beside_message_context() };
     if pointer.is_null() {
         return Ok(false);
     }
     let row: Value = unsafe {
         let data = serde_json::from_slice(CStr::from_ptr(pointer).to_bytes());
-        sumi_free(pointer);
+        beside_free(pointer);
         data.msg()?
     };
     let context = row["turns"]
@@ -158,7 +158,7 @@ pub fn draft(s: &Store, id: &str, sink: &mut dyn FnMut(&str)) -> Res<Value> {
             sink(v)
         }
     };
-    let inkling = model["runtime"] == "Sumi"
+    let inkling = model["runtime"] == "Beside"
         && model["name"]
             .as_str()
             .is_some_and(|name| name.to_ascii_lowercase().starts_with("inkling-2-mini"));

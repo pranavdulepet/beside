@@ -121,7 +121,7 @@ export function Models({
         <div className="row" key={m.name}>
           <span className="model-meta">
             <span className="perm-name">{m.name}</span>
-            <small>via {m.runtime === 'Sumi' ? 'Beside' : m.runtime || 'Local'}</small>
+            <small>via {m.runtime || 'Local'}</small>
           </span>
           <span className="perm-badge granted">✓ Active</span>
         </div>
@@ -139,7 +139,7 @@ export function Models({
                 <div className="row" key={m.name}>
                   <span className="model-meta">
                     <span className="perm-name">{m.name}</span>
-                    <small>via {m.runtime === 'Sumi' ? 'Beside' : m.runtime || 'Local'}</small>
+                    <small>via {m.runtime || 'Local'}</small>
                   </span>
                   <button
                     type="button"

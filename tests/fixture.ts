@@ -10,7 +10,7 @@ export async function fixtureNotebook(
   existingFolder?: string,
   event?: (message: any) => void,
 ) {
-  const folder = existingFolder ?? (await mkdtemp(join(tmpdir(), 'sumi-ui-')));
+  const folder = existingFolder ?? (await mkdtemp(join(tmpdir(), 'beside-ui-')));
   if (datedHistory) {
     await mkdir(join(folder, 'scroll'), {recursive: true});
     await writeFile(join(folder, 'scroll/deciding.md'), datedHistory.markdown);
@@ -20,7 +20,7 @@ export async function fixtureNotebook(
     );
   }
   const core = spawn(
-    'src-tauri/target/debug/sumi',
+    'src-tauri/target/debug/beside',
     [
       '--fixture-rpc',
       '--notebook',

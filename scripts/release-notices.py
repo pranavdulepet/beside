@@ -22,7 +22,7 @@ def include(package, folder, extra=()):
 
 for package in sorted(metadata["packages"], key=lambda p: (p["name"], p["version"])):
     name, version = package["name"], package["version"]
-    if name == "sumi":
+    if name == "beside":
         continue
     label = f"{name} {version}"
     index.append(f"{label}  {package['license'] or package['license_file']}  https://crates.io/crates/{name}/{version}")

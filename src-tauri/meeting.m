@@ -5,7 +5,7 @@
 
 // All recorder state and picker callbacks are serialized on the main queue.
 API_AVAILABLE(macos(15.0))
-@interface SumiMeeting : NSObject <SCContentSharingPickerObserver, SCStreamDelegate, SCRecordingOutputDelegate>
+@interface BesideMeeting : NSObject <SCContentSharingPickerObserver, SCStreamDelegate, SCRecordingOutputDelegate>
 @property(nonatomic, copy) NSString *phase, *issue;
 @property(nonatomic, strong) NSURL *destination;
 @property BOOL microphone;
@@ -13,7 +13,7 @@ API_AVAILABLE(macos(15.0))
 @property(nonatomic, strong) SCRecordingOutput *output;
 @end
 
-@implementation SumiMeeting
+@implementation BesideMeeting
 - (void)end:(NSString *)error {
     SCContentSharingPicker *picker = SCContentSharingPicker.sharedPicker;
     [picker removeObserver:self];
@@ -44,7 +44,7 @@ API_AVAILABLE(macos(15.0))
     SCContentSharingPickerConfiguration *configuration = [SCContentSharingPickerConfiguration new];
     configuration.allowedPickerModes = SCContentSharingPickerModeSingleWindow;
     configuration.allowsChangingSelectedContent = NO;
-    configuration.excludedBundleIDs = @[NSBundle.mainBundle.bundleIdentifier ?: @"studio.sumi.notebook"];
+    configuration.excludedBundleIDs = @[NSBundle.mainBundle.bundleIdentifier ?: @"studio.beside.notebook"];
     picker.defaultConfiguration = configuration;
     [picker addObserver:self];
     picker.active = YES;
@@ -119,13 +119,13 @@ API_AVAILABLE(macos(15.0))
 }
 @end
 
-char *sumi_meeting(const char *operation, const char *path, int mic) {
+char *beside_meeting(const char *operation, const char *path, int mic) {
     @autoreleasepool {
         __block NSDictionary *result = @{@"phase":@"unavailable"};
         if (@available(macOS 15.0, *)) {
             void (^work)(void) = ^{
-                static SumiMeeting *meeting;
-                if (!meeting) meeting = [SumiMeeting new];
+                static BesideMeeting *meeting;
+                if (!meeting) meeting = [BesideMeeting new];
                 if (!strcmp(operation, "start") && (!meeting.phase || [meeting.phase isEqual:@"idle"] || [meeting.phase isEqual:@"failed"])) {
                     [meeting begin:[NSURL fileURLWithPath:@(path)] mic:mic != 0];
                 } else if (!strcmp(operation, "stop")) [meeting stop];
@@ -139,7 +139,7 @@ char *sumi_meeting(const char *operation, const char *path, int mic) {
 }
 
 // The request is local-only, including when no language pack is installed.
-char *sumi_meeting_transcript(const char *path) {
+char *beside_meeting_transcript(const char *path) {
     @autoreleasepool {
         dispatch_semaphore_t permission = dispatch_semaphore_create(0);
         __block BOOL granted = NO;

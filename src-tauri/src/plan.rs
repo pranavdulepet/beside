@@ -464,7 +464,7 @@ mod tests {
             json!({"section":"people"}),
         ] {
             assert!(!usable(&plan, &private));
-            assert!(usable(&json!({"runtime":"Sumi"}), &private));
+            assert!(usable(&json!({"runtime":"Beside"}), &private));
         }
         assert!(clean(&json!({"examples":[{"reply":"password=private-example"}]})).is_err());
         assert!(!clean(&json!({"text":"Send it to sample@example.org"}))

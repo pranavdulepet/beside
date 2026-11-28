@@ -79,7 +79,7 @@ pub fn files(path: &Path, ext: &[&str]) -> Vec<PathBuf> {
         .filter_entry(|e| {
             !matches!(
                 e.file_name().to_str(),
-                Some(".git" | "node_modules" | ".sumi")
+                Some(".git" | "node_modules" | ".beside")
             )
         })
         .filter_map(Result::ok)

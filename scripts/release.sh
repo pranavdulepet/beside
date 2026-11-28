@@ -3,8 +3,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 npm run bundle -- --bundles app
 built=src-tauri/target/release/bundle/macos/Beside.app
-stage=$(mktemp -d "${TMPDIR:-/tmp}/sumi-release-XXXXXXXX")
-archive=$(mktemp website/.sumi-package-XXXXXXXX)
+stage=$(mktemp -d "${TMPDIR:-/tmp}/beside-release-XXXXXXXX")
+archive=$(mktemp website/.beside-package-XXXXXXXX)
 trap 'rm -rf "$stage"; test ! -f "$archive" || unlink "$archive"' EXIT
 app="$stage/Beside.app"
 /usr/bin/ditto --norsrc --noextattr "$built" "$app"
@@ -13,8 +13,8 @@ mkdir -p "$resources/licenses"
 cp LICENSE "$resources/licenses/Beside.txt"
 cp licenses/*.txt "$resources/licenses/"
 python3 scripts/release-notices.py "$resources/licenses/Dependencies.txt"
-notary_profile=${BESIDE_NOTARY_PROFILE:-${SUMI_NOTARY_PROFILE:-}}
-identity=${BESIDE_SIGN_IDENTITY:-${SUMI_SIGN_IDENTITY:--}}
+notary_profile=${BESIDE_NOTARY_PROFILE:-}
+identity=${BESIDE_SIGN_IDENTITY:--}
 if [[ -n "$notary_profile" && "$identity" == "-" ]]; then
   echo "Choose a Developer ID Application identity for notarization." >&2
   exit 1

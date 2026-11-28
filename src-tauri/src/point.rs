@@ -79,12 +79,12 @@ pub(crate) fn drafting_selection<'a>(point: &'a Value, question: &str) -> Option
 }
 
 extern "C" {
-    fn sumi_speak(text:*const c_char);
-    fn sumi_stop_speaking();
+    fn beside_speak(text:*const c_char);
+    fn beside_stop_speaking();
     fn beside_speaking()->i32;
-    fn sumi_summon_access() -> i32;
-    fn sumi_position_reply(pointer: *mut std::ffi::c_void);
-    fn sumi_voice_key(down: i32, config: *const c_char, callback: extern "C" fn(*const c_char));
+    fn beside_summon_access() -> i32;
+    fn beside_position_reply(pointer: *mut std::ffi::c_void);
+    fn beside_voice_key(down: i32, config: *const c_char, callback: extern "C" fn(*const c_char));
 }
 static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 struct Gesture {
@@ -96,14 +96,14 @@ struct Gesture {
 static LAST: Mutex<Option<Gesture>> = Mutex::new(None);
 
 fn screen_available() -> bool {
-    unsafe { sumi_summon_access() != 0 }
+    unsafe { beside_summon_access() != 0 }
 }
 
 pub fn speak(text:&str)->Res<Value>{
     if text.trim().is_empty() || text.len()>64000{return Err("Choose a reply to read aloud.".into())}
-    let text=std::ffi::CString::new(text).msg()?;unsafe{sumi_speak(text.as_ptr())};Ok(Value::Null)
+    let text=std::ffi::CString::new(text).msg()?;unsafe{beside_speak(text.as_ptr())};Ok(Value::Null)
 }
-pub fn stop_speaking(){unsafe{sumi_stop_speaking()}}
+pub fn stop_speaking(){unsafe{beside_stop_speaking()}}
 pub fn speaking()->bool{unsafe{beside_speaking()!=0}}
 
 pub fn dismiss() {
@@ -147,7 +147,7 @@ pub fn key(app: &tauri::AppHandle, down: bool) {
         }
     }
     let raw = CString::new(config.to_string()).unwrap();
-    unsafe { sumi_voice_key(down as i32, raw.as_ptr(), receive) };
+    unsafe { beside_voice_key(down as i32, raw.as_ptr(), receive) };
 }
 extern "C" fn receive(raw: *const c_char) {
     if raw.is_null() {
@@ -164,7 +164,7 @@ extern "C" fn receive(raw: *const c_char) {
     tauri::async_runtime::spawn_blocking(move || {
         let s = app.state::<Arc<Store>>();
         if payload["warm"] == true {
-            if let Some(cfg) = activity::private_model(&s).filter(|cfg| cfg["runtime"] == "Sumi") {
+            if let Some(cfg) = activity::private_model(&s).filter(|cfg| cfg["runtime"] == "Beside") {
                 let _ = crate::bundled::warm(&cfg);
             }
             return;
@@ -200,7 +200,7 @@ extern "C" fn receive(raw: *const c_char) {
             let inner = w.clone();
             let _ = w.run_on_main_thread(move || {
                 if let Ok(ptr) = inner.ns_window() {
-                    unsafe { sumi_position_reply(ptr) }
+                    unsafe { beside_position_reply(ptr) }
                 }
             });
         }

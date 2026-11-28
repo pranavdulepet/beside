@@ -5,7 +5,7 @@
 <key>NSServices</key>
 <array><dict>
     <key>NSMenuItem</key><dict><key>default</key><string>Ask Beside about selection</string></dict>
-    <key>NSMessage</key><string>askSumi</string>
+    <key>NSMessage</key><string>askBeside</string>
     <key>NSPortName</key><string>Beside</string>
     <key>NSSendTypes</key><array><string>public.utf8-plain-text</string><string>NSStringPboardType</string></array>
     <key>NSRequiredContext</key><dict/>

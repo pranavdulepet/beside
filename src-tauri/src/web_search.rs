@@ -806,7 +806,7 @@ mod availability_tests {
 /// A request to identify the visible screen is answered from the capture at summon time.
 pub(crate) fn current_screen_question(q: &str) -> bool {
     static SCREEN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"(?i)^\s*(?:(?:hey beside|beside|hey sumi|sumi|please)[, ]+)?(?:what (?:am i|are we) (?:looking at|reading|viewing|working on)|what(?:['’]s| is) (?:currently )?(?:on (?:my|the) screen|in (?:this|the current) window))(?: (?:right now|now|currently|at the moment|on my screen))*[?.! ]*$").unwrap()
+        regex::Regex::new(r"(?i)^\s*(?:(?:hey beside|beside|please)[, ]+)?(?:what (?:am i|are we) (?:looking at|reading|viewing|working on)|what(?:['’]s| is) (?:currently )?(?:on (?:my|the) screen|in (?:this|the current) window))(?: (?:right now|now|currently|at the moment|on my screen))*[?.! ]*$").unwrap()
     });
     SCREEN.is_match(q)
 }

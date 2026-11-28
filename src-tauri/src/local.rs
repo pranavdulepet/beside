@@ -4,38 +4,38 @@ use std::{
     sync::Once,
 };
 extern "C" {
-    fn sumi_semantic(p: *const c_char, out: *mut f32, n: i32) -> i32;
-    fn sumi_request_notifications();
-    fn sumi_notify_when_ready();
-    fn sumi_entities(p: *const c_char) -> *mut c_char;
-    fn sumi_free(p: *mut c_char);
-    fn sumi_quiet_power(seconds: f64) -> i32;
-    fn sumi_heavy_allowed() -> i32;
+    fn beside_semantic(p: *const c_char, out: *mut f32, n: i32) -> i32;
+    fn beside_request_notifications();
+    fn beside_notify_when_ready();
+    fn beside_entities(p: *const c_char) -> *mut c_char;
+    fn beside_free(p: *mut c_char);
+    fn beside_quiet_power(seconds: f64) -> i32;
+    fn beside_heavy_allowed() -> i32;
     fn beside_keyboard_idle_seconds() -> f64;
-    fn sumi_background_thread();
+    fn beside_background_thread();
 }
 pub fn names(s: &str) -> Vec<String> {
     let Ok(c) = CString::new(s) else {
         return vec![];
     };
     unsafe {
-        let p = sumi_entities(c.as_ptr());
+        let p = beside_entities(c.as_ptr());
         if p.is_null() {
             return vec![];
         }
         let names = serde_json::from_slice(CStr::from_ptr(p).to_bytes()).unwrap_or_default();
-        sumi_free(p);
+        beside_free(p);
         names
     }
 }
 pub fn quiet_after_chat() -> bool {
-    unsafe { sumi_quiet_power(20.) != 0 }
+    unsafe { beside_quiet_power(20.) != 0 }
 }
 pub fn keyboard_idle_seconds() -> f64 {
     unsafe { beside_keyboard_idle_seconds() }
 }
 pub fn idle() -> bool {
-    unsafe { sumi_heavy_allowed() != 0 }
+    unsafe { beside_heavy_allowed() != 0 }
 }
 thread_local! {static IN_BACKGROUND:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
 pub fn background() -> bool {
@@ -43,7 +43,7 @@ pub fn background() -> bool {
 }
 pub fn background_thread() {
     IN_BACKGROUND.with(|v| v.set(true));
-    unsafe { sumi_background_thread() }
+    unsafe { beside_background_thread() }
 }
 pub fn vectors() {
     static LOAD: Once = Once::new();
@@ -118,7 +118,7 @@ pub fn embedding(t: &str) -> Vec<u8> {
     let mut v = [0f32; 192];
     let semantic = CString::new(t)
         .ok()
-        .is_some_and(|c| unsafe { sumi_semantic(c.as_ptr(), v.as_mut_ptr(), 192) != 0 });
+        .is_some_and(|c| unsafe { beside_semantic(c.as_ptr(), v.as_mut_ptr(), 192) != 0 });
     if !semantic {
         for w in t
             .split(|c: char| !c.is_alphanumeric())
@@ -134,9 +134,9 @@ pub fn embedding(t: &str) -> Vec<u8> {
 }
 
 pub fn notify_ready() {
-    unsafe { sumi_notify_when_ready() }
+    unsafe { beside_notify_when_ready() }
 }
 
 pub fn request_notifications() {
-    unsafe { sumi_request_notifications() }
+    unsafe { beside_request_notifications() }
 }

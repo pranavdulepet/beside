@@ -12,7 +12,7 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Res<String> {
             "-c",
             "user.name=Beside",
             "-c",
-            "user.email=local@sumi.invalid",
+            "user.email=local@beside.invalid",
             "-c",
             "commit.gpgsign=false",
         ])
@@ -95,7 +95,7 @@ pub(crate) fn approved_at(root: &Path) -> Res<Vec<Value>> {
             let Some((title, body)) = block.split_once('\n') else {
                 continue;
             };
-            let Some((sentence, meta)) = body.rsplit_once("<!-- sumi ") else {
+            let Some((sentence, meta)) = body.rsplit_once("<!-- beside ") else {
                 continue;
             };
             let Some(meta) = meta.trim().strip_suffix("-->") else {
@@ -137,7 +137,7 @@ fn snippet(v: &Value) -> String {
             .collect::<Vec<_>>()
             .join(" ")
     });
-    format!("\n## {title}\n{text}\n<!-- sumi {metadata} -->\n")
+    format!("\n## {title}\n{text}\n<!-- beside {metadata} -->\n")
 }
 fn rewrite(s: &Store, rows: &[Value]) -> Res<()> {
     write_files(&s.root, rows)
@@ -161,7 +161,7 @@ pub(crate) fn write_files(root: &Path, rows: &[Value]) -> Res<()> {
         let mut out = blocks.next().unwrap_or("").to_owned();
         for block in blocks {
             let meta = block
-                .rsplit_once("<!-- sumi ")
+                .rsplit_once("<!-- beside ")
                 .and_then(|(_, tail)| tail.trim().strip_suffix("-->"))
                 .and_then(|raw| serde_json::from_str::<Value>(raw.trim()).ok());
             if let Some(id) = meta.as_ref().and_then(|m| m["id"].as_str()) {

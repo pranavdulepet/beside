@@ -6,12 +6,12 @@
 #import <QuartzCore/QuartzCore.h>
 #import <WebKit/WebKit.h>
 
-extern NSDictionary *sumi_point_window(CGPoint p);
-extern NSDictionary *sumi_read_point(NSDictionary *window, CGPoint p, NSDictionary *settings);
-extern int sumi_workspace_available(void);
+extern NSDictionary *beside_point_window(CGPoint p);
+extern NSDictionary *beside_read_point(NSDictionary *window, CGPoint p, NSDictionary *settings);
+extern int beside_workspace_available(void);
 
-int sumi_summon_access(void) {
-    if (!sumi_workspace_available()) return 0;
+int beside_summon_access(void) {
+    if (!beside_workspace_available()) return 0;
     if (CGPreflightScreenCaptureAccess()) return 1;
     // Some Macs grant ScreenCaptureKit while the older Core Graphics check
     // reports false. Verify that grant afresh; an earlier success can be revoked.
@@ -24,8 +24,8 @@ int sumi_summon_access(void) {
         }];
     return !dispatch_semaphore_wait(ready,dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC)) && allowed;
 }
-typedef void (*SumiVoiceCallback)(const char *);
-@interface SumiVoice : NSObject
+typedef void (*BesideVoiceCallback)(const char *);
+@interface BesideVoice : NSObject
 @property AVAudioEngine *engine;
 @property SFSpeechAudioBufferRecognitionRequest *request;
 @property SFSpeechRecognitionTask *task;
@@ -37,9 +37,9 @@ typedef void (*SumiVoiceCallback)(const char *);
 @property NSPoint mouse;
 @property NSString *text, *issue;
 @property BOOL held, released, finished, tapped, typed, pointReady, speechDone;
-@property SumiVoiceCallback callback;
+@property BesideVoiceCallback callback;
 @end
-static SumiVoice *current;
+static BesideVoice *current;
 static NSValue *replyPosition;
 static NSRect sourceWindow;
 // A receipt for the frontmost app and its focused window. No text or image is read.
@@ -50,7 +50,7 @@ static id serviceWindow;
 static NSRunningApplication *recentServiceSender;
 static NSTimeInterval senderLostFocus;
 
-void sumi_watch_service_origin(void) {
+void beside_watch_service_origin(void) {
     NSNotificationCenter *center=NSWorkspace.sharedWorkspace.notificationCenter;
     [center addObserverForName:NSWorkspaceDidDeactivateApplicationNotification object:nil
                          queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *event) {
@@ -80,9 +80,9 @@ static void rememberFrontApp(void) {
 
 // Capture the sender while its Services menu still owns the selection. The
 // asynchronous WebView presentation can happen after AppKit changes focus.
-void sumi_capture_service_origin(void) {
+void beside_capture_service_origin(void) {
     if (!NSThread.isMainThread) {
-        dispatch_sync(dispatch_get_main_queue(),^{ sumi_capture_service_origin(); });
+        dispatch_sync(dispatch_get_main_queue(),^{ beside_capture_service_origin(); });
         return;
     }
     NSWorkspace *workspace=NSWorkspace.sharedWorkspace;
@@ -98,7 +98,7 @@ void sumi_capture_service_origin(void) {
     serviceWindow=focusedWindowOf(serviceApp);
 }
 
-void sumi_prepare_panel(int fromService) {
+void beside_prepare_panel(int fromService) {
     void (^prepare)(void)=^{
         if (fromService) {
             returnApp=serviceApp;
@@ -132,7 +132,7 @@ static WKWebView *panelWebView(NSView *view) {
 // WKWebView, even after its hidden DOM was replaced. Keep an opaque native
 // view over that surface across orderOut/orderFront. Keyboard input goes
 // straight to the fresh composer underneath.
-void sumi_cover_panel(void *pointer) {
+void beside_cover_panel(void *pointer) {
     NSWindow *panel = (__bridge NSWindow *)pointer;
     panelPaintGeneration++;
     panel.alphaValue = 0;
@@ -154,7 +154,7 @@ void sumi_cover_panel(void *pointer) {
     [CATransaction flush];
 }
 
-void sumi_reveal_after_paint(void *pointer) {
+void beside_reveal_after_paint(void *pointer) {
     NSWindow *panel = (__bridge NSWindow *)pointer;
     NSUInteger generation = panelPaintGeneration;
     WKWebView *web = panelWebView(panel.contentView);
@@ -183,7 +183,7 @@ void sumi_reveal_after_paint(void *pointer) {
     }];
 }
 
-void sumi_dismiss_panel(void *pointer) {
+void beside_dismiss_panel(void *pointer) {
     NSWindow *panel=(__bridge NSWindow *)pointer;
     NSRunningApplication *origin=returnApp;
     id window=returnWindow;
@@ -202,7 +202,7 @@ void sumi_dismiss_panel(void *pointer) {
             allowed=[origin activateFromApplication:beside options:0];
         } else allowed=[origin activateWithOptions:0];
     }
-    sumi_cover_panel(pointer);
+    beside_cover_panel(pointer);
     [panel orderOut:nil];
     if (allowed && window && AXIsProcessTrusted()) {
         AXUIElementSetMessagingTimeout((__bridge AXUIElementRef)window,0.1);
@@ -210,7 +210,7 @@ void sumi_dismiss_panel(void *pointer) {
     }
 }
 
-void sumi_position_reply(void *pointer) {
+void beside_position_reply(void *pointer) {
     if (!replyPosition) return;
     NSPoint p=replyPosition.pointValue; replyPosition=nil;
     NSWindow *w=(__bridge NSWindow *)pointer;
@@ -236,7 +236,7 @@ void sumi_position_reply(void *pointer) {
     }
     [w setFrameOrigin:NSMakePoint(MAX(NSMinX(area),MIN(x,NSMaxX(area)-frame.size.width)),y)];
 }
-@implementation SumiVoice
+@implementation BesideVoice
 - (void)badgeText:(NSString *)value {
     if (!self.badge) {
         NSPanel *panel=[[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,108,31) styleMask:NSWindowStyleMaskBorderless|NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:NO];
@@ -320,10 +320,10 @@ void sumi_position_reply(void *pointer) {
     SFSpeechAudioBufferRecognitionRequest *request=self.request;
     [input installTapOnBus:0 bufferSize:1024 format:format block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when){ (void)when; [request appendAudioPCMBuffer:buffer]; }];
     self.tapped=YES;
-    __weak SumiVoice *weak=self;
+    __weak BesideVoice *weak=self;
     self.task=[self.recognizer recognitionTaskWithRequest:self.request resultHandler:^(SFSpeechRecognitionResult *r,NSError *error){
         dispatch_async(dispatch_get_main_queue(),^{
-            SumiVoice *s=weak; if (!s || s.finished) return;
+            BesideVoice *s=weak; if (!s || s.finished) return;
             if (r.bestTranscription.formattedString.length) {
                 s.text=r.bestTranscription.formattedString;
                 if (!s.released) [s badgeText:s.text];
@@ -345,11 +345,11 @@ void sumi_position_reply(void *pointer) {
 }
 @end
 
-void sumi_voice_key(int down,const char *raw,SumiVoiceCallback callback) {
+void beside_voice_key(int down,const char *raw,BesideVoiceCallback callback) {
     NSData *data=raw ? [NSData dataWithBytes:raw length:strlen(raw)] : nil;
     dispatch_async(dispatch_get_main_queue(),^{
         if (!down) {
-            SumiVoice *s=current; if (!s || s.released) return;
+            BesideVoice *s=current; if (!s || s.released) return;
             if (!s.held) {
                 // Quick tap = Point & Type: keep the live screen & cursor capture, skip mic.
                 if (![s.settings[@"onDemand"] boolValue] && [s.window[@"bundle"] isEqual:@"com.apple.MobileSMS"]) {
@@ -367,15 +367,15 @@ void sumi_voice_key(int down,const char *raw,SumiVoiceCallback callback) {
         if (current && !current.released) return;
         if (current) { current.finished=YES; [current stopMic]; [current.task cancel]; [current.badge orderOut:nil]; }
         rememberFrontApp();
-        SumiVoice *s=[SumiVoice new]; current=s; s.callback=callback;
+        BesideVoice *s=[BesideVoice new]; current=s; s.callback=callback;
         s.settings=data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : @{};
         s.mouse=NSEvent.mouseLocation;
         s.position=CGPointMake(s.mouse.x,NSMaxY(NSScreen.screens.firstObject.frame)-s.mouse.y);
-        if ([s.settings[@"enabled"] boolValue]) s.window=sumi_point_window(s.position);
+        if ([s.settings[@"enabled"] boolValue]) s.window=beside_point_window(s.position);
         // Capture pointer + full-window screenshot immediately on key-down so both
         // Tap (type) and Hold (speak) have instant visual + pointer context.
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
-            NSDictionary *point=sumi_read_point(s.window,s.position,s.settings);
+            NSDictionary *point=beside_read_point(s.window,s.position,s.settings);
             dispatch_async(dispatch_get_main_queue(),^{ s.point=point; s.pointReady=YES; [s deliver]; });
         });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,240*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
@@ -390,7 +390,7 @@ void sumi_voice_key(int down,const char *raw,SumiVoiceCallback callback) {
 // Read the displayed answer with a system voice.
 static AVSpeechSynthesizer *speechSynth;
 
-void sumi_stop_speaking(void) {
+void beside_stop_speaking(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (speechSynth && speechSynth.isSpeaking) {
             [speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
@@ -398,7 +398,7 @@ void sumi_stop_speaking(void) {
     });
 }
 
-void sumi_speak(const char *rawText) {
+void beside_speak(const char *rawText) {
     if (!rawText || !rawText[0]) return;
     NSString *text = [NSString stringWithUTF8String:rawText];
     if (!text.length) return;

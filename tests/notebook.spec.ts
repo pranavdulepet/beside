@@ -38,13 +38,13 @@ test('brushstroke, real local prediction, correction, history and persisted shee
 }, info) => {
   const {core, rpc, folder} = await fixtureNotebook();
   try {
-    await page.exposeFunction('sumiTestIPC', withTestModel(rpc));
+    await page.exposeFunction('besideTestIPC', withTestModel(rpc));
     await page.addInitScript(() => {
       (window as any).__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -195,7 +195,7 @@ test('brushstroke, real local prediction, correction, history and persisted shee
       await readFile(join(folder, 'scroll/deciding.md'), 'utf8'),
     ).toContain('I prefer an agenda');
     expect(
-      (await readFile(join(folder, '.sumi/moments.db')))
+      (await readFile(join(folder, '.beside/moments.db')))
         .subarray(0, 16)
         .toString(),
     ).not.toContain('SQLite format');
@@ -237,13 +237,13 @@ test('first reading shows a recent reply and leaves older history for idle time'
         [1, 1],
       ],
     });
-    await page.exposeFunction('sumiTestIPC', withTestModel(rpc));
+    await page.exposeFunction('besideTestIPC', withTestModel(rpc));
     await page.addInitScript(() => {
       (window as any).__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -317,7 +317,7 @@ test('first reading survives a reloaded window and resumes a scored notebook aft
       ],
     });
     await notebook.rpc('model', {runtime: 'Ollama', name: 'llama3.2:3b'});
-    await context.exposeFunction('sumiTestIPC', (op: string, args: object) =>
+    await context.exposeFunction('besideTestIPC', (op: string, args: object) =>
       notebook.rpc(op, args),
     );
     await context.addInitScript(() => {
@@ -325,7 +325,7 @@ test('first reading survives a reloaded window and resumes a scored notebook aft
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -398,7 +398,7 @@ test('a requested export arrives after reopening and waits for consent', async (
       ],
     });
     await notebook.rpc('finish');
-    await page.exposeFunction('sumiTestIPC', (op: string, args: object) =>
+    await page.exposeFunction('besideTestIPC', (op: string, args: object) =>
       notebook.rpc(op, args),
     );
     await page.addInitScript(() => {
@@ -406,7 +406,7 @@ test('a requested export arrives after reopening and waits for consent', async (
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -769,7 +769,7 @@ test('paper, brush and downloadable local Mac archive', async ({
   expect(await result.failure()).toBeNull();
   const bytes = await readFile((await result.path())!);
   expect(bytes.subarray(0, 4).toString('hex')).toBe('504b0304');
-  expect(bytes.includes(Buffer.from('Beside.app/Contents/MacOS/sumi'))).toBe(
+  expect(bytes.includes(Buffer.from('Beside.app/Contents/MacOS/beside'))).toBe(
     true,
   );
   await page.emulateMedia({colorScheme: 'dark', reducedMotion: 'reduce'});
@@ -908,7 +908,7 @@ test('Desk distinguishes accepted ink, a written alternative, dismissal and movi
     await rpc('newSheet');
     let hold = false;
     let release: (() => void) | undefined;
-    await page.exposeFunction('sumiTestIPC', async (op: string, args: any) => {
+    await page.exposeFunction('besideTestIPC', async (op: string, args: any) => {
       const result = await rpc(op, args);
       if (op === 'ghost' && hold)
         await new Promise<void>(r => {
@@ -921,7 +921,7 @@ test('Desk distinguishes accepted ink, a written alternative, dismissal and movi
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -1015,7 +1015,7 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
   const {core, rpc, folder} = await fixtureNotebook(true);
   const configPath = join(folder, 'agent-config', '.claude.json');
   const personal = {
-    mcpServers: {sumi: {command: 'personal-reader'}},
+    mcpServers: {beside: {command: 'personal-reader'}},
     theme: 'ink',
   };
   await mkdir(join(folder, 'agent-config'), {recursive: true});
@@ -1029,13 +1029,13 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
       ],
     });
     await rpc('finish');
-    await page.exposeFunction('sumiTestIPC', rpc);
+    await page.exposeFunction('besideTestIPC', rpc);
     await page.addInitScript(() => {
       (window as any).__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -1070,9 +1070,9 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
     await expect(
       page.getByLabel('Line for Claude Code’s instructions'),
     ).toHaveValue(/beside_answer/);
-    await expect(page.getByText('MCP server · sumi-2')).toBeVisible();
+    await expect(page.getByText('MCP server · beside-2')).toBeVisible();
     const installed = await readFile(configPath, 'utf8');
-    const config = JSON.parse(installed).mcpServers['sumi-2'];
+    const config = JSON.parse(installed).mcpServers['beside-2'];
     agent = spawn(config.command, config.args, {
       stdio: ['pipe', 'pipe', 'inherit'],
     });
@@ -1097,11 +1097,11 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
       return JSON.parse(result.content[0].text);
     }
     const question = 'Which sketch should I prepare for review?';
-    const ticket = await ask('sumi_answer', {question});
+    const ticket = await ask('beside_answer', {question});
     expect(ticket.queued).toBe(true);
     for (let i = 0; i < 64; i++)
-      await ask('sumi_context', {task: 'Look up review preferences.'});
-    expect((await ask('sumi_answer', {ticket: ticket.id})).queued).toBe(true);
+      await ask('beside_recall', {task: 'Look up review preferences.'});
+    expect((await ask('beside_answer', {ticket: ticket.id})).queued).toBe(true);
     await page.clock.setFixedTime(new Date(2026, 10, 1, 8));
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await chat.click();
@@ -1135,7 +1135,7 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
     await expect(
       page.getByText('Use the ink sketch.', {exact: true}),
     ).toBeVisible();
-    expect(await ask('sumi_answer', {ticket: ticket.id})).toMatchObject({
+    expect(await ask('beside_answer', {ticket: ticket.id})).toMatchObject({
       answer: 'Use the ink sketch.',
       decidedBy: 'user',
     });
@@ -1167,7 +1167,7 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
       let qualified = 0;
       let automatic = 0;
       for (let i = 0; i < 90; i++) {
-        const reply = await ask('sumi_answer', request);
+        const reply = await ask('beside_answer', request);
         if (!reply.queued) {
           expect(reply.answer).toBe('Bullets');
           automatic++;
@@ -1212,7 +1212,7 @@ test('morning return preserves the old sheet and delivers a waiting agent its an
       page.getByText('Access revoked. Configuration cleanup is pending.'),
     ).toBeVisible();
     await expect(
-      ask('sumi_context', {task: 'Check a preference.'}),
+      ask('beside_recall', {task: 'Check a preference.'}),
     ).rejects.toThrow('not connected');
     await expect(readFile(config.args.at(-1))).rejects.toMatchObject({
       code: 'ENOENT',
@@ -1246,7 +1246,7 @@ test('three weeks of observed choices lead to one user-approved revision', async
   const markdown =
     '# How you decide\n\n## Recurring meetings\n' +
     text +
-    '\n<!-- sumi ' +
+    '\n<!-- beside ' +
     JSON.stringify(rule) +
     ' -->\n';
   const scores = [21, 10, 1].map((days, index) => ({
@@ -1279,13 +1279,13 @@ test('three weeks of observed choices lead to one user-approved revision', async
       ],
     });
     await rpc('finish');
-    await page.exposeFunction('sumiTestIPC', rpc);
+    await page.exposeFunction('besideTestIPC', rpc);
     await page.addInitScript(() => {
       (window as any).__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -1350,7 +1350,7 @@ test('Desk matches approved goals to the active paragraph and remembers a dismis
       (await readFile(goals, 'utf8')) +
         '\n## Portraits\n' +
         strongest +
-        '\n<!-- sumi ' +
+        '\n<!-- beside ' +
         JSON.stringify({
           id,
           status: 'stamped',
@@ -1360,13 +1360,13 @@ test('Desk matches approved goals to the active paragraph and remembers a dismis
         }) +
         ' -->\n',
     );
-    await page.exposeFunction('sumiTestIPC', rpc);
+    await page.exposeFunction('besideTestIPC', rpc);
     await page.addInitScript(() => {
       (window as any).__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -1416,7 +1416,7 @@ test('resume the publisher’s real GGUF download and seal a decision without an
   page,
 }) => {
   test.skip(
-    (process.env.BESIDE_TEST_MODEL_DOWNLOAD ?? process.env.SUMI_TEST_MODEL_DOWNLOAD) !== '1',
+    process.env.BESIDE_TEST_MODEL_DOWNLOAD !== '1',
     'Requires the hardware-tier GGUF download.',
   );
   test.setTimeout(1800000);
@@ -1424,7 +1424,7 @@ test('resume the publisher’s real GGUF download and seal a decision without an
   const first = await fixtureNotebook();
   const partial = join(
     first.folder,
-    '.sumi',
+    '.beside',
     'models',
     (await first.rpc('modelDownloadStatus')).file + '.partial',
   );
@@ -1444,7 +1444,7 @@ test('resume the publisher’s real GGUF download and seal a decision without an
     // A verified local copy can seed the prefix on repeat runs. Both continuations
     // still use the publisher, and the runtime verifies the entire finished file.
     let startingBytes = 0;
-    const seed = (process.env.BESIDE_TEST_GGUF_PREFIX ?? process.env.SUMI_TEST_GGUF_PREFIX);
+    const seed = process.env.BESIDE_TEST_GGUF_PREFIX;
     if (seed && basename(seed) === basename(partial, '.partial')) {
       const bytes = (await stat(seed)).size;
       startingBytes = Math.max(0, bytes - 96 * 1024 * 1024);
@@ -1467,7 +1467,7 @@ test('resume the publisher’s real GGUF download and seal a decision without an
     writer = await fixtureNotebook(false, undefined, first.folder);
     reader = await fixtureNotebook(false, undefined, first.folder);
     const steps: number[] = [];
-    await page.exposeFunction('sumiTestIPC', async (op: string, args: any) => {
+    await page.exposeFunction('besideTestIPC', async (op: string, args: any) => {
       if (op === 'models') return []; // Model a Mac with no exposed Ollama or LM Studio.
       if (op === 'modelDownloadStatus') {
         const progress = await reader!.rpc(op, args);
@@ -1486,7 +1486,7 @@ test('resume the publisher’s real GGUF download and seal a decision without an
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -1519,7 +1519,7 @@ test('resume the publisher’s real GGUF download and seal a decision without an
       .fill('I will sketch the cover first.');
     await page.getByRole('button', {name: 'Break the seal'}).click();
     const state = await writer.rpc('state');
-    expect(state.model.runtime).toBe('Sumi');
+    expect(state.model.runtime).toBe('Beside');
     expect(state.sealed.guess.trim().length).toBeGreaterThan(0);
     console.log(
       'Real bundled download resumed at',
@@ -1557,7 +1557,7 @@ test('Settings asks for consent and finishes ChatGPT sign-in before switching to
     });
     let attempts = 0;
     let finishCheck: (() => void) | undefined;
-    await page.exposeFunction('sumiTestIPC', async (op: string, args: any) => {
+    await page.exposeFunction('besideTestIPC', async (op: string, args: any) => {
       // Browser automation cannot consent on a person's OpenAI account.
       // The native transport test checks the actual HTTP and streaming contract.
       if (op === 'connectPlan') {
@@ -1577,7 +1577,7 @@ test('Settings asks for consent and finishes ChatGPT sign-in before switching to
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -1621,13 +1621,13 @@ test('one sheet keeps a conversation, a correction, and a reusable method', asyn
       section: 'deciding',
       text: 'For museum visits, I pick one painting to spend time with.',
     });
-    await page.exposeFunction('sumiTestIPC', rpc);
+    await page.exposeFunction('besideTestIPC', rpc);
     await page.addInitScript(() => {
       (window as any).__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -1727,13 +1727,13 @@ test('a dinner question chooses its own tools and remembers a change of mind', a
     });
     await rpc('model', {name: 'llama3.2:3b', runtime: 'Ollama'});
     await rpc('finish');
-    await page.exposeFunction('sumiTestIPC', rpc);
+    await page.exposeFunction('besideTestIPC', rpc);
     await page.addInitScript(() => {
       (window as any).__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -1899,7 +1899,7 @@ test('a weekend plan uses live sources and the current preference from another s
   page,
 }, info) => {
   test.skip(
-    (process.env.BESIDE_LIVE_SEARCH ?? process.env.SUMI_LIVE_SEARCH) !== '1',
+    process.env.BESIDE_LIVE_SEARCH !== '1',
     'Uses the free public search service and an installed local model.',
   );
   // Several conversations share this run. Each answer still has its own 90-second deadline.
@@ -1916,13 +1916,13 @@ test('a weekend plan uses live sources and the current preference from another s
     if (process.env.BESIDE_TEST_INKLING === '1') await rpc('fixtureInkling');
     else await rpc('model', {name: 'llama3.2:3b', runtime: 'Ollama'});
     await rpc('finish');
-    await page.exposeFunction('sumiTestIPC', rpc);
+    await page.exposeFunction('besideTestIPC', rpc);
     await page.addInitScript(() => {
       (window as any).__TAURI_INTERNALS__ = {
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiTestIPC(p.operation, p.args)
+            ? (window as any).besideTestIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
@@ -2010,7 +2010,7 @@ test('read a workshop schedule, follow up from the file, then correct a dated pr
   const {rpc, core} = await fixtureNotebook(false, undefined, undefined, m => {
     chunks++;
     void page
-      .evaluate(message => (window as any).sumiDelta?.(message.payload), m)
+      .evaluate(message => (window as any).besideDelta?.(message.payload), m)
       .catch(() => {});
   });
   try {
@@ -2022,7 +2022,7 @@ test('read a workshop schedule, follow up from the file, then correct a dated pr
       ],
     });
     await rpc('finish');
-    await page.exposeFunction('sumiTestIPC', rpc);
+    await page.exposeFunction('besideTestIPC', rpc);
     await page.addInitScript(() => {
       const callbacks = new Map();
       let serial = 0;
@@ -2034,11 +2034,11 @@ test('read a workshop schedule, follow up from the file, then correct a dated pr
         unregisterCallback: (id: number) => callbacks.delete(id),
         invoke: (cmd: string, p: any) => {
           if (cmd === 'notebook')
-            return (window as any).sumiTestIPC(p.operation, p.args);
+            return (window as any).besideTestIPC(p.operation, p.args);
           if (cmd === 'plugin:event|listen') {
             const emit = (payload?: unknown) =>
               callbacks.get(p.handler)?.({event: p.event, payload, id: p.handler});
-            if (p.event === 'reply-delta') (window as any).sumiDelta = emit;
+            if (p.event === 'reply-delta') (window as any).besideDelta = emit;
             if (p.event === 'fresh-sheet') (window as any).freshDeskShortcut = emit;
           }
           return Promise.resolve(1);
@@ -2152,7 +2152,7 @@ test('read a workshop schedule, follow up from the file, then correct a dated pr
       ).toContain('autumn exhibition');
       expect(
         execFileSync('unzip', ['-Z1', download], {encoding: 'utf8'}),
-      ).not.toContain('.sumi/');
+      ).not.toContain('.beside/');
     } finally {
       await rm(download);
     }
@@ -2164,7 +2164,7 @@ test('read a workshop schedule, follow up from the file, then correct a dated pr
 test('ask anywhere remembers a window, credits a source, learns a correction and forgets it', async ({
   browser,
 }, info) => {
-  test.setTimeout((process.env.BESIDE_TEST_INKLING ?? process.env.SUMI_TEST_INKLING) === '1' ? 300000 : 150000);
+  test.setTimeout(process.env.BESIDE_TEST_INKLING === '1' ? 300000 : 150000);
   const {core, rpc, folder} = await fixtureNotebook();
   const context = await browser.newContext({
     viewport: {width: 640, height: 540},
@@ -2173,7 +2173,7 @@ test('ask anywhere remembers a window, credits a source, learns a correction and
   try {
     const page = await context.newPage();
     page.setDefaultTimeout(12000);
-    await page.exposeFunction('sumiActivityIPC', (op: string, args: object) =>
+    await page.exposeFunction('besideActivityIPC', (op: string, args: object) =>
       op === 'activitySize' ? null : rpc(op, args),
     );
     await page.addInitScript(() => {
@@ -2184,11 +2184,11 @@ test('ask anywhere remembers a window, credits a source, learns a correction and
         transformCallback: () => 1,
         invoke: (cmd: string, p: any) =>
           cmd === 'notebook'
-            ? (window as any).sumiActivityIPC(p.operation, p.args)
+            ? (window as any).besideActivityIPC(p.operation, p.args)
             : Promise.resolve(1),
       };
     });
-    if ((process.env.BESIDE_TEST_INKLING ?? process.env.SUMI_TEST_INKLING) === '1') await rpc('fixtureInkling');
+    if (process.env.BESIDE_TEST_INKLING === '1') await rpc('fixtureInkling');
     else await rpc('model', {runtime: 'Ollama', name: 'llama3.2:3b'});
     await page.goto('/#activity');
     await page.getByRole('button', {name: 'What Beside knows'}).click();
@@ -2259,7 +2259,7 @@ test('ask anywhere remembers a window, credits a source, learns a correction and
       /Sunday/i,
       {timeout: 120000},
     );
-    if ((process.env.BESIDE_TEST_INKLING ?? process.env.SUMI_TEST_INKLING) === '1') {
+    if (process.env.BESIDE_TEST_INKLING === '1') {
       const question = 'What color is the rectangle in the Messages screenshot?';
       await page.getByLabel('Follow up').fill(question);
       await page.getByRole('button', {name: 'Ask on this Mac'}).click();
@@ -2322,7 +2322,7 @@ test('floating assistant reads an unopened local document and manages daily scre
       join(docs, 'Studio schedule.md'),
       'The Juniper Lantern collection opens at seven on Saturday.',
     );
-    if ((process.env.BESIDE_TEST_INKLING ?? process.env.SUMI_TEST_INKLING) === '1') await rpc('fixtureInkling');
+    if (process.env.BESIDE_TEST_INKLING === '1') await rpc('fixtureInkling');
     else await rpc('model', {runtime: 'Ollama', name: 'llama3.2:3b'});
     await page.exposeFunction('assistantIPC', async (op: string, args: any) => {
       if (op === 'activitySettings')
@@ -2364,7 +2364,7 @@ test('floating assistant reads an unopened local document and manages daily scre
     await page.getByLabel('Keep daily Markdown copies').check();
     const daily = join(
       folder,
-      '.sumi',
+      '.beside',
       'activity-journal',
       new Date().toISOString().slice(0, 10) + '.md',
     );
@@ -2828,7 +2828,7 @@ test('checks a train against an earlier ferry email and reveals the exact source
   test.setTimeout(180000);
   const {core, rpc, folder} = await fixtureNotebook();
   try {
-    if ((process.env.BESIDE_TEST_INKLING ?? process.env.SUMI_TEST_INKLING) === '1') await rpc('fixtureInkling');
+    if (process.env.BESIDE_TEST_INKLING === '1') await rpc('fixtureInkling');
     else await rpc('model', {runtime: 'Ollama', name: 'llama3.2:3b'});
     await rpc('activityConfigure', {scope: 'displays'});
     await rpc('activityConfigure', {enabled: true});
@@ -2951,7 +2951,7 @@ test('floating reply correction stays with its chat and survives reopening the n
   let core = fixture.core;
   let rpc = fixture.rpc;
   try {
-    if ((process.env.BESIDE_TEST_INKLING ?? process.env.SUMI_TEST_INKLING) === '1') await rpc('fixtureInkling');
+    if (process.env.BESIDE_TEST_INKLING === '1') await rpc('fixtureInkling');
     await rpc('activityConfigure', {scope: 'displays'});
     await rpc('activityConfigure', {enabled: true});
     await rpc('fixtureActivity', {
@@ -2992,7 +2992,7 @@ test('floating reply correction stays with its chat and survives reopening the n
     };
     await page.evaluate(
       (chat) =>
-        localStorage.setItem('sumi.floating.chats', JSON.stringify([chat])),
+        localStorage.setItem('beside.floating.chats', JSON.stringify([chat])),
       legacyChat,
     );
     await page.reload();
@@ -3003,7 +3003,7 @@ test('floating reply correction stays with its chat and survives reopening the n
       page.getByRole('button', {name: /Gallery opening/}),
     ).toBeVisible();
     expect(
-      await page.evaluate(() => localStorage.getItem('sumi.floating.chats')),
+      await page.evaluate(() => localStorage.getItem('beside.floating.chats')),
     ).toBeNull();
     await page.getByRole('button', {name: 'New chat', exact: true}).click();
     const q =
@@ -3031,7 +3031,7 @@ test('floating reply correction stays with its chat and survives reopening the n
     const original = (await rpc('floatingChats'))[0];
     expect(original.turns[0].question).toBe(q);
     expect(
-      await page.evaluate(() => localStorage.getItem('sumi.floating.chats')),
+      await page.evaluate(() => localStorage.getItem('beside.floating.chats')),
     ).toBeNull();
     const exited = once(core, 'exit');
     core.stdin.end();
@@ -3051,7 +3051,7 @@ test('floating reply correction stays with its chat and survives reopening the n
     expect(
       (await rpc('state')).notes.some((n: Row) => n.text === rule && n.private),
     ).toBeTruthy();
-    if ((process.env.BESIDE_TEST_INKLING ?? process.env.SUMI_TEST_INKLING) === '1') {
+    if (process.env.BESIDE_TEST_INKLING === '1') {
       await page.getByRole('button', {name: 'New', exact: true}).click();
       await field.fill(
         'Choose the frame finish I prefer, oak or walnut. Give my choice in one word.',
@@ -3185,7 +3185,7 @@ test('a suggestion waits for the user and keeps the screen that prompted it', as
     void page.evaluate(data => (window as any).activityDelta?.(data), payload).catch(() => {});
   });
   try {
-    if ((process.env.BESIDE_TEST_INKLING ?? process.env.SUMI_TEST_INKLING) === '1') await rpc('fixtureInkling');
+    if (process.env.BESIDE_TEST_INKLING === '1') await rpc('fixtureInkling');
     else await rpc('model', {runtime: 'Ollama', name: 'llama3.2:3b'});
     await rpc('activityConfigure', {scope: 'displays'});
     await rpc('activityConfigure', {enabled: true});

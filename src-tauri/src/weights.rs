@@ -44,12 +44,9 @@ const TIERS: [Tier; 2] = [
 fn installed_copy(root: &Path, home: &Path, tier: &Tier) -> Option<PathBuf> {
     let home = home.canonicalize().ok()?;
     let current = root.canonicalize().ok()?;
-    for name in ["Beside", "Sumi"] {
-        let notebook = home.join(name);
-        if notebook == current {
-            continue;
-        }
-        let file = notebook.join(".sumi/models").join(tier.file);
+    let notebook = home.join("Beside");
+    if notebook != current {
+        let file = notebook.join(".beside/models").join(tier.file);
         if file.canonicalize().ok().as_ref() == Some(&file)
             && file.metadata().is_ok_and(|m| m.is_file() && m.len() == tier.size)
         {
@@ -231,7 +228,7 @@ impl Download<'_> {
 }
 fn spec<'a>(s: &Store, t: &Tier, url: &'a str) -> Download<'a> {
     Download {
-        dest: s.root.join(".sumi/models").join(t.file),
+        dest: s.root.join(".beside/models").join(t.file),
         url,
         size: t.size,
         sha: t.sha,
@@ -321,7 +318,7 @@ mod tests {
     fn reused_weights_are_limited_to_known_regular_files_and_require_the_published_digest() {
         let home = tempfile::tempdir().unwrap();
         let current = home.path().join("new");
-        let previous = home.path().join("Beside/.sumi/models");
+        let previous = home.path().join("Beside/.beside/models");
         std::fs::create_dir_all(&current).unwrap();
         std::fs::create_dir_all(&previous).unwrap();
         let tier = Tier {ram: 1, label: "Test", repo: "test", revision: "a", file: "weights.gguf", size: 4,

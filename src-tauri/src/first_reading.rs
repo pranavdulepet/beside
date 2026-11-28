@@ -22,7 +22,7 @@ pub fn start(s: &Arc<Store>, notify: Option<bool>) -> Res<()> {
         .truncate(false)
         .read(true)
         .write(true)
-        .open(s.root.join(".sumi/first-reading.lock"))
+        .open(s.root.join(".beside/first-reading.lock"))
         .msg()?;
     match lock.try_lock() {
         Ok(()) => {}

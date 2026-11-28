@@ -378,7 +378,7 @@ fn infer_local(
 ) -> Res<(String, bool)> {
     if let Some(image) = opts.image_base64 {
         let limit = if opts.requires_image { opts.max_tokens.clamp(24, 80) } else { opts.max_tokens.max(240) };
-        if model["runtime"] == "Sumi" {
+        if model["runtime"] == "Beside" {
             if let Some(projector) = crate::weights::projector(s, model) {
                 let mut cfg = model.clone();
                 cfg["projector"] = json!(projector);
@@ -715,7 +715,7 @@ mod tests {
         assert!(missing.contains("don’t have an image"));
         assert_eq!(meta["usedImage"], false);
 
-        let model = json!({"runtime":"Sumi", "name":"Inkling 2 Mini", "path":temp.path().join("Inkling-2-Mini.gguf")});
+        let model = json!({"runtime":"Beside", "name":"Inkling 2 Mini", "path":temp.path().join("Inkling-2-Mini.gguf")});
         let opts = BrainOpts { image_base64: Some("unused-test-pixels"), ..opts };
         let (answer, used) = infer_local(&s, &model, "", &Value::Null, &opts, &mut |_| {}).unwrap();
         assert!(!used);

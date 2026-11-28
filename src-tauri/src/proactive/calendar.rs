@@ -11,7 +11,7 @@ extern "C" {
     fn beside_calendar_permitted() -> i32;
     fn beside_calendar_allow() -> i32;
     fn beside_meetings_between(earliest: i64, until: i64) -> *mut c_char;
-    fn sumi_free(p: *mut c_char);
+    fn beside_free(p: *mut c_char);
 }
 pub(super) fn authorize() -> Res<()> {
     if unsafe { beside_calendar_allow() } == 1 {
@@ -27,7 +27,7 @@ fn upcoming(now: i64) -> Option<Vec<Value>> {
             return None;
         }
         let row = serde_json::from_slice(CStr::from_ptr(p).to_bytes()).ok();
-        sumi_free(p);
+        beside_free(p);
         row
     }
 }

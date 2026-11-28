@@ -35,7 +35,7 @@ pub fn reap(force: bool) {
             let mut child = state.lock().unwrap();
             if child
                 .as_ref()
-                .is_some_and(|r| r.last.elapsed() > Duration::from_secs(240))
+                .is_some_and(|r| r.last.elapsed() > Duration::from_secs(900))
             {
                 stop(&mut child);
             }
@@ -59,7 +59,7 @@ fn binary() -> Res<PathBuf> {
     }
 }
 pub(crate) fn is_inkling(config: &Value) -> bool {
-    config["runtime"] == "Sumi"
+    config["runtime"] == "Beside"
         && config["name"]
             .as_str()
             .is_some_and(|name| name.to_lowercase().contains("inkling"))
@@ -73,7 +73,7 @@ pub fn use_file(s: &Store, path: &Path) -> Res<Value> {
     if &magic != b"GGUF" {
         return Err("Choose a GGUF model file.".into());
     }
-    let config = json!({"runtime":"Sumi","name":path.file_stem().and_then(|n|n.to_str()).unwrap_or("Local model"),"path":path,"private":s.root.join(".sumi")});
+    let config = json!({"runtime":"Beside","name":path.file_stem().and_then(|n|n.to_str()).unwrap_or("Local model"),"path":path,"private":s.root.join(".beside")});
     if is_inkling(&config) {
         let ready = inkling_text(
             &config,
@@ -103,7 +103,7 @@ pub fn infer(
     let path = Path::new(cfg["path"].as_str().ok_or("Missing model file.")?);
     with_server(cfg, |h, port, token| {
         let mut body =
-            json!({"model":cfg["name"],"messages":messages,"temperature":0,"max_tokens":limit});
+            json!({"model":cfg["name"],"messages":messages,"temperature":0,"max_tokens":limit,"cache_prompt":true});
         // Inkling counts internal reasoning against max_tokens even at minimum effort.
         // Reserve enough room for a visible answer, including small readiness checks.
         if path
@@ -303,7 +303,7 @@ pub(crate) fn passage_embedding(
     warm_only: bool,
 ) -> Res<Vec<f32>> {
     let cfg =
-        json!({"path":path,"private":s.root.join(".sumi"),"embedding":true,"warmOnly":warm_only});
+        json!({"path":path,"private":s.root.join(".beside"),"embedding":true,"warmOnly":warm_only});
     with_server(&cfg, |http, port, token| {
         let response: Value = http
             .post(&format!("http://127.0.0.1:{port}/v1/embeddings"))
@@ -343,7 +343,9 @@ fn with_server<T>(cfg: &Value, request: impl FnOnce(&ureq::Agent, u16, &str) -> 
         return Err("Beside is quitting.".into());
     }
     let live = state.as_mut().is_some_and(|r| {
-        r.path == path && r.projector == projector && r.child.try_wait().ok() == Some(None)
+        r.path == path
+            && (r.projector == projector || (projector.is_none() && r.projector.is_some()))
+            && r.child.try_wait().ok() == Some(None)
     });
     let h = ureq::AgentBuilder::new()
         .redirects(0)

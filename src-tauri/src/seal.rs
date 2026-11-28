@@ -7,7 +7,7 @@ use std::{
 };
 pub const AGENTS: [&str; 4] = ["Claude Code", "Codex", "Claude Desktop", "Cursor"];
 pub(crate) fn token_hash(token: &str) -> String {
-    hash(&format!("sumi-seal/{token}"))
+    hash(&format!("beside-seal/{token}"))
 }
 fn locate(s: &Store, token: &str) -> Res<Value> {
     s.list("agent")?
@@ -84,7 +84,10 @@ fn hybrid_recall(s: &Store, a: &Value, query: &str, limit: usize) -> Res<Vec<Val
         if text.trim().is_empty() {
             continue;
         }
-        let lex = q_words.intersection(&conversation::words(text)).count() as f64;
+        let sec = entry["section"].as_str().unwrap_or("");
+        let mut entry_words = conversation::words(text);
+        entry_words.extend(conversation::words(sec));
+        let lex = q_words.intersection(&entry_words).count() as f64;
         let cos = cosine_bytes(&q_vec, &local::embedding(text)).max(0.0) as f64;
         let score = lex * 1.4 + cos * 2.2;
         if query.trim().is_empty() || lex > 0.0 || cos >= 0.35 {
@@ -271,13 +274,10 @@ pub fn policy(s: &Store, a: &Value) -> Res<()> {
     export(s)
 }
 pub fn call(s: &Store, token: &str, name: &str, args: &Value) -> Res<Value> {
-    let is_answer_tool = matches!(name, "sumi_answer" | "beside_answer");
-    let is_read = matches!(
-        name,
-        "sumi_predict" | "beside_predict" | "sumi_context" | "beside_recall" | "beside_profile"
-    );
+    let is_answer_tool = name == "beside_answer";
+    let is_read = matches!(name, "beside_predict" | "beside_recall" | "beside_profile");
     // A queued request and revocation must agree on whether the ticket can still be answered.
-    let _ticket_lock = if is_answer_tool || matches!(name, "sumi_observe" | "beside_observe") {
+    let _ticket_lock = if is_answer_tool || name == "beside_observe" {
         Some(crate::agent_link::notebook_lock(s)?)
     } else {
         None
@@ -300,14 +300,13 @@ pub fn call(s: &Store, token: &str, name: &str, args: &Value) -> Res<Value> {
     };
     let mut log = json!({"id":id(),"agent":who,"name":a["name"],"date":now(),"tool":name,"question":q,"status":"served"});
     let result = match name {
-        "sumi_context" => json!({"entries":shared_rules(engine::rank(scoped(s,&a)?,&q))}),
         "beside_recall" => {
             let limit = args["limit"].as_u64().unwrap_or(8) as usize;
             let items = hybrid_recall(s, &a, &q, limit)?;
             json!({"query": q, "items": items})
         }
         "beside_profile" => build_profile(s, &a)?,
-        "sumi_predict" | "beside_predict" if p != "Read" => {
+        "beside_predict" if p != "Read" => {
             let model = s.get("model")?;
             let entries = shared_rules(engine::select_rules(s, &model, &q, scoped(s, &a)?));
             let guess = if args["options"].is_null() {
@@ -344,11 +343,11 @@ pub fn call(s: &Store, token: &str, name: &str, args: &Value) -> Res<Value> {
             };
             json!({"guess":guess,"confidence":null,"rules":entries,"advisory":true})
         }
-        "sumi_answer" | "beside_answer" if p == "Answer for me" => {
+        "beside_answer" if p == "Answer for me" => {
             if let Some(ticket) = args["ticket"].as_str() {
                 let old = s.doc("log", ticket)?;
                 if old["agent"] != who
-                    || !matches!(old["tool"].as_str(), Some("sumi_answer" | "beside_answer"))
+                    || old["tool"].as_str() != Some("beside_answer")
                     || !matches!(
                         old["status"].as_str(),
                         Some("waiting" | "answered" | "reviewed")
@@ -374,36 +373,15 @@ pub fn call(s: &Store, token: &str, name: &str, args: &Value) -> Res<Value> {
                 };
                 log["ticket"] = json!(ticket);
                 log["status"] = json!("checked");
-                log["shared"] = match name {
-                    "beside_recall" => {
-                        json!({"items":result["items"].as_array().map_or(0,Vec::len)})
-                    }
-                    "beside_profile" => {
-                        json!({"permittedSections":a["sections"], "memories":result["memories"].as_array().map_or(0,Vec::len)})
-                    }
-                    _ => result.clone(),
-                };
+                log["shared"] = result.clone();
                 s.put("log", &log)?;
                 return Ok(result);
             }
 
             let options = args["options"].as_array().cloned().unwrap_or_default();
-            // `sumi_answer` keeps its original strict 2-question policy; `beside_answer`
-            // generalizes shadow-calibrated autonomous replies to any repeated, closed,
-            // non-sensitive low-stakes preference question once >= 20 shadow trials match.
-            let safe = if name == "sumi_answer" {
-                match q.as_str() {
-                    "Which response length do you prefer?" => {
-                        options == vec![json!("Brief"), json!("Detailed")]
-                    }
-                    "Which format do you prefer?" => {
-                        options == vec![json!("Bullets"), json!("Prose")]
-                    }
-                    _ => false,
-                }
-            } else {
-                is_low_stakes_generalized_preference(&q, &options)
-            };
+            // `beside_answer` answers repeated, closed, non-sensitive presentation
+            // preference questions autonomously once >= 20 calibrated shadow trials match.
+            let safe = is_low_stakes_generalized_preference(&q, &options);
             let scope = hash(
                 &json!([a["sections"], a["shareMemories"] == true, a["permission"]]).to_string(),
             );
@@ -413,8 +391,8 @@ pub fn call(s: &Store, token: &str, name: &str, args: &Value) -> Res<Value> {
                 .into_iter()
                 .filter(|l| {
                     l["agent"] == who
-                        && (name == "sumi_answer" || l["policyScope"] == scope)
-                        && matches!(l["tool"].as_str(), Some("sumi_answer" | "beside_answer"))
+                        && l["policyScope"] == scope
+                        && l["tool"].as_str() == Some("beside_answer")
                         && l["status"] == "reviewed"
                         && l["question"] == q
                         && l["options"] == json!(options)
@@ -441,7 +419,7 @@ pub fn call(s: &Store, token: &str, name: &str, args: &Value) -> Res<Value> {
                 json!({"queued":true,"id":log["id"],"trials":checked.len(),"needed":20})
             }
         }
-        "sumi_observe" | "beside_observe" if p != "Read" => {
+        "beside_observe" if p != "Read" => {
             log["status"] = json!("observed");
             sources::add(
                 s,
@@ -502,27 +480,14 @@ fn tools_list(permission: &str) -> Value {
             "event",
             "Record an observed correction or preference signal into Beside's encrypted notebook.",
         ),
-        // Legacy sumi_* aliases retained for full backwards compatibility
-        (
-            "sumi_context",
-            "task",
-            "Read relevant permitted Scroll entries.",
-        ),
-        ("sumi_predict", "question", "Ask for an advisory guess."),
-        (
-            "sumi_answer",
-            "question",
-            "Ask for a low-stakes preference or queue it for the person.",
-        ),
-        ("sumi_observe", "event", "Record an observed correction."),
     ] {
-        if (matches!(name, "sumi_answer" | "beside_answer") && permission != "Answer for me")
-            || (matches!(name, "sumi_predict" | "beside_predict" | "sumi_observe" | "beside_observe") && permission == "Read")
+        if (name == "beside_answer" && permission != "Answer for me")
+            || (matches!(name, "beside_predict" | "beside_observe") && permission == "Read")
         {
             continue;
         }
         let mut tool = json!({"name":name,"description":detail,"inputSchema":{"type":"object","properties":{(arg):{"type":"string"},"limit":{"type":"integer"},"options":{"type":"array","items":{"type":"string"}},"ticket":{"type":"string","description":"ID of a previously queued question."}},"required":[arg]}});
-        if matches!(name, "sumi_answer" | "beside_answer") {
+        if name == "beside_answer" {
             tool["inputSchema"]
                 .as_object_mut()
                 .unwrap()
@@ -556,12 +521,9 @@ pub fn rpc(s: &Store, token: &str, req: &Value) -> Option<Value> {
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .flat_map(|v| {
+                    .map(|v| {
                         let sec = v.as_str().unwrap_or("");
-                        vec![
-                            json!({"uri":format!("sumi://scroll/{sec}"),"name":sec,"mimeType":"text/plain"}),
-                            json!({"uri":format!("beside://memory/{sec}"),"name":format!("Beside memory · {sec}"),"mimeType":"text/plain"}),
-                        ]
+                        json!({"uri":format!("beside://memory/{sec}"),"name":format!("Beside memory · {sec}"),"mimeType":"text/plain"})
                     })
                     .collect();
                 if a["shareMemories"] == true
@@ -588,8 +550,7 @@ pub fn rpc(s: &Store, token: &str, req: &Value) -> Option<Value> {
                     );
                 }
                 let sec = uri
-                    .strip_prefix("sumi://scroll/")
-                    .or_else(|| uri.strip_prefix("beside://memory/"))
+                    .strip_prefix("beside://memory/")
                     .ok_or("Unknown resource")?;
                 if !a["sections"].as_array().unwrap().iter().any(|v| v == sec) {
                     return Err("Section is outside this agent's scope.".into());
@@ -672,9 +633,7 @@ mod tests {
         crate::app::setup(&s).unwrap();
         let token = setup_agent(&s, "Read", vec!["writing"]);
 
-        for alias in ["sumi_observe","beside_observe"]{
-            assert!(call(&s,&token,alias,&json!({"event":"A read-only client offered a correction"})).is_err());
-        }
+        assert!(call(&s,&token,"beside_observe",&json!({"event":"A read-only client offered a correction"})).is_err());
         assert_eq!(s.db.lock().unwrap().query_row("SELECT count(*) FROM moments",[],|r|r.get::<_,i64>(0)).unwrap(),0);
 
         // Permitted Scroll entry in `writing`, unpermitted in `goals`
@@ -694,10 +653,8 @@ mod tests {
         scroll::change(&s,"createFromReview",&json!({"id":"private-writing","section":"writing","localOnly":true,"text":"Private manuscript schedule."})).unwrap();
         let hidden=call(&s,&token,"beside_profile",&json!({})).unwrap();
         assert!(!hidden.to_string().contains("manuscript"));
-        for uri in ["sumi://scroll/writing","beside://memory/writing"]{
-            let read=rpc(&s,&token,&json!({"id":1,"method":"resources/read","params":{"uri":uri}})).unwrap();
-            assert!(read.to_string().contains("terse Rust"));assert!(!read.to_string().contains("manuscript"));
-        }
+        let read=rpc(&s,&token,&json!({"id":1,"method":"resources/read","params":{"uri":"beside://memory/writing"}})).unwrap();
+        assert!(read.to_string().contains("terse Rust"));assert!(!read.to_string().contains("manuscript"));
         // Public memory note vs private memory note
         s.put(
             "note",

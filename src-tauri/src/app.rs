@@ -13,7 +13,7 @@ pub fn setup(s: &Store) -> Res<()> {
     }
     if ours {
         atomic(
-            &s.root.join(".sumi/owned-history"),
+            &s.root.join(".beside/owned-history"),
             b"Beside private Scroll history\n",
         )?
     }
@@ -52,7 +52,7 @@ pub fn state(s: &Store) -> Res<Value> {
     let mut agents = s.list("agent")?;
     for a in &mut agents {
         a.as_object_mut().unwrap().remove("tokenHash");
-        a["serverName"] = json!(a["link"]["slot"].as_str().unwrap_or("sumi"));
+        a["serverName"] = json!(a["link"]["slot"].as_str().unwrap_or("beside"));
         a.as_object_mut().unwrap().remove("link");
     }
     let versions = s
@@ -600,7 +600,7 @@ pub fn action(s: &Store, op: &str, a: &Value) -> Res<Value> {
         "respond" => {
             let _lock = crate::agent_link::notebook_lock(s)?;
             let mut l = s.doc("log", text(a, "id")?)?;
-            if !matches!(l["tool"].as_str(),Some("sumi_answer" | "beside_answer"))
+            if l["tool"].as_str() != Some("beside_answer")
                 || !matches!(
                     l["status"].as_str(),
                     Some("waiting" | "answered" | "reviewed")

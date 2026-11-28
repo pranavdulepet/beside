@@ -1,9 +1,9 @@
 [package]
-name = "sumi"
-version = "1.4.14"
+name = "beside"
+version = "1.4.15"
 edition = "2021"
 license = "MIT"
-default-run = "sumi"
+default-run = "beside"
 [build-dependencies]
 cc = "1"
 tauri-build = { version = "2", features = [] }

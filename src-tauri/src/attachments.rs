@@ -8,23 +8,23 @@ use std::{
 };
 
 extern "C" {
-    fn sumi_read_document(
+    fn beside_read_document(
         bytes: *const u8,
         length: usize,
         kind: *const std::ffi::c_char,
     ) -> *mut std::ffi::c_char;
-    fn sumi_image_preview(bytes: *const u8, length: usize) -> *mut std::ffi::c_char;
-    fn sumi_free(pointer: *mut std::ffi::c_char);
+    fn beside_image_preview(bytes: *const u8, length: usize) -> *mut std::ffi::c_char;
+    fn beside_free(pointer: *mut std::ffi::c_char);
 }
 fn native(bytes: &[u8], kind: &str) -> Res<String> {
     let kind = CString::new(kind).msg()?;
     unsafe {
-        let pointer = sumi_read_document(bytes.as_ptr(), bytes.len(), kind.as_ptr());
+        let pointer = beside_read_document(bytes.as_ptr(), bytes.len(), kind.as_ptr());
         if pointer.is_null() {
             return Err("No readable text or image subjects were found in that file.".into());
         }
         let out = CStr::from_ptr(pointer).to_string_lossy().into_owned();
-        sumi_free(pointer);
+        beside_free(pointer);
         Ok(out)
     }
 }
@@ -162,12 +162,12 @@ pub fn read(a: &Value) -> Res<Value> {
     );
     let preview = if image {
         unsafe {
-            let p = sumi_image_preview(bytes.as_ptr(), bytes.len());
+            let p = beside_image_preview(bytes.as_ptr(), bytes.len());
             if p.is_null() {
                 return Err("Could not open this image.".into());
             }
             let encoded = CStr::from_ptr(p).to_string_lossy().into_owned();
-            sumi_free(p);
+            beside_free(p);
             Some(encoded)
         }
     } else {

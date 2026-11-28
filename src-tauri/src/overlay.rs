@@ -10,9 +10,9 @@ use std::{
 extern "C" {
     fn beside_capture_front_elements(config: *const c_char) -> *mut c_char;
     fn beside_window_current(owner: *const c_char) -> i32;
-    fn sumi_overlay_highlight_steps(request: *const c_char);
-    fn sumi_overlay_clear();
-    fn sumi_free(p: *mut c_char);
+    fn beside_overlay_highlight_steps(request: *const c_char);
+    fn beside_overlay_clear();
+    fn beside_free(p: *mut c_char);
 }
 
 pub fn live_elements(s: &Store) -> Value {
@@ -31,7 +31,7 @@ pub fn live_elements(s: &Store) -> Value {
     unsafe {
         let mut parsed = serde_json::from_slice::<Value>(CStr::from_ptr(ptr).to_bytes())
             .unwrap_or_else(|_| json!({"elements": []}));
-        sumi_free(ptr);
+        beside_free(ptr);
         parsed["generation"] = generation;
         if usable(s, &parsed) {
             parsed
@@ -93,7 +93,7 @@ pub fn present(s: &Store, snap: &Value, steps: &mut Vec<Value>) {
     let target = owner(snap);
     let request = json!({"owner":target,"steps":steps,"config":config});
     if let Ok(c) = CString::new(request.to_string()) {
-        unsafe { sumi_overlay_highlight_steps(c.as_ptr()) };
+        unsafe { beside_overlay_highlight_steps(c.as_ptr()) };
     }
     for step in steps {
         step["owner"] = target.clone();
@@ -118,7 +118,7 @@ pub fn replay(s: &Store, step: &Value) -> Res<Value> {
 }
 
 pub fn clear() {
-    unsafe { sumi_overlay_clear() };
+    unsafe { beside_overlay_clear() };
 }
 
 pub fn wants_guidance(question: &str) -> bool {

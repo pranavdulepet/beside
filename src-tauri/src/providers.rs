@@ -27,14 +27,14 @@ fn account(s: &Store, k: &str) -> String {
 }
 fn vault(s: &Store, k: &str, v: &Value) -> Res<()> {
     security_framework::passwords::set_generic_password(
-        "studio.sumi.providers",
+        "studio.beside.providers",
         &account(s, k),
         v.to_string().as_bytes(),
     )
     .msg()
 }
 pub(crate) fn credential(s: &Store, k: &str) -> Res<Value> {
-    serde_json::from_slice(&keychain("studio.sumi.providers", &account(s, k))?).msg()
+    serde_json::from_slice(&keychain("studio.beside.providers", &account(s, k))?).msg()
 }
 fn response(r: Result<ureq::Response, ureq::Error>) -> Res<Value> {
     let res = r.map_err(|e| match e {
@@ -103,7 +103,7 @@ pub fn disconnect(s: &Store, k: &str) -> Res<()> {
         None
     };
     match security_framework::passwords::delete_generic_password(
-        "studio.sumi.providers",
+        "studio.beside.providers",
         &account(s, k),
     ) {
         Err(e) if e.code() != -25300 => return Err(e.to_string()),
@@ -469,7 +469,7 @@ fn plan_lock(s: &Store) -> Res<std::fs::File> {
         .create(true)
         .truncate(false)
         .write(true)
-        .open(s.root.join(".sumi/plan.lock"))
+        .open(s.root.join(".beside/plan.lock"))
         .msg()?;
     f.lock().msg()?;
     Ok(f)

@@ -7,12 +7,12 @@ use tauri::Emitter;
 static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 static TEXT: Mutex<Option<String>> = Mutex::new(None);
 extern "C" {
-    fn sumi_register_service(callback: extern "C" fn(*const c_char));
+    fn beside_register_service(callback: extern "C" fn(*const c_char));
 }
 
 pub fn enable(app: &tauri::AppHandle) {
     let _ = APP.set(app.clone());
-    unsafe { sumi_register_service(receive) }
+    unsafe { beside_register_service(receive) }
 }
 extern "C" fn receive(raw: *const c_char) {
     if raw.is_null() {

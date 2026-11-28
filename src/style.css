@@ -455,7 +455,7 @@ button.active-chip {
   color: var(--seal);
   font-size: var(--text-xs);
   line-height: 1.45;
-  animation: sumi-fade-in 160ms ease-out;
+  animation: beside-fade-in 160ms ease-out;
 }
 
 .confirm-bar {
@@ -494,7 +494,7 @@ button.active-chip {
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   border: 1px solid var(--border);
-  animation: sumi-fade-in 140ms ease-out;
+  animation: beside-fade-in 140ms ease-out;
 }
 
 .evidence-head {
@@ -635,7 +635,7 @@ button.active-chip {
   background: rgba(28, 41, 41, 0.78);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
-  animation: sumi-fade-in 120ms ease-out;
+  animation: beside-fade-in 120ms ease-out;
 }
 
 .lightbox-inner {
@@ -940,20 +940,20 @@ p[role='alert'] {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: sumi-shimmer 1.6s linear infinite;
+  animation: beside-shimmer 1.6s linear infinite;
 }
 
-@keyframes sumi-shimmer {
+@keyframes beside-shimmer {
   to {
     background-position: 220% center;
   }
 }
 
 .assistant-stream {
-  animation: sumi-fade-in 180ms ease-out;
+  contain: layout style;
 }
 
-@keyframes sumi-fade-in {
+@keyframes beside-fade-in {
   from {
     opacity: 0.3;
   }
@@ -1420,6 +1420,7 @@ p[role='alert'] {
 .sheet-content {
   flex: 1 1 auto;
   overflow-y: auto;
+  overflow-anchor: auto;
   padding: 10px 18px 10px;
 }
 

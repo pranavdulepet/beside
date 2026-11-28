@@ -81,17 +81,17 @@ impl Store {
     pub fn open(root: PathBuf) -> Res<Self> {
         let account = hash(&root.to_string_lossy());
         let key = match security_framework::passwords::get_generic_password(
-            "studio.sumi.memory",
+            "studio.beside.memory",
             &account,
         ) {
             Ok(k) => k,
             Err(e) if e.code() == -25300 => {
-                if root.join(".sumi/moments.db").exists() {
+                if root.join(".beside/moments.db").exists() {
                     return Err("The notebook key is missing from Keychain. Restore the key before opening this notebook.".into());
                 }
                 let k = rand::random::<[u8; 32]>();
                 security_framework::passwords::set_generic_password(
-                    "studio.sumi.memory",
+                    "studio.beside.memory",
                     &account,
                     &k,
                 )
@@ -103,13 +103,13 @@ impl Store {
         Self::with_key(root, &key)
     }
     pub fn with_key(root: PathBuf, key: &[u8]) -> Res<Self> {
-        for dir in ["", ".sumi", "scroll", "scroll/people", "desk"] {
+        for dir in ["", ".beside", "scroll", "scroll/people", "desk"] {
             let p = root.join(dir);
             fs::create_dir_all(&p).msg()?;
             fs::set_permissions(p, fs::Permissions::from_mode(0o700)).msg()?
         }
         crate::local::vectors();
-        let conn = Connection::open(root.join(".sumi/moments.db")).msg()?;
+        let conn = Connection::open(root.join(".beside/moments.db")).msg()?;
         conn.execute_batch(&format!("PRAGMA key=\"x'{}'\";", hex::encode(key)))
             .msg()?;
         let _: String = conn

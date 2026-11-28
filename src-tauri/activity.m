@@ -117,7 +117,7 @@ static void trackScreenError(NSError *error) {
         @synchronized ([SCShareableContent class]) { allowedScreenKit = NO; checkedScreenKit = YES; }
     }
 }
-int sumi_activity_permission(int web, int prompt) {
+int beside_activity_permission(int web, int prompt) {
     if (!web) {
         if (!prompt) return screenAccess(NO);
         if (CGRequestScreenCaptureAccess()) return YES;
@@ -136,15 +136,15 @@ static BOOL availableSession(void) {
            [session[(__bridge NSString *)kCGSessionOnConsoleKey] boolValue] &&
            !IsSecureEventInputEnabled();
 }
-int sumi_activity_awake(void) {
+int beside_activity_awake(void) {
     return CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateCombinedSessionState,
                                                   kCGAnyInputEventType) <= 120;
 }
 // Keep the user's opted-in observation responsive while they are working in
 // another app. This activity allows both the display and the system to sleep.
-void sumi_observing_window(int observing) {
+void beside_observing_window(int observing) {
     static id activity;
-    BOOL needed=observing && sumi_activity_awake() && availableSession();
+    BOOL needed=observing && beside_activity_awake() && availableSession();
     if (needed && !activity)
         activity=[NSProcessInfo.processInfo beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep reason:@"Remembering visible work on this Mac"];
     else if (!needed && activity) {
@@ -724,13 +724,13 @@ static char *sampleNote(NSRunningApplication *app, NSString *source, BOOL previe
 
 // Sample one open window per pass, including windows covered by another app.
 // Window pixels are discarded immediately after local OCR.
-int sumi_workspace_available(void) {
+int beside_workspace_available(void) {
     NSString *front = NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier;
     return availableSession() && (!protectedApp(front) || [front isEqual:NSBundle.mainBundle.bundleIdentifier]) && screenAccess(NO);
 }
-char *sumi_workspace_windows(unsigned long slot) {
+char *beside_workspace_windows(unsigned long slot) {
     @autoreleasepool {
-        if (!sumi_workspace_available()) return NULL;
+        if (!beside_workspace_available()) return NULL;
         dispatch_semaphore_t ready = dispatch_semaphore_create(0);
         __block SCShareableContent *content = nil;
         [SCShareableContent getShareableContentExcludingDesktopWindows:YES onScreenWindowsOnly:NO
@@ -744,7 +744,7 @@ char *sumi_workspace_windows(unsigned long slot) {
         NSMutableArray<SCWindow *> *eligible = [NSMutableArray array];
         for (SCWindow *w in content.windows) {
             NSString *bundle = w.owningApplication.bundleIdentifier;
-            if (!bundle.length || protectedApp(bundle) || [bundle hasPrefix:@"studio.sumi."] ||
+            if (!bundle.length || protectedApp(bundle) || [bundle hasPrefix:@"studio.beside."] ||
                 w.windowLayer != 0 || w.frame.size.width < 160 || w.frame.size.height < 80) continue;
             NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:w.owningApplication.processID];
             if (app.activationPolicy != NSApplicationActivationPolicyRegular) continue;
@@ -778,7 +778,7 @@ char *sumi_workspace_windows(unsigned long slot) {
                 rows[index][@"text"] = read[@"body"] ?: @"";
             }
         }
-        return sumi_workspace_available() ? packed(@{@"windows":rows}) : NULL;
+        return beside_workspace_available() ? packed(@{@"windows":rows}) : NULL;
     }
 }
 
@@ -870,7 +870,7 @@ static char *sampleDisplay(BOOL preview, NSString *generation) {
 BOOL beside_guidance_session(void) {
     return availableSession() && screenAccess(NO);
 }
-BOOL sumi_overlay_allowed(const char *raw, NSString *bundle) {
+BOOL beside_overlay_allowed(const char *raw, NSString *bundle) {
     NSDictionary *cfg = [NSJSONSerialization JSONObjectWithData:
         [[NSString stringWithUTF8String:raw] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
     if (![cfg[@"enabled"] boolValue] || !bundle.length || !availableSession() ||
@@ -882,7 +882,7 @@ BOOL sumi_overlay_allowed(const char *raw, NSString *bundle) {
 static NSString *mailWindowTitle(NSString *name) {
     return [@"Mail · " stringByAppendingString:name.length ? name : @"Message"];
 }
-char *sumi_activity_front(const char *raw) {
+char *beside_activity_front(const char *raw) {
     @autoreleasepool {
         NSDictionary *settings =
             [NSJSONSerialization JSONObjectWithData:[[NSString stringWithUTF8String:raw]
@@ -1008,7 +1008,7 @@ static NSDictionary *visibleEditorDocument(NSRunningApplication *app, NSString *
 }
 
 
-char *sumi_activity_sample(const char *raw) {
+char *beside_activity_sample(const char *raw) {
     @autoreleasepool {
         NSDictionary *settings =
             [NSJSONSerialization JSONObjectWithData:[[NSString stringWithUTF8String:raw]
@@ -1154,7 +1154,7 @@ char *sumi_activity_sample(const char *raw) {
 }
 
 // Enumerate names on demand. Browser windows continue to require an exact site.
-char *sumi_activity_apps(void) {
+char *beside_activity_apps(void) {
     @autoreleasepool {
         NSWorkspace *workspace = NSWorkspace.sharedWorkspace;
         NSArray *webHandlers =
@@ -1181,8 +1181,8 @@ char *sumi_activity_apps(void) {
     }
 }
 
-int sumi_login_status(void) { return (int)SMAppService.mainAppService.status; }
-char *sumi_login_change(int enable) {
+int beside_login_status(void) { return (int)SMAppService.mainAppService.status; }
+char *beside_login_change(int enable) {
     @autoreleasepool {
         NSError *error = nil;
         SMAppService *service = SMAppService.mainAppService;
@@ -1197,7 +1197,7 @@ char *sumi_login_change(int enable) {
 
 // Keep the lower corner where the user put it as the panel changes between a
 // tab, a composer and a reading surface. AppKit provides the native curve.
-void sumi_size_panel(void *pointer, int layout, bool initial) {
+void beside_size_panel(void *pointer, int layout, bool initial, bool animate) {
     NSWindow *w = (__bridge NSWindow *)pointer;
     if (initial) {
         w.titlebarAppearsTransparent = YES;
@@ -1214,34 +1214,34 @@ void sumi_size_panel(void *pointer, int layout, bool initial) {
     NSRect target = NSMakeRect(MAX(NSMinX(area), MIN(right-width, NSMaxX(area)-width)),
                                MAX(NSMinY(area), MIN(bottom, NSMaxY(area)-height)), width, height);
     if (!NSEqualRects(target, old))
-        [w setFrame:target display:YES animate:!initial && w.visible && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion];
+        [w setFrame:target display:YES animate:animate && !initial && w.visible && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion];
 }
 
 // macOS supplies just the selection when someone invokes Services > Ask Beside.
 static void (*receivedSelection)(const char *);
-extern void sumi_capture_service_origin(void);
-extern void sumi_watch_service_origin(void);
-@interface SumiServices : NSObject
+extern void beside_capture_service_origin(void);
+extern void beside_watch_service_origin(void);
+@interface BesideServices : NSObject
 @end
-@implementation SumiServices
-- (void)askSumi:(NSPasteboard *)pasteboard userData:(NSString *)data error:(NSString **)error {
+@implementation BesideServices
+- (void)askBeside:(NSPasteboard *)pasteboard userData:(NSString *)data error:(NSString **)error {
     NSString *text = [pasteboard stringForType:NSPasteboardTypeString];
     if (!text.length || text.length > 12000) {
         if (error) *error = @"Select between 1 and 12,000 characters to use in Beside.";
         return;
     }
     if (receivedSelection) {
-        sumi_capture_service_origin();
+        beside_capture_service_origin();
         receivedSelection(text.UTF8String);
     }
 }
 @end
-void sumi_register_service(void (*callback)(const char *)) {
+void beside_register_service(void (*callback)(const char *)) {
     receivedSelection = callback;
-    static SumiServices *provider;
+    static BesideServices *provider;
     if (!provider) {
-        sumi_watch_service_origin();
-        provider = [SumiServices new];
+        beside_watch_service_origin();
+        provider = [BesideServices new];
     }
     NSApp.servicesProvider = provider;
     NSUpdateDynamicServices();
@@ -1379,7 +1379,7 @@ static NSDictionary *messagesOnScreen(NSRunningApplication *app) {
     return stillFront(pid) && frontWindow(pid)==wid ? result : nil;
 }
 
-char *sumi_message_context(void) {
+char *beside_message_context(void) {
     @autoreleasepool {
         NSRunningApplication *app = NSWorkspace.sharedWorkspace.frontmostApplication;
         if (![app.bundleIdentifier isEqual:@"com.apple.MobileSMS"] || !availableSession()) return NULL;
@@ -1416,7 +1416,7 @@ char *sumi_message_context(void) {
 
 // Resolve the target in the window that was under the pointer at key-down.
 // Coordinates here use the global Quartz space (origin at the main display's top left).
-NSDictionary *sumi_point_window(CGPoint p) {
+NSDictionary *beside_point_window(CGPoint p) {
     if (!availableSession()) return nil;
     NSArray *windows = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID));
     for (NSDictionary *row in windows) {
@@ -1466,7 +1466,7 @@ static NSString *selectedPassage(NSDictionary *window, CGPoint point) {
     return text.length > 0 && text.length <= 1200 && stillFront(pid) && frontWindow(pid) == wid ? text : nil;
 }
 
-NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary *settings) {
+NSDictionary *beside_read_point(NSDictionary *window, CGPoint point, NSDictionary *settings) {
     if (!window || ![settings[@"enabled"] boolValue]) return nil;
     pid_t pid = [window[@"pid"] intValue];
     CGWindowID wid = [window[@"id"] unsignedIntValue];
@@ -1530,7 +1530,7 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
             config.width=ceil(frame.size.width*scale); config.height=ceil(frame.size.height*scale);
             SCContentFilter *filter=[[SCContentFilter alloc] initWithDesktopIndependentWindow:w];
             [SCScreenshotManager captureImageWithFilter:filter configuration:config completionHandler:^(CGImageRef image,NSError *issue) {
-                if (image && !issue && [sumi_point_window(point)[@"id"] unsignedIntValue]==wid) {
+                if (image && !issue && [beside_point_window(point)[@"id"] unsignedIntValue]==wid) {
                     // Crop in the returned window's own pixel coordinates. Window filters can ignore sourceRect.
                     CGFloat sx=CGImageGetWidth(image)/frame.size.width, sy=CGImageGetHeight(image)/frame.size.height;
                     CGImageRef patch=CGImageCreateWithImageInRect(image,CGRectIntegral(CGRectMake(crop.origin.x*sx,crop.origin.y*sy,crop.size.width*sx,crop.size.height*sy)));
@@ -1655,7 +1655,7 @@ NSDictionary *sumi_read_point(NSDictionary *window, CGPoint point, NSDictionary 
     }];
     if (dispatch_semaphore_wait(done,dispatch_time(DISPATCH_TIME_NOW,4*NSEC_PER_SEC))) return nil;
     if (result && ![result[@"style"] count] && [window[@"bundle"] isEqual:@"com.apple.MobileSMS"] && stillFront(pid) && frontWindow(pid)==wid) {
-        char *raw=sumi_message_context();
+        char *raw=beside_message_context();
         if (raw) {
             NSData *bytes=[NSData dataWithBytes:raw length:strlen(raw)]; free(raw);
             NSArray *rows=[NSJSONSerialization JSONObjectWithData:bytes options:0 error:nil][@"turns"];

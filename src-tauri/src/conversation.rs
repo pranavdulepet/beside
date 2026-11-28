@@ -77,7 +77,7 @@ fn skills_in(dir: &std::path::Path) -> Res<Vec<Value>> {
             let mut body = body.trim_start_matches("<!-- local -->").trim();
             let mut learned = Value::Null;
             if let Some((metadata, rest)) = body
-                .strip_prefix("<!-- sumi-method ")
+                .strip_prefix("<!-- beside-method ")
                 .and_then(|s| s.split_once(" -->\n"))
             {
                 learned = serde_json::from_str(metadata).unwrap_or(Value::Null);
@@ -119,7 +119,7 @@ pub fn save_skill(s: &Store, a: &Value) -> Res<Value> {
             .cloned()
             .unwrap_or_else(|| learned["at"].clone());
         format!(
-            "<!-- sumi-method {} -->\n",
+            "<!-- beside-method {} -->\n",
             learned.to_string().replace("-->", "--\\u003e")
         )
     } else {
@@ -195,7 +195,7 @@ pub(crate) fn local_model(s: &Store) -> Option<Value> {
         return None;
     }
     let last = s.get("previousLocalModel").ok()?;
-    if last["runtime"] == "Sumi"
+    if last["runtime"] == "Beside"
         && last["path"]
             .as_str()
             .is_some_and(|p| std::path::Path::new(p).is_file())
@@ -912,7 +912,7 @@ pub fn ask_with(s: &Store, a: &Value, sink: &mut dyn FnMut(&str)) -> Res<Value> 
         } else {
             "Here are the matching words from your earlier conversations."
         };
-        let turn = json!({"id":key,"at":at.to_rfc3339(),"question":q,"reply":reply,"lane":"private","runtime":"Sumi","model":"Notebook search","notes":[],"rules":[],"tools":[],"timeline":passages,"archiveLookup":true});
+        let turn = json!({"id":key,"at":at.to_rfc3339(),"question":q,"reply":reply,"lane":"private","runtime":"Beside","model":"Notebook search","notes":[],"rules":[],"tools":[],"timeline":passages,"archiveLookup":true});
         chat["turns"].as_array_mut().unwrap().push(turn);
         chat["private"] = json!(true);
         chat["networkClosed"] = json!(true);

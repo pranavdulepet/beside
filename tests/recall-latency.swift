@@ -67,7 +67,7 @@ func words(_ text: String) -> String {
     static func main() async throws {
         let sample = try JSONDecoder().decode(Example.self, from: FileHandle.standardInput.readDataToEndOfFile())
         let workspace = NSWorkspace.shared
-        let apps = workspace.runningApplications.filter { $0.bundleIdentifier == "studio.sumi.notebook" }
+        let apps = workspace.runningApplications.filter { $0.bundleIdentifier == "studio.beside.notebook" }
         guard apps.count == 1, let app = apps.first,
               workspace.frontmostApplication?.processIdentifier != app.processIdentifier,
               CGPreflightPostEventAccess(), AXIsProcessTrusted() else {

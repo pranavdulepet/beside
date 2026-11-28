@@ -3,7 +3,7 @@
 # supports offline builds. Only the libraries needed by the server are bundled.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-stage=$(mktemp -d "${TMPDIR:-/tmp}/sumi-runtime-XXXXXXXX")
+stage=$(mktemp -d "${TMPDIR:-/tmp}/beside-runtime-XXXXXXXX")
 trap 'rm -rf "$stage"' EXIT
 archive=${1:-"$stage/runtime.tar.gz"}
 if [[ $# -eq 0 ]]; then

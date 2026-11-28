@@ -4,13 +4,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 built=${1:-src-tauri/target/release/bundle/macos/Beside.app}
 target="$HOME/Applications/Beside.app"
-installed="$target"
-legacy="$HOME/Applications/Sumi.app"
-if [[ ! -e "$target" && -d "$legacy" && ! -L "$legacy" ]]; then
-  installed="$legacy"
-fi
-test -x "$built/Contents/MacOS/sumi"
-identity=${BESIDE_LOCAL_SIGN_IDENTITY:-${SUMI_LOCAL_SIGN_IDENTITY:-}}
+test -x "$built/Contents/MacOS/beside"
+identity=${BESIDE_LOCAL_SIGN_IDENTITY:-}
 if [[ -z "$identity" ]]; then
   entries=$(security find-identity -v -p codesigning | awk '/"Apple Development:/ {print}')
   names=$(echo "$entries" | cut -d'"' -f2 | sort -u)
@@ -22,7 +17,7 @@ if [[ -z "$identity" ]]; then
 fi
 [[ "$identity" != "-" ]] || exit 1
 mkdir -p "$HOME/Applications"
-cache="$HOME/Library/Caches/studio.sumi.notebook"
+cache="$HOME/Library/Caches/studio.beside.notebook"
 mkdir -p "$cache"
 stage=$(mktemp -d "$cache/signed-update-XXXXXXXX")
 new="$stage/Beside.app"
@@ -32,10 +27,10 @@ for item in "$new/Contents/Resources/runtime/"*.dylib "$new/Contents/Resources/r
 done
 codesign --force --sign "$identity" --timestamp=none --options runtime --entitlements src-tauri/entitlements.plist "$new"
 codesign --verify --deep --strict "$new"
-if [[ -d "$installed" ]]; then
-  oldmeta=$(codesign -dv --verbose=3 "$installed" 2>&1)
+if [[ -d "$target" ]]; then
+  oldmeta=$(codesign -dv --verbose=3 "$target" 2>&1)
   if ! grep -q '^Signature=adhoc$' <<<"$oldmeta"; then
-    requirement=$(codesign -d -r- "$installed" 2>&1 | sed -n 's/^designated => //p')
+    requirement=$(codesign -d -r- "$target" 2>&1 | sed -n 's/^designated => //p')
     [[ -n "$requirement" ]]
     codesign --verify -R="$requirement" "$new"
   fi
@@ -48,11 +43,11 @@ for _ in 0..<100 {
     if apps.allSatisfy({$0.isTerminated}) { exit(0) }
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
 }
-exit(1)' "$installed"
-python3 - "$new" "$installed" "$target" <<'PY'
+exit(1)' "$target"
+python3 - "$new" "$target" <<'PY'
 from pathlib import Path
 import ctypes, os, sys
-new, target, branded = map(Path, sys.argv[1:])
+new, target = map(Path, sys.argv[1:])
 if target.exists():
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.renamex_np(os.fsencode(new), os.fsencode(target), 2):
@@ -60,14 +55,6 @@ if target.exists():
     new.rename(new.parent / "previous.bundle")
 else:
     new.rename(target)
-if target != branded:
-    target.rename(branded)
-    try:
-        # Existing agent configurations may refer to the former executable path.
-        target.symlink_to(branded.name)
-    except OSError:
-        branded.rename(target)
-        raise
 PY
 open "$target"
 echo "Installed $target"
